@@ -11,8 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit-tests:
-    name: Unit Tests
+  python-unit-tests:
+    name: Python Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -36,38 +36,48 @@ jobs:
           uv run ruff format --check .
 
       - name: Unit tests
-        run: uv run pytest tests/unit/ -v --cov=src/phosphene --cov-report=term-missing --cov-report=xml
+        run: uv run pytest tests/unit/ tests/integration/ tests/e2e/ -v --cov=src/phosphene --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-unit
+          name: coverage-python
           path: coverage.xml
           retention-days: 3
 
-  integration-tests:
-    name: Integration Tests
-    needs: unit-tests
+  typescript-tests:
+    name: TypeScript Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
+
+    defaults:
+      run:
+        working-directory: ts
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ts/package-lock.json
 
       - name: Install dependencies
-        run: uv venv && uv pip install -e ".[dev]"
+        run: npm ci || npm install
 
-      - name: Integration tests
-        run: uv run pytest tests/integration/ -v --tb=short || echo "No integration tests yet — passing"
+      - name: Typecheck
+        run: npm run typecheck
 
-      - name: E2E tests
-        run: uv run pytest tests/e2e/ -v --tb=short || echo "No E2E tests yet — passing"
+      - name: Unit tests
+        run: npm run test
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-typescript
+          path: ts/coverage/
+          retention-days: 3
