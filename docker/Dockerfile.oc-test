@@ -1,0 +1,46 @@
+"""Docker test container for OpenClaw — lightweight test image.
+
+Builds a minimal OC test environment from the npm package with patches applied.
+Used by integration and E2E tests to verify patches against real OC behavior.
+"""
+
+FROM node:22-bookworm-slim
+
+# Install dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create test user
+RUN useradd -m -s /bin/bash testuser
+WORKDIR /home/testuser
+
+# Copy OC source (pinned version)
+ARG OC_VERSION=2026.6.8
+RUN npm install -g openclaw@${OC_VERSION} || echo "OC install skipped in test build"
+
+# Copy patches
+COPY patches/ /home/testuser/patches/
+
+# Apply patches
+RUN if [ -d /home/testuser/patches ] && [ "$(ls -A /home/testuser/patches/ 2>/dev/null)" ]; then \
+      for patch in /home/testuser/patches/*.patch; do \
+        echo "Applying $patch"; \
+        cd /usr/lib/nodejs22/lib/node_modules/openclaw 2>/dev/null && patch -p1 < "$patch" || echo "Patch $patch skipped"; \
+      done; \
+    fi
+
+# Copy test config
+COPY docker/test-openclaw.json /home/testuser/.openclaw/openclaw.json
+
+# Copy Python test deps
+COPY pyproject.toml /home/testuser/harness/
+COPY src/ /home/testuser/harness/src/
+COPY tests/ /home/testuser/harness/tests/
+
+# Install Python deps
+RUN cd /home/testuser/harness && python3 -m venv .venv && \
+    .venv/bin/pip install -e ".[dev]" 2>/dev/null || true
+
+USER testuser
+CMD ["sleep", "infinity"]

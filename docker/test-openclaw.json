@@ -1,0 +1,35 @@
+{
+  "agents": {
+    "defaults": {
+      "model": "openrouter/@preset/glm-5-2",
+      "contextTokens": 128000,
+      "maxConcurrent": 2,
+      "compaction": {
+        "mode": "safeguard",
+        "maxActiveTranscriptBytes": "5mb"
+      },
+      "subagents": {
+        "maxConcurrent": 2,
+        "maxSpawnDepth": 1,
+        "maxChildrenPerAgent": 2,
+        "runTimeoutSeconds": 30,
+        "archiveAfterMinutes": 2
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "mock": {
+        "baseUrl": "http://127.0.0.1:9999/v1",
+        "api": "openai-completions",
+        "apiKey": "test-key",
+        "models": {
+          "test/model": {
+            "contextWindow": 128000,
+            "maxTokens": 4096
+          }
+        }
+      }
+    }
+  }
+}

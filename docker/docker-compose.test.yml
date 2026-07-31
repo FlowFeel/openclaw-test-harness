@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  oc-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.oc-test
+    container_name: oc-test-harness
+    ports:
+      - "18790:18790"   # OC internal API
+      - "8787:8787"     # OC control panel
+    volumes:
+      - ../src:/home/testuser/harness/src
+      - ../tests:/home/testuser/harness/tests
+    environment:
+      - OC_ENV=test
+      - UV_THREADPOOL_SIZE=4
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8787/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
