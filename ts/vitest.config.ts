@@ -4,10 +4,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["tests/spec/**/*.spec.ts"],
+    include: ["tests/spec/**/*.spec.ts", "tests/integration/**/*.spec.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/**/*"],
+      include: ["src/**/*", "patches/**/*"],
       reporter: ["text", "json"],
     },
   },
