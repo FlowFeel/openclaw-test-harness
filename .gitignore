@@ -5,3 +5,4 @@ __pycache__/
 htmlcov/
 *.egg-info/
 dist/
+ts/node_modules/
