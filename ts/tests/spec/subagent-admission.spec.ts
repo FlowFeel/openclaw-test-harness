@@ -7,9 +7,9 @@
 
 import { describe, it, expect } from "vitest"
 import { createActor } from "xstate"
-import { subagentMachine } from "../src/features/subagent-admission/subagent-admission.machine.js"
-import { resolveAdmission } from "../src/features/subagent-admission/subagent-admission.logic.js"
-import type { AdmissionPolicy } from "../src/features/subagent-admission/subagent-admission.schema.js"
+import { subagentMachine } from "../../src/features/subagent-admission/subagent-admission.machine.js"
+import { resolveAdmission } from "../../src/features/subagent-admission/subagent-admission.logic.js"
+import type { AdmissionPolicy } from "../../src/features/subagent-admission/subagent-admission.schema.js"
 
 const testPolicy: AdmissionPolicy = {
   maxSpawnDepth: 1,

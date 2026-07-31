@@ -26,7 +26,7 @@
  * Parallel: Python `lifecycle.py` — same states/events, different runtime
  */
 
-import { setup, assign } from "xstate"
+import { setup } from "xstate"
 import type { SubagentSnapshot, SubagentState, SubagentEvent } from "./subagent-admission.schema.js"
 
 /**
@@ -41,6 +41,9 @@ export const subagentMachine = setup({
       startedAtMs: number | null
       endedAtMs: number | null
       retryCount: number
+    },
+    input: {} as {
+      sessionKey: string
     },
     events: {} as
       | { type: "dispatch" }
