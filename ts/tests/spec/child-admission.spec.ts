@@ -37,8 +37,7 @@ describe("resolveChildAdmission — original behavior", () => {
       collect: false,
     })
     expect(result.ok).toBe(false)
-    expect(result.governingCap).toBe("subagents.maxSpawnDepth")
-  })
+    if (!result.ok) { expect(result.governingCap).toBe("subagents.maxSpawnDepth"); }  })
 
   it("rejects when children exceeded", () => {
     const result = resolveChildAdmission({
@@ -49,8 +48,7 @@ describe("resolveChildAdmission — original behavior", () => {
       collect: false,
     })
     expect(result.ok).toBe(false)
-    expect(result.governingCap).toBe("subagents.maxChildrenPerAgent")
-  })
+    if (!result.ok) { expect(result.governingCap).toBe("subagents.maxChildrenPerAgent"); }  })
 
   it("rejects when swarm total exceeded (collect mode)", () => {
     const result = resolveChildAdmission({
@@ -63,8 +61,7 @@ describe("resolveChildAdmission — original behavior", () => {
       maxTotalChildren: 5,
     })
     expect(result.ok).toBe(false)
-    expect(result.governingCap).toBe("tools.swarm.maxTotalPerGroup")
-  })
+    if (!result.ok) { expect(result.governingCap).toBe("tools.swarm.maxTotalPerGroup"); }  })
 
   it("rejects when swarm children exceeded (collect mode)", () => {
     const result = resolveChildAdmission({
@@ -77,8 +74,7 @@ describe("resolveChildAdmission — original behavior", () => {
       maxTotalChildren: 10,
     })
     expect(result.ok).toBe(false)
-    expect(result.governingCap).toBe("tools.swarm.maxChildrenPerGroup")
-  })
+    if (!result.ok) { expect(result.governingCap).toBe("tools.swarm.maxChildrenPerGroup"); }  })
 })
 
 // ── Extension: maxConcurrent ───────────────────────────────────
@@ -108,8 +104,7 @@ describe("resolveChildAdmission — maxConcurrent extension", () => {
       maxConcurrent: 2,
     })
     expect(result.ok).toBe(false)
-    expect(result.governingCap).toBe("subagents.maxConcurrent")
-    expect(result.error).toContain("concurrent")
+    if (!result.ok) { expect(result.governingCap).toBe("subagents.maxConcurrent"); expect(result.error).toContain("concurrent"); }
   })
 
   it("concurrent checked before children", () => {
@@ -122,8 +117,7 @@ describe("resolveChildAdmission — maxConcurrent extension", () => {
       globalActive: 5,
       maxConcurrent: 2,
     })
-    expect(result.governingCap).toBe("subagents.maxConcurrent")
-  })
+    if (!result.ok) { expect(result.governingCap).toBe("subagents.maxConcurrent"); }  })
 })
 
 // ── Extension: runTimeoutSeconds ────────────────────────────────
@@ -142,8 +136,7 @@ describe("resolveChildAdmission — runTimeoutSeconds extension", () => {
       runTimeoutSeconds: 300,
     })
     expect(result.ok).toBe(false)
-    expect(result.governingCap).toBe("subagents.runTimeoutSeconds")
-    expect(result.error.toLowerCase()).toContain("timeout")
+    if (!result.ok) { expect(result.governingCap).toBe("subagents.runTimeoutSeconds"); expect(result.error.toLowerCase()).toContain("timeout"); }
   })
 
   it("admits when no timed-out subagents", () => {
@@ -177,8 +170,7 @@ describe("resolveChildAdmission — guard ordering", () => {
       timedOutSubagents: ["stale"],
       runTimeoutSeconds: 300,
     })
-    expect(result.governingCap).toBe("subagents.maxSpawnDepth")
-  })
+    if (!result.ok) { expect(result.governingCap).toBe("subagents.maxSpawnDepth"); }  })
 
   it("concurrent is checked before timeout", () => {
     const result = resolveChildAdmission({
@@ -192,8 +184,7 @@ describe("resolveChildAdmission — guard ordering", () => {
       timedOutSubagents: ["stale"],
       runTimeoutSeconds: 300,
     })
-    expect(result.governingCap).toBe("subagents.maxConcurrent")
-  })
+    if (!result.ok) { expect(result.governingCap).toBe("subagents.maxConcurrent"); }  })
 
   it("timeout is checked before children", () => {
     const result = resolveChildAdmission({
@@ -207,8 +198,7 @@ describe("resolveChildAdmission — guard ordering", () => {
       timedOutSubagents: ["stale"],
       runTimeoutSeconds: 300,
     })
-    expect(result.governingCap).toBe("subagents.runTimeoutSeconds")
-  })
+    if (!result.ok) { expect(result.governingCap).toBe("subagents.runTimeoutSeconds"); }  })
 })
 
 // ── Backwards compatibility ────────────────────────────────────
