@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-class LifecycleState(str, enum.Enum):
+class LifecycleState(enum.StrEnum):
     """Subagent lifecycle states."""
 
     CREATED = "created"
@@ -28,7 +28,7 @@ class LifecycleState(str, enum.Enum):
     ARCHIVED = "archived"
 
 
-class LifecycleEvent(str, enum.Enum):
+class LifecycleEvent(enum.StrEnum):
     """Events triggering lifecycle transitions."""
 
     DISPATCH = "dispatch"
@@ -91,12 +91,14 @@ TRANSITIONS: dict[tuple[LifecycleState, LifecycleEvent], LifecycleState] = {
     (LifecycleState.ABORTED, LifecycleEvent.ARCHIVE): LifecycleState.ARCHIVED,
 }
 
-TERMINAL_STATES = frozenset({
-    LifecycleState.COMPLETED,
-    LifecycleState.FAILED,
-    LifecycleState.TIMED_OUT,
-    LifecycleState.ABORTED,
-})
+TERMINAL_STATES = frozenset(
+    {
+        LifecycleState.COMPLETED,
+        LifecycleState.FAILED,
+        LifecycleState.TIMED_OUT,
+        LifecycleState.ABORTED,
+    }
+)
 
 
 def is_terminal(state: LifecycleState) -> bool:

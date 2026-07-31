@@ -31,8 +31,7 @@ class MemorySessionStore:
     def list_active(self) -> list[SessionRecord]:
         active_statuses = {"processing", "running", "created", "dispatched"}
         return [
-            r for r in self._records.values()
-            if (r.status or "") in active_statuses
+            r for r in self._records.values() if (r.status or "") in active_statuses
         ]
 
     def list_subagents(self, parent_key: str | None = None) -> list[SessionRecord]:
@@ -47,7 +46,8 @@ class MemorySessionStore:
     def count_children(self, parent_key: str) -> int:
         active_statuses = {"processing", "running", "created", "dispatched"}
         return sum(
-            1 for r in self._records.values()
+            1
+            for r in self._records.values()
             if r.spawned_by == parent_key
             and r.is_subagent
             and (r.status or "") in active_statuses

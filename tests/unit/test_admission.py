@@ -10,7 +10,6 @@ import pytest
 
 from phosphene.oc.admission import (
     AdmissionCap,
-    AdmissionDecision,
     AdmissionPolicy,
     resolve_admission,
 )
@@ -23,7 +22,6 @@ from phosphene.oc.lifecycle import (
 )
 from phosphene.oc.memory_store import MemorySessionStore
 from phosphene.oc.store import SessionRecord
-
 
 # ── Admission tests ────────────────────────────────────────────
 
@@ -132,7 +130,13 @@ class TestLifecycleTransitions:
 
     def test_terminal_states(self) -> None:
         """Terminal states can only transition to ARCHIVED."""
-        for state in [LifecycleState.COMPLETED, LifecycleState.FAILED, LifecycleState.TIMED_OUT, LifecycleState.ABORTED]:
+        terminal = [
+            LifecycleState.COMPLETED,
+            LifecycleState.FAILED,
+            LifecycleState.TIMED_OUT,
+            LifecycleState.ABORTED,
+        ]
+        for state in terminal:
             assert is_terminal(state)
             result = evaluate_transition(
                 SessionSnapshot("test", state), LifecycleEvent.ARCHIVE
@@ -170,15 +174,42 @@ class TestMemorySessionStore:
         store = MemorySessionStore()
         store.save(SessionRecord(session_key="a", status="running", is_subagent=True))
         store.save(SessionRecord(session_key="b", status="done", is_subagent=True))
-        store.save(SessionRecord(session_key="c", status="processing", is_subagent=True))
+        store.save(
+            SessionRecord(
+                session_key="c",
+                status="processing",
+                is_subagent=True,
+            )
+        )
         assert store.count_active() == 2
 
     def test_count_children(self) -> None:
         store = MemorySessionStore()
         parent = "agent:main:main"
-        store.save(SessionRecord(session_key="c1", status="running", is_subagent=True, spawned_by=parent))
-        store.save(SessionRecord(session_key="c2", status="done", is_subagent=True, spawned_by=parent))
-        store.save(SessionRecord(session_key="c3", status="running", is_subagent=True, spawned_by=parent))
+        store.save(
+            SessionRecord(
+                session_key="c1",
+                status="running",
+                is_subagent=True,
+                spawned_by=parent,
+            )
+        )
+        store.save(
+            SessionRecord(
+                session_key="c2",
+                status="done",
+                is_subagent=True,
+                spawned_by=parent,
+            )
+        )
+        store.save(
+            SessionRecord(
+                session_key="c3",
+                status="running",
+                is_subagent=True,
+                spawned_by=parent,
+            )
+        )
         assert store.count_children(parent) == 2  # only active
 
     def test_list_subagents_filtered(self) -> None:

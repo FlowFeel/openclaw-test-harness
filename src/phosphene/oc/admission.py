@@ -16,12 +16,11 @@ The concrete implementation patches OC's child-admission.ts via diff.
 from __future__ import annotations
 
 import enum
-import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 
-class AdmissionCap(str, enum.Enum):
+class AdmissionCap(enum.StrEnum):
     """The governing cap that rejected a spawn."""
 
     MAX_SPAWN_DEPTH = "subagents.maxSpawnDepth"
@@ -135,17 +134,20 @@ def resolve_admission(
         )
 
     # Guard 4: swarm total (from OC, collect mode only)
-    if collect and policy.max_total_per_group is not None:
-        if total_children >= policy.max_total_per_group:
-            return AdmissionDecision(
-                ok=False,
-                cap=AdmissionCap.MAX_TOTAL_PER_GROUP,
-                reason=(
-                    f"sessions_spawn reached maxTotalPerGroup "
-                    f"({total_children}/{policy.max_total_per_group})"
-                ),
-                evidence=evidence,
-            )
+    if (
+        collect
+        and policy.max_total_per_group is not None
+        and total_children >= policy.max_total_per_group
+    ):
+        return AdmissionDecision(
+            ok=False,
+            cap=AdmissionCap.MAX_TOTAL_PER_GROUP,
+            reason=(
+                f"sessions_spawn reached maxTotalPerGroup "
+                f"({total_children}/{policy.max_total_per_group})"
+            ),
+            evidence=evidence,
+        )
 
     # Guard 5: maxChildrenPerAgent (from OC)
     if active_children >= policy.max_children_per_agent:
