@@ -1,23 +1,37 @@
-version: "3.8"
-
 services:
   oc-test:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.oc-test
-    container_name: oc-test-harness
-    ports:
-      - "18790:18790"   # OC internal API
-      - "8787:8787"     # OC control panel
+    image: node:22-bookworm-slim
+    container_name: oc-admission-test
+    working_dir: /app/ts
     volumes:
-      - ../src:/home/testuser/harness/src
-      - ../tests:/home/testuser/harness/tests
+      - ../ts:/app/ts
     environment:
-      - OC_ENV=test
-      - UV_THREADPOOL_SIZE=4
+      - NODE_ENV=test
+    command: |
+      sh -c "
+        npm ci --include=dev &&
+        npx tsc --noEmit &&
+        npx vitest run --reporter=verbose
+      "
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8787/health"]
+      test: ["CMD", "node", "-e", "process.exit(0)"]
       interval: 5s
       timeout: 3s
-      retries: 10
-      start_period: 10s
+      retries: 3
+
+  integration:
+    image: node:22-bookworm-slim
+    container_name: oc-integration
+    working_dir: /app/ts
+    volumes:
+      - ../ts:/app/ts
+    environment:
+      - NODE_ENV=test
+    command: |
+      sh -c "
+        npm ci --include=dev &&
+        npx vitest run tests/integration/ tests/e2e/ --reporter=verbose
+      "
+    depends_on:
+      oc-test:
+        condition: service_completed_successfully
