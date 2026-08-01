@@ -44,6 +44,9 @@ function getPool() {
           } else if (handler === 'compact.transcript') {
             const result = input.entries.map(e => JSON.stringify(e)).join('\\n');
             parentPort.postMessage({ id, ok: true, data: result });
+          } else if (handler === 'serialize.session') {
+            const result = JSON.stringify(input.session);
+            parentPort.postMessage({ id, ok: true, data: result });
           } else if (handler === 'measure.size') {
             let chars = 0;
             for (const b of input.blocks) {
@@ -91,6 +94,8 @@ function getPool() {
               result = JSON.stringify(input.data, input.replacer, input.indent);
             } else if (handler === 'compact.transcript') {
               result = input.entries.map(e => JSON.stringify(e)).join('\n');
+            } else if (handler === 'serialize.session') {
+              result = JSON.stringify(input.session);
             } else if (handler === 'measure.size') {
               result = input.blocks.reduce((acc, b) => acc + JSON.stringify(b.arguments || {}).length, 0);
             } else {
