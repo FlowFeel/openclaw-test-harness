@@ -71,11 +71,17 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 - **Dynamic E2E Verifications**: Configured Testcontainers to mount the host `/var/run/docker.sock` to support sibling container orchestration in Docker-in-Docker environments.
 - **Automated Validation Spec**: Implemented `patch-validator.ts` and `patch.spec.ts` to verify that patches compile cleanly, match diff files, and enforce concurrent/timeout guards without drift.
 
+### Phase 7: SQLite Session Registry Accessor (better-sqlite3)
+
+- **Target Architecture Alignment**: Evaluated driver options and selected `better-sqlite3` to match the non-containerized Amazon Linux 2023 EC2 production target environment (4 cores, 30GB RAM).
+- **Synchronous SQLite Controller**: Created `sqlite-accessor.ts` offering indexed lookups (`sessionKey`, `spawnedBy`, `status`) to replace synchronous `sessions.json` parsing.
+- **Full Test Coverage**: Implemented `sqlite-accessor.spec.ts` integration suite verifying CRUD operations, subagent depth counts, active session tracking, and stale timeout queries.
+
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
 
-2. **The test pyramid** — unit (0.08s) → BDD integration (SQLite) → Docker (compose) → testcontainers (real patched OC). Each layer tests the same logic against a different I/O boundary. 147 tests, all green in CI.
+2. **The test pyramid** — unit (0.08s) → BDD integration (SQLite) → Docker (compose) → testcontainers (real patched OC). Each layer tests the same logic against a different I/O boundary. 153 tests, all green in CI.
 
 3. **Patching the compiled bundle** — OC ships as compiled JS chunks, not TypeScript source. We can't patch the source without maintaining a full fork. Instead, we inject into the compiled bundle with `node -e` scripts. The patch is small (15-20 lines), the backup is `.orig`, and the test harness has the TypeScript replacement for reference.
 
@@ -101,7 +107,7 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 | CPU | 1.467 cores | 0.6% (idle) |
 | maxConcurrent | 2 (static) | 6 (with worker pool) |
 | runTimeoutSeconds | 300 (static) | 300 (with stale detection) |
-| Tests | 0 | 147 (53 Python + 94 TS) |
+| Tests | 0 | 153 (53 Python + 100 TS) |
 | CI layers | 0 | 4 (unit → docker → staging → integration) |
 | Releases | 0 | 2 (v0.1.0, v0.2.0) |
 
