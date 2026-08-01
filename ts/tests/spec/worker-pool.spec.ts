@@ -161,6 +161,13 @@ describe("Built-in handlers — session serialization", () => {
     expect(result.ok).toBe(true)
     expect(JSON.parse(result.data!)).toEqual(session)
   })
+
+  it("transfers structured objects directly via IPC without JSON stringification", async () => {
+    const complexObj = { key: "test", count: 42, active: true, nested: { items: [1, 2, 3] } }
+    const result = await pool.execute<typeof complexObj>("ipc.transfer", { payload: complexObj })
+    expect(result.ok).toBe(true)
+    expect(result.data).toEqual(complexObj)
+  })
 })
 
 describe("Orthogonality — multiple handler types in one pool", () => {

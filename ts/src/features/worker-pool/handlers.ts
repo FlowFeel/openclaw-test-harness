@@ -60,6 +60,12 @@ export function serializeSession(input: { session: Record<string, unknown> }): s
   return JSON.stringify(input.session)
 }
 
+// ── In-Memory IPC Transfer handler (Ticket #3) ────────────────
+
+export function ipcTransfer(input: { payload: unknown }): unknown {
+  return input.payload
+}
+
 // ── Registration helper ────────────────────────────────────────
 
 export function registerBuiltinHandlers(pool: WorkerPool): void {
@@ -67,4 +73,5 @@ export function registerBuiltinHandlers(pool: WorkerPool): void {
   pool.register("json.parse", jsonParse)
   pool.register("compact.context", compactContext)
   pool.register("serialize.session", serializeSession)
+  pool.register("ipc.transfer", ipcTransfer)
 }
