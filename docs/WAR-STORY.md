@@ -89,6 +89,12 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 - **Worker Thread Execution & Fallback**: Configured worker pool worker_threads execution with an inline CPU fallback mechanism for high burst loads.
 - **Zero Event Loop Pauses**: Eliminates 200–500ms synchronous JSON serialization freezes per session turn.
 
+### Phase 10: In-Memory IPC Refactoring (Zero JSON Stringification)
+
+- **V8 Structured Clone Algorithm**: Implemented `ipc.transfer` handler in `handlers.ts` and `worker-pool.js` to transfer complex JS objects directly across worker thread boundaries.
+- **Eliminated Double Serialization**: Replaced JSON string encoding/decoding during inter-process transfers with native memory cloning.
+- **100% Green Test Pyramid**: Validated across all 154 unit, BDD integration, and Docker Testcontainers E2E test suites.
+
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
@@ -119,7 +125,7 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 | CPU | 1.467 cores | 0.6% (idle) |
 | maxConcurrent | 2 (static) | 6 (with worker pool) |
 | runTimeoutSeconds | 300 (static) | 300 (with stale detection) |
-| Tests | 0 | 153 (53 Python + 100 TS) |
+| Tests | 0 | 154 (53 Python + 101 TS) |
 | CI layers | 0 | 4 (unit → docker → staging → integration) |
 | Releases | 0 | 2 (v0.1.0, v0.2.0) |
 
