@@ -61,22 +61,42 @@ export function resolveChildAdmission(params: ChildAdmissionParams): ChildAdmiss
     );
   }
 
+  // Fallbacks: Attempt dynamic query to SQLite registry automatically if not provided explicitly in params
+  let globalActive = params.globalActive;
+  let timedOutSubagents = params.timedOutSubagents;
+
+  if (globalActive === undefined || !timedOutSubagents) {
+    try {
+      // Dynamic require/import fallback for environments with sqlite-accessor
+      const sqlite = require("./sqlite-accessor.js");
+      if (globalActive === undefined && typeof sqlite.countActiveSessions === "function") {
+        globalActive = sqlite.countActiveSessions();
+      }
+      if (!timedOutSubagents && typeof sqlite.getTimedOut === "function") {
+        const timeout = params.runTimeoutSeconds ?? 300;
+        timedOutSubagents = sqlite.getTimedOut(timeout);
+      }
+    } catch {
+      // Ignore if sqlite-accessor or better-sqlite3 is not present
+    }
+  }
+
   // Guard 2: maxConcurrent (extension — global, not per-parent)
-  if (params.maxConcurrent !== undefined && params.globalActive !== undefined) {
-    if (params.globalActive >= params.maxConcurrent) {
+  if (params.maxConcurrent !== undefined && globalActive !== undefined) {
+    if (globalActive >= params.maxConcurrent) {
       return rejectChildAdmission(
         "subagents.maxConcurrent",
-        `sessions_spawn has reached global max concurrent (${params.globalActive}/${params.maxConcurrent}; agents.defaults.subagents.maxConcurrent).`,
+        `sessions_spawn has reached global max concurrent (${globalActive}/${params.maxConcurrent}; agents.defaults.subagents.maxConcurrent).`,
       );
     }
   }
 
   // Guard 3: runTimeoutSeconds (extension — block if timed-out subs exist)
-  if (params.timedOutSubagents && params.timedOutSubagents.length > 0) {
+  if (timedOutSubagents && timedOutSubagents.length > 0) {
     const timeout = params.runTimeoutSeconds ?? 300;
     return rejectChildAdmission(
       "subagents.runTimeoutSeconds",
-      `sessions_spawn blocked: ${params.timedOutSubagents.length} subagent(s) have exceeded runTimeoutSeconds (${timeout}s; agents.defaults.subagents.runTimeoutSeconds) and must be cleaned up before spawning.`,
+      `sessions_spawn blocked: ${timedOutSubagents.length} subagent(s) have exceeded runTimeoutSeconds (${timeout}s; agents.defaults.subagents.runTimeoutSeconds) and must be cleaned up before spawning.`,
     );
   }
 
