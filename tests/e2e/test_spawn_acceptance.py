@@ -17,19 +17,33 @@ step definitions are the proof, real I/O proves state.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from pathlib import Path
 
 import pytest
 
+# These are acceptance tests against a LIVE, patched OpenClaw runtime (the
+# managed OC agent at /home/node/.openclaw). They can only run inside that
+# container. Outside it — e.g. the CI unit job or a dev host — skip cleanly so
+# `pytest tests/` stays green without a container. The sentinel is the live
+# config file the fixture below reads; if it's absent, every test would error
+# anyway, so we skip up front with a readable reason.
+_OC_CONFIG = Path("/home/node/.openclaw/openclaw.json")
+pytestmark = pytest.mark.skipif(
+    not _OC_CONFIG.exists(),
+    reason=(
+        f"OC container environment not found (looking for {_OC_CONFIG}); "
+        "acceptance tests run inside the patched OC container"
+    ),
+)
+
 
 # ── Config fixture — reads the live openclaw.json ───────────────
 
 
 @pytest.fixture
-def subagent_config():
+def subagent_config() -> dict[str, int]:
     """Read the live subagent config from openclaw.json."""
     config_path = Path("/home/node/.openclaw/openclaw.json")
     with open(config_path) as f:
@@ -50,29 +64,31 @@ def subagent_config():
 class TestConfigPolicy:
     """Verify the config enforces the policy Ed Phil defined."""
 
-    def test_spine_is_flexible(self, subagent_config):
+    def test_spine_is_flexible(self, subagent_config: dict[str, int]) -> None:
         """maxConcurrent should be >= 4 (flexible spawning)."""
         assert subagent_config["maxConcurrent"] >= 4, (
             f"maxConcurrent={subagent_config['maxConcurrent']} — "
             "spine should be flexible (>= 4)"
         )
 
-    def test_children_per_agent_is_generous(self, subagent_config):
+    def test_children_per_agent_is_generous(
+        self, subagent_config: dict[str, int]
+    ) -> None:
         """maxChildrenPerAgent should be >= 3."""
         assert subagent_config["maxChildrenPerAgent"] >= 3
 
-    def test_entropy_is_tight(self, subagent_config):
+    def test_entropy_is_tight(self, subagent_config: dict[str, int]) -> None:
         """runTimeoutSeconds should be <= 180 (tight — no lingering)."""
         assert subagent_config["runTimeoutSeconds"] <= 180, (
             f"runTimeoutSeconds={subagent_config['runTimeoutSeconds']} — "
             "entropy should be tight (<= 180s)"
         )
 
-    def test_cleanup_is_fast(self, subagent_config):
+    def test_cleanup_is_fast(self, subagent_config: dict[str, int]) -> None:
         """archiveAfterMinutes should be <= 10 (fast cleanup)."""
         assert subagent_config["archiveAfterMinutes"] <= 10
 
-    def test_no_nesting(self, subagent_config):
+    def test_no_nesting(self, subagent_config: dict[str, int]) -> None:
         """maxSpawnDepth should be 1 — no nesting."""
         assert subagent_config["maxSpawnDepth"] == 1
 
@@ -83,7 +99,7 @@ class TestConfigPolicy:
 class TestAdmissionAcceptance:
     """Test the patched child-admission logic against the live config."""
 
-    def test_admit_within_limits(self, subagent_config):
+    def test_admit_within_limits(self, subagent_config: dict[str, int]) -> None:
         """Spawn should be admitted when all limits are within bounds."""
         from phosphene.oc.admission import AdmissionPolicy, resolve_admission
 
@@ -103,7 +119,7 @@ class TestAdmissionAcceptance:
         )
         assert result.ok
 
-    def test_reject_at_max_concurrent(self, subagent_config):
+    def test_reject_at_max_concurrent(self, subagent_config: dict[str, int]) -> None:
         """Spawn should be rejected when global active >= maxConcurrent."""
         from phosphene.oc.admission import AdmissionPolicy, resolve_admission
 
@@ -124,7 +140,9 @@ class TestAdmissionAcceptance:
         assert not result.ok
         assert "concurrent" in result.reason.lower()
 
-    def test_reject_when_timed_out_exists(self, subagent_config):
+    def test_reject_when_timed_out_exists(
+        self, subagent_config: dict[str, int]
+    ) -> None:
         """Spawn should be rejected when timed-out subagents exist."""
         from phosphene.oc.admission import AdmissionPolicy, resolve_admission
 
@@ -145,14 +163,14 @@ class TestAdmissionAcceptance:
         assert not result.ok
         assert "timeout" in result.reason.lower()
 
-    def test_reject_at_max_children(self, subagent_config):
+    def test_reject_at_max_children(self, subagent_config: dict[str, int]) -> None:
         """Spawn should be rejected when children >= maxChildrenPerAgent."""
         from phosphene.oc.admission import AdmissionPolicy, resolve_admission
 
         policy = AdmissionPolicy(
             max_spawn_depth=subagent_config["maxSpawnDepth"],
             max_children_per_agent=subagent_config["maxChildrenPerAgent"],
-            max_concurrent=subagent_config["maxConcurrent"] + 10,  # high so it doesn't block
+            max_concurrent=subagent_config["maxConcurrent"] + 10,  # high; won't block
             run_timeout_seconds=subagent_config["runTimeoutSeconds"],
         )
 
@@ -173,7 +191,7 @@ class TestAdmissionAcceptance:
 class TestLifecycleAcceptance:
     """Test the XState machine against the live timeout policy."""
 
-    def test_full_spawn_timeout_archive_cycle(self):
+    def test_full_spawn_timeout_archive_cycle(self) -> None:
         """Full lifecycle: created → dispatched → running → timed_out → archived."""
         from phosphene.oc.lifecycle import (
             LifecycleEvent,
@@ -204,7 +222,7 @@ class TestLifecycleAcceptance:
         r = evaluate_transition(snap, LifecycleEvent.ARCHIVE)
         assert r.accepted and r.to_state == LifecycleState.ARCHIVED
 
-    def test_archived_is_final(self):
+    def test_archived_is_final(self) -> None:
         """Archived state should reject all events."""
         from phosphene.oc.lifecycle import (
             LifecycleEvent,
@@ -225,14 +243,14 @@ class TestLifecycleAcceptance:
 class TestWorkerPoolAcceptance:
     """Verify the worker pool patch is live and functional."""
 
-    def test_worker_pool_module_exists(self):
+    def test_worker_pool_module_exists(self) -> None:
         """The worker pool module should be in OC's dist directory."""
         pool_path = Path(
             "/usr/lib/nodejs22/lib/node_modules/openclaw/dist/worker-pool-patch.cjs"
         )
         assert pool_path.exists(), "worker-pool-patch.cjs not found in OC dist"
 
-    def test_compaction_bundle_is_patched(self):
+    def test_compaction_bundle_is_patched(self) -> None:
         """The compaction bundle should reference the worker pool."""
         bundle_path = Path(
             "/usr/lib/nodejs22/lib/node_modules/openclaw/dist/compaction-successor-transcript-Ncp4Uf5J.js"
@@ -240,7 +258,7 @@ class TestWorkerPoolAcceptance:
         content = bundle_path.read_text()
         assert "worker-pool-patch" in content or "__ocWorkerPool" in content
 
-    def test_child_admission_bundle_is_patched(self):
+    def test_child_admission_bundle_is_patched(self) -> None:
         """The acp-spawn bundle should reference maxConcurrent/runTimeoutSeconds."""
         bundle_path = Path(
             "/usr/lib/nodejs22/lib/node_modules/openclaw/dist/acp-spawn-FpIdWOvV.js"
@@ -249,17 +267,19 @@ class TestWorkerPoolAcceptance:
         assert "maxConcurrent" in content
         assert "runTimeoutSeconds" in content
 
-    def test_worker_pool_executes(self):
+    def test_worker_pool_executes(self) -> None:
         """The worker pool should execute JSON.stringify in a worker thread."""
         import subprocess
 
         script = (
             "const { getPool } = "
-            "require('/usr/lib/nodejs22/lib/node_modules/openclaw/dist/worker-pool-patch.cjs'); "
+            "require('/usr/lib/nodejs22/lib/node_modules/"
+            "openclaw/dist/worker-pool-patch.cjs'); "
             "const p = getPool(); "
             "p.execute('json.stringify', { data: { test: true } })"
             ".then(r => { "
-            "console.log(JSON.stringify({ok: r === '{\"test\":true}', stats: p.stats()})); "
+            "console.log(JSON.stringify({ok: r === '{\"test\":true}', "
+            "stats: p.stats()})); "
             "process.exit(0); "
             "}).catch(e => { console.error(e.message); process.exit(1); });"
         )
@@ -282,30 +302,26 @@ class TestWorkerPoolAcceptance:
 class TestSQLiteRegistryAcceptance:
     """Verify the SQLite-backed session registry is live."""
 
-    def test_registry_db_exists(self):
+    def test_registry_db_exists(self) -> None:
         """registry.db should exist in the sessions directory."""
         db_path = Path("/home/node/.openclaw/agents/main/sessions/registry.db")
         assert db_path.exists(), "registry.db not found"
 
-    def test_registry_has_entries(self):
+    def test_registry_has_entries(self) -> None:
         """The registry should have session entries."""
         import sqlite3
 
-        conn = sqlite3.connect(
-            "/home/node/.openclaw/agents/main/sessions/registry.db"
-        )
+        conn = sqlite3.connect("/home/node/.openclaw/agents/main/sessions/registry.db")
         cur = conn.execute("SELECT COUNT(*) FROM sessions")
         count = cur.fetchone()[0]
         conn.close()
         assert count > 0, "Registry should have at least 1 session"
 
-    def test_registry_has_active_sessions(self):
+    def test_registry_has_active_sessions(self) -> None:
         """The registry should have active sessions."""
         import sqlite3
 
-        conn = sqlite3.connect(
-            "/home/node/.openclaw/agents/main/sessions/registry.db"
-        )
+        conn = sqlite3.connect("/home/node/.openclaw/agents/main/sessions/registry.db")
         cur = conn.execute(
             "SELECT COUNT(*) FROM sessions WHERE status IN ('running', 'processing')"
         )
@@ -324,7 +340,7 @@ class TestSpawnPerformance:
     concurrent spawning without blocking the event loop.
     """
 
-    def test_session_query_is_fast(self):
+    def test_session_query_is_fast(self) -> None:
         """session-query.py should return counts in under 500ms."""
         import subprocess
 
@@ -342,7 +358,7 @@ class TestSpawnPerformance:
             f"session-query took {elapsed:.3f}s — should be under 500ms"
         )
 
-    def test_active_query_is_fast(self):
+    def test_active_query_is_fast(self) -> None:
         """Active session query should be fast (indexed SQLite, not JSON)."""
         import subprocess
 
@@ -373,7 +389,9 @@ class TestSpawnMultipleSubagents:
               And none should be rejected for concurrent overflow
     """
 
-    def test_four_spans_admitted_under_limit(self, subagent_config):
+    def test_four_spans_admitted_under_limit(
+        self, subagent_config: dict[str, int]
+    ) -> None:
         """4 spawns should all be admitted when maxConcurrent >= 4."""
         from phosphene.oc.admission import AdmissionPolicy, resolve_admission
 
@@ -402,7 +420,9 @@ class TestSpawnMultipleSubagents:
                 "should be admitted under flexible spine policy"
             )
 
-    def test_fifth_spawn_rejected_at_concurrent_limit(self, subagent_config):
+    def test_fifth_spawn_rejected_at_concurrent_limit(
+        self, subagent_config: dict[str, int]
+    ) -> None:
         """When maxConcurrent is reached, next spawn should be rejected."""
         from phosphene.oc.admission import AdmissionPolicy, resolve_admission
 
@@ -423,7 +443,9 @@ class TestSpawnMultipleSubagents:
         )
         assert not result.ok
 
-    def test_tight_timeout_does_not_block_healthy_spawns(self, subagent_config):
+    def test_tight_timeout_does_not_block_healthy_spawns(
+        self, subagent_config: dict[str, int]
+    ) -> None:
         """Tight runTimeoutSeconds should not block spawns of healthy subagents."""
         from phosphene.oc.admission import AdmissionPolicy, resolve_admission
 
