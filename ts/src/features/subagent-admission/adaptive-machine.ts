@@ -1,5 +1,5 @@
 /**
- * XState v5 machine for adaptive subagent lifecycle with self-reporting.
+ * XState-free pure functional state machine for adaptive subagent lifecycle.
  *
  * @behavior
  * Replaces the static lifecycle with an adaptive one:
@@ -10,111 +10,151 @@
  *
  * @invariants
  * - A stale subagent enters "yielding" (not "timed_out" + kill)
- * - A yielding subagent can checkpoint and transition to "done"
+ * - A yielding subagent can checkpoint and transition to "completed"
  * - The machine tracks progress (0.0 to 1.0) and estimated time
  */
 
-import { setup, assign } from "xstate"
+export type AdaptiveState =
+  | "created"
+  | "dispatched"
+  | "running"
+  | "yielding"
+  | "stale"
+  | "completed"
+  | "failed"
+  | "archived"
 
-export const adaptiveSubagentMachine = setup({
-  types: {
-    context: {} as {
-      sessionKey: string
-      progress: number
-      lastReportAtMs: number
-      estimatedRemainingMs: number | null
-      staleCount: number
-    },
-    input: {} as {
-      sessionKey: string
-    },
-    events: {} as
-      | { type: "dispatch" }
-      | { type: "start" }
-      | { type: "report"; progress: number; estimatedRemainingMs?: number }
-      | { type: "yield" }
-      | { type: "checkpoint" }
-      | { type: "resume" }
-      | { type: "finish" }
-      | { type: "error" }
-      | { type: "stale" }
-      | { type: "archive" },
+export type AdaptiveEvent =
+  | { type: "dispatch" }
+  | { type: "start" }
+  | { type: "report"; progress: number; estimatedRemainingMs?: number }
+  | { type: "yield" }
+  | { type: "checkpoint" }
+  | { type: "resume" }
+  | { type: "finish" }
+  | { type: "error" }
+  | { type: "stale" }
+  | { type: "archive" }
+
+export interface AdaptiveContext {
+  sessionKey: string
+  progress: number
+  lastReportAtMs: number
+  estimatedRemainingMs: number | null
+  staleCount: number
+}
+
+export const ADAPTIVE_TRANSITIONS: Record<AdaptiveState, Partial<Record<AdaptiveEvent["type"], AdaptiveState>>> = {
+  created: {
+    dispatch: "dispatched",
   },
-}).createMachine({
-  id: "adaptive-subagent",
-  initial: "created",
-  context: ({ input }) => ({
-    sessionKey: input.sessionKey,
-    progress: 0,
-    lastReportAtMs: 0,
-    estimatedRemainingMs: null,
-    staleCount: 0,
-  }),
-  states: {
-    created: {
-      on: {
-        dispatch: "dispatched",
-      },
-    },
-    dispatched: {
-      on: {
-        start: "running",
-        error: "failed",
-      },
-    },
-    running: {
-      on: {
-        report: {
-          target: "running",
-          actions: assign({
-            progress: ({ event }) => event.progress,
-            lastReportAtMs: () => Date.now(),
-            estimatedRemainingMs: ({ event }) => event.estimatedRemainingMs ?? null,
-          }),
-        },
-        yield: "yielding",
-        finish: "completed",
-        error: "failed",
-        stale: {
-          target: "stale",
-          actions: assign({
-            staleCount: ({ context }) => context.staleCount + 1,
-          }),
-        },
-      },
-    },
-    yielding: {
-      // Graceful checkpoint — subagent can save state and exit
-      on: {
-        checkpoint: "completed",
-        resume: "running",
-        error: "failed",
-      },
-    },
-    stale: {
-      // Missed a report — not killed, but marked
-      // Parent will yield to let it checkpoint
-      on: {
-        report: {
-          target: "running",
-          actions: assign({
-            progress: ({ event }) => event.progress,
-            lastReportAtMs: () => Date.now(),
-          }),
-        },
-        yield: "yielding",
-        finish: "completed",
-        error: "failed",
-      },
-    },
-    completed: {
-      on: { archive: "archived" },
-    },
-    failed: {
-      on: { archive: "archived" },
-    },
-    archived: {
-      type: "final",
-    },
+  dispatched: {
+    start: "running",
+    error: "failed",
   },
-})
+  running: {
+    report: "running",
+    yield: "yielding",
+    finish: "completed",
+    error: "failed",
+    stale: "stale",
+  },
+  yielding: {
+    checkpoint: "completed",
+    resume: "running",
+    error: "failed",
+  },
+  stale: {
+    report: "running",
+    yield: "yielding",
+    finish: "completed",
+    error: "failed",
+  },
+  completed: {
+    archive: "archived",
+  },
+  failed: {
+    archive: "archived",
+  },
+  archived: {},
+}
+
+/**
+ * Pure transition function for the state value.
+ */
+export function transitionAdaptiveState(state: AdaptiveState, eventType: AdaptiveEvent["type"]): AdaptiveState {
+  const next = ADAPTIVE_TRANSITIONS[state][eventType]
+  if (!next) {
+    if (state === "archived") {
+      return "archived"
+    }
+    return state
+  }
+  return next
+}
+
+/**
+ * Pure context reducer function. Updates the context based on current context and event.
+ */
+export function reduceAdaptiveContext(
+  context: AdaptiveContext,
+  event: AdaptiveEvent,
+  nowMs: number = Date.now()
+): AdaptiveContext {
+  switch (event.type) {
+    case "report":
+      return {
+        ...context,
+        progress: event.progress,
+        lastReportAtMs: nowMs,
+        estimatedRemainingMs: event.estimatedRemainingMs ?? null,
+      }
+    case "stale":
+      return {
+        ...context,
+        staleCount: context.staleCount + 1,
+      }
+    default:
+      return context
+  }
+}
+
+/**
+ * A lightweight, zero-dependency actor-like wrapper to preserve compatibility
+ * with tests that use xstate-like `createActor(machine)` APIs.
+ */
+export class AdaptiveSubagentActor {
+  private currentState: AdaptiveState = "created"
+  private currentContext: AdaptiveContext
+
+  constructor(sessionKey: string) {
+    this.currentContext = {
+      sessionKey,
+      progress: 0,
+      lastReportAtMs: 0,
+      estimatedRemainingMs: null,
+      staleCount: 0,
+    }
+  }
+
+  start() {
+    this.currentState = "created"
+    return this
+  }
+
+  send(event: AdaptiveEvent) {
+    this.currentState = transitionAdaptiveState(this.currentState, event.type)
+    this.currentContext = reduceAdaptiveContext(this.currentContext, event)
+  }
+
+  getSnapshot() {
+    return {
+      value: this.currentState,
+      context: this.currentContext,
+    }
+  }
+}
+
+export const adaptiveSubagentMachine = {
+  createActor: (input: { sessionKey: string }) => new AdaptiveSubagentActor(input.sessionKey)
+}

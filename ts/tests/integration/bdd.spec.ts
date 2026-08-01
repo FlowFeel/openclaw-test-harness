@@ -6,8 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { TestStore } from "../../src/test/store.js"
 import { resolveChildAdmission } from "../../patches/child-admission.js"
-import { subagentMachine } from "../../src/features/subagent-admission/subagent-admission.machine.js"
-import { createActor } from "xstate"
+import { transitionSubagent } from "../../src/features/subagent-admission/subagent-admission.machine.js"
 import type { AdmissionPolicy } from "../../src/features/subagent-admission/subagent-admission.schema.js"
 
 function insertSubagent(
@@ -142,23 +141,19 @@ describe("Feature: Subagent Spawn Admission — depth and children", () => {
 
 describe("Feature: Subagent Lifecycle — timeout and archive", () => {
   it("Scenario: Subagent transitions to timed_out", () => {
-    const actor = createActor(subagentMachine, { input: { sessionKey: "test" } })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "timeout" })
-    expect(actor.getSnapshot().value).toBe("timed_out")
+    let state = transitionSubagent("created", "dispatch")
+    state = transitionSubagent(state, "start")
+    state = transitionSubagent(state, "timeout")
+    expect(state).toBe("timed_out")
   })
 
   it("Scenario: Timed-out subagent transitions to archived", () => {
-    const actor = createActor(subagentMachine, { input: { sessionKey: "test" } })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "timeout" })
-    actor.send({ type: "archive" })
-    expect(actor.getSnapshot().value).toBe("archived")
-    actor.send({ type: "dispatch" })
-    expect(actor.getSnapshot().value).toBe("archived")
+    let state = transitionSubagent("created", "dispatch")
+    state = transitionSubagent(state, "start")
+    state = transitionSubagent(state, "timeout")
+    state = transitionSubagent(state, "archive")
+    expect(state).toBe("archived")
+    state = transitionSubagent(state, "dispatch")
+    expect(state).toBe("archived")
   })
 })

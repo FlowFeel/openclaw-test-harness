@@ -6,12 +6,15 @@
  * - Subagent self-reporting via progress contracts
  * - Stale detection (not killing — yielding)
  * - Effective capacity calculation
- * - XState machine with report/stale/yield/checkpoint states
+ * - Pure state machine with report/stale/yield/checkpoint transitions
  */
 
 import { describe, it, expect } from "vitest"
-import { createActor } from "xstate"
-import { adaptiveSubagentMachine } from "../../src/features/subagent-admission/adaptive-machine.js"
+import {
+  transitionAdaptiveState,
+  reduceAdaptiveContext,
+  ADAPTIVE_TRANSITIONS,
+} from "../../src/features/subagent-admission/adaptive-machine.js"
 import {
   evaluateAdaptiveSpawn,
   isStale,
@@ -192,105 +195,70 @@ describe("calculateEffectiveCapacity", () => {
   })
 })
 
-// ── Adaptive XState machine ────────────────────────────────────
+// ── Pure Adaptive Transition State Machine ─────────────────────
 
-describe("adaptiveSubagentMachine", () => {
+describe("adaptiveSubagent transitions", () => {
   it("starts in created and transitions to running", () => {
-    const actor = createActor(adaptiveSubagentMachine, {
-      input: { sessionKey: "test" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    expect(actor.getSnapshot().value).toBe("running")
+    expect(transitionAdaptiveState("created", "dispatch")).toBe("dispatched")
+    expect(transitionAdaptiveState("dispatched", "start")).toBe("running")
   })
 
-  it("updates progress on report", () => {
-    const actor = createActor(adaptiveSubagentMachine, {
-      input: { sessionKey: "test" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "report", progress: 0.5, estimatedRemainingMs: 10000 })
-    const snap = actor.getSnapshot()
-    expect(snap.context.progress).toBe(0.5)
-    expect(snap.context.estimatedRemainingMs).toBe(10000)
-    expect(snap.value).toBe("running")
+  it("updates progress context on report", () => {
+    const context = {
+      sessionKey: "test",
+      progress: 0,
+      lastReportAtMs: 0,
+      estimatedRemainingMs: null,
+      staleCount: 0,
+    }
+    const updated = reduceAdaptiveContext(context, {
+      type: "report",
+      progress: 0.5,
+      estimatedRemainingMs: 10000,
+    }, 5000)
+
+    expect(updated.progress).toBe(0.5)
+    expect(updated.estimatedRemainingMs).toBe(10000)
+    expect(updated.lastReportAtMs).toBe(5000)
   })
 
-  it("transitions to stale on missed report", () => {
-    const actor = createActor(adaptiveSubagentMachine, {
-      input: { sessionKey: "test" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "stale" })
-    expect(actor.getSnapshot().value).toBe("stale")
-    expect(actor.getSnapshot().context.staleCount).toBe(1)
+  it("transitions to stale and increments staleCount", () => {
+    expect(transitionAdaptiveState("running", "stale")).toBe("stale")
+    
+    const context = {
+      sessionKey: "test",
+      progress: 0.5,
+      lastReportAtMs: 1000,
+      estimatedRemainingMs: null,
+      staleCount: 0,
+    }
+    const updated = reduceAdaptiveContext(context, { type: "stale" })
+    expect(updated.staleCount).toBe(1)
   })
 
   it("recovers from stale on new report", () => {
-    const actor = createActor(adaptiveSubagentMachine, {
-      input: { sessionKey: "test" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "stale" })
-    actor.send({ type: "report", progress: 0.8 })
-    expect(actor.getSnapshot().value).toBe("running")
-    expect(actor.getSnapshot().context.progress).toBe(0.8)
+    expect(transitionAdaptiveState("stale", "report")).toBe("running")
   })
 
   it("transitions stale → yielding (not killed)", () => {
-    const actor = createActor(adaptiveSubagentMachine, {
-      input: { sessionKey: "test" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "stale" })
-    actor.send({ type: "yield" })
-    expect(actor.getSnapshot().value).toBe("yielding")
+    expect(transitionAdaptiveState("stale", "yield")).toBe("yielding")
   })
 
   it("checkpoints from yielding to completed", () => {
-    const actor = createActor(adaptiveSubagentMachine, {
-      input: { sessionKey: "test" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "yield" })
-    actor.send({ type: "checkpoint" })
-    expect(actor.getSnapshot().value).toBe("completed")
+    expect(transitionAdaptiveState("yielding", "checkpoint")).toBe("completed")
   })
 
   it("resumes from yielding back to running", () => {
-    const actor = createActor(adaptiveSubagentMachine, {
-      input: { sessionKey: "test" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "yield" })
-    actor.send({ type: "resume" })
-    expect(actor.getSnapshot().value).toBe("running")
+    expect(transitionAdaptiveState("yielding", "resume")).toBe("running")
   })
 
   it("archived is final", () => {
-    const actor = createActor(adaptiveSubagentMachine, {
-      input: { sessionKey: "test" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "finish" })
-    actor.send({ type: "archive" })
-    expect(actor.getSnapshot().value).toBe("archived")
-    actor.send({ type: "dispatch" })
-    expect(actor.getSnapshot().value).toBe("archived")
+    expect(transitionAdaptiveState("archived", "dispatch")).toBe("archived")
+  })
+
+  it("validates adaptive transition table structure", () => {
+    expect(ADAPTIVE_TRANSITIONS.created.dispatch).toBe("dispatched")
+    expect(ADAPTIVE_TRANSITIONS.running.stale).toBe("stale")
+    expect(ADAPTIVE_TRANSITIONS.stale.report).toBe("running")
   })
 })

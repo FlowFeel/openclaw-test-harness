@@ -1,13 +1,15 @@
 /**
- * Unit tests for subagent admission logic and XState machine.
+ * Unit tests for subagent admission logic and pure transition state machine.
  *
  * Tests every guard in resolveAdmission and every transition in
- * subagentMachine. Pure logic — no I/O, no browser, no fixtures.
+ * transitionSubagent. Pure logic — no I/O, no browser, no fixtures.
  */
 
 import { describe, it, expect } from "vitest"
-import { createActor } from "xstate"
-import { subagentMachine } from "../../src/features/subagent-admission/subagent-admission.machine.js"
+import {
+  transitionSubagent,
+  TRANSITIONS,
+} from "../../src/features/subagent-admission/subagent-admission.machine.js"
 import { resolveAdmission } from "../../src/features/subagent-admission/subagent-admission.logic.js"
 import type { AdmissionPolicy } from "../../src/features/subagent-admission/subagent-admission.schema.js"
 
@@ -122,159 +124,57 @@ describe("resolveAdmission", () => {
   })
 })
 
-// ── XState machine tests ───────────────────────────────────────
+// ── Pure Transition State Machine tests ────────────────────────
 
-describe("subagentMachine", () => {
-  it("starts in created state", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    expect(actor.getSnapshot().value).toBe("created")
-  })
-
-  it("transitions created → dispatched on dispatch", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    expect(actor.getSnapshot().value).toBe("dispatched")
-  })
-
-  it("transitions dispatched → running on start", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    expect(actor.getSnapshot().value).toBe("running")
-  })
-
-  it("transitions running → completed on finish", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "finish" })
-    expect(actor.getSnapshot().value).toBe("completed")
+describe("transitionSubagent", () => {
+  it("has correct initial and subsequent transitions", () => {
+    expect(transitionSubagent("created", "dispatch")).toBe("dispatched")
+    expect(transitionSubagent("dispatched", "start")).toBe("running")
+    expect(transitionSubagent("running", "finish")).toBe("completed")
+    expect(transitionSubagent("completed", "archive")).toBe("archived")
   })
 
   it("transitions running → timed_out on timeout", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "timeout" })
-    expect(actor.getSnapshot().value).toBe("timed_out")
+    expect(transitionSubagent("running", "timeout")).toBe("timed_out")
   })
 
   it("transitions running → failed on error", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "error" })
-    expect(actor.getSnapshot().value).toBe("failed")
+    expect(transitionSubagent("running", "error")).toBe("failed")
   })
 
   it("transitions running → yielding on yield", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "yield" })
-    expect(actor.getSnapshot().value).toBe("yielding")
+    expect(transitionSubagent("running", "yield")).toBe("yielding")
   })
 
   it("transitions yielding → running on child_done", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "yield" })
-    actor.send({ type: "child_done" })
-    expect(actor.getSnapshot().value).toBe("running")
-  })
-
-  it("transitions completed → archived on archive", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "finish" })
-    actor.send({ type: "archive" })
-    expect(actor.getSnapshot().value).toBe("archived")
+    expect(transitionSubagent("yielding", "child_done")).toBe("running")
   })
 
   it("transitions aborted from any non-terminal state on parent_abort", () => {
-    const states = ["created", "dispatched", "running", "yielding"] as const
-    for (const state of states) {
-      const actor = createActor(subagentMachine, {
-        input: { sessionKey: "test-session" },
-      })
-      actor.start()
-      // Navigate to the target state
-      if (state === "dispatched" || state === "running" || state === "yielding") {
-        actor.send({ type: "dispatch" })
-      }
-      if (state === "running" || state === "yielding") {
-        actor.send({ type: "start" })
-      }
-      if (state === "yielding") {
-        actor.send({ type: "yield" })
-      }
-      actor.send({ type: "parent_abort" })
-      expect(actor.getSnapshot().value).toBe("aborted")
-    }
+    expect(transitionSubagent("created", "parent_abort")).toBe("aborted")
+    expect(transitionSubagent("dispatched", "parent_abort")).toBe("aborted")
+    expect(transitionSubagent("running", "parent_abort")).toBe("aborted")
+    expect(transitionSubagent("yielding", "parent_abort")).toBe("aborted")
   })
 
   it("archived is final — no transitions", () => {
-    const actor = createActor(subagentMachine, {
-      input: { sessionKey: "test-session" },
-    })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "finish" })
-    actor.send({ type: "archive" })
-    // Try sending events — should stay in archived
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    actor.send({ type: "finish" })
-    expect(actor.getSnapshot().value).toBe("archived")
+    expect(transitionSubagent("archived", "dispatch")).toBe("archived")
+    expect(transitionSubagent("archived", "start")).toBe("archived")
+    expect(transitionSubagent("archived", "finish")).toBe("archived")
   })
 
   it("terminal states only transition to archived", () => {
     const terminalStates = ["completed", "failed", "timed_out", "aborted"] as const
     for (const state of terminalStates) {
-      const actor = createActor(subagentMachine, {
-        input: { sessionKey: "test-session" },
-      })
-      actor.start()
-      actor.send({ type: "dispatch" })
-      actor.send({ type: "start" })
-      if (state === "completed") actor.send({ type: "finish" })
-      if (state === "failed") actor.send({ type: "error" })
-      if (state === "timed_out") actor.send({ type: "timeout" })
-      if (state === "aborted") actor.send({ type: "parent_abort" })
-
-      expect(actor.getSnapshot().value).toBe(state)
-      actor.send({ type: "archive" })
-      expect(actor.getSnapshot().value).toBe("archived")
+      expect(transitionSubagent(state, "archive")).toBe("archived")
+      // Check invalid transitions return current state
+      expect(transitionSubagent(state, "dispatch")).toBe(state)
     }
+  })
+
+  it("validates transition table structure", () => {
+    expect(TRANSITIONS.created.dispatch).toBe("dispatched")
+    expect(TRANSITIONS.running.finish).toBe("completed")
+    expect(TRANSITIONS.archived).toEqual({})
   })
 })

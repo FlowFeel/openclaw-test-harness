@@ -6,8 +6,7 @@
 import { describe, it, expect } from "vitest"
 import { TestStore } from "../../src/test/store.js"
 import { resolveChildAdmission } from "../../patches/child-admission.js"
-import { subagentMachine } from "../../src/features/subagent-admission/subagent-admission.machine.js"
-import { createActor } from "xstate"
+import { transitionSubagent } from "../../src/features/subagent-admission/subagent-admission.machine.js"
 import type { AdmissionPolicy } from "../../src/features/subagent-admission/subagent-admission.schema.js"
 
 describe("Docker container environment", () => {
@@ -73,16 +72,14 @@ describe("Docker BDD: Full spawn → timeout → archive cycle", () => {
   })
 
   it("full lifecycle: spawn → running → timeout → archive", () => {
-    const actor = createActor(subagentMachine, { input: { sessionKey: "docker-test" } })
-    actor.start()
-    actor.send({ type: "dispatch" })
-    actor.send({ type: "start" })
-    expect(actor.getSnapshot().value).toBe("running")
-    actor.send({ type: "timeout" })
-    expect(actor.getSnapshot().value).toBe("timed_out")
-    actor.send({ type: "archive" })
-    expect(actor.getSnapshot().value).toBe("archived")
-    actor.send({ type: "dispatch" })
-    expect(actor.getSnapshot().value).toBe("archived")
+    let state = transitionSubagent("created", "dispatch")
+    state = transitionSubagent(state, "start")
+    expect(state).toBe("running")
+    state = transitionSubagent(state, "timeout")
+    expect(state).toBe("timed_out")
+    state = transitionSubagent(state, "archive")
+    expect(state).toBe("archived")
+    state = transitionSubagent(state, "dispatch")
+    expect(state).toBe("archived")
   })
 })
