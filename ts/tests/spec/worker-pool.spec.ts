@@ -168,6 +168,20 @@ describe("Built-in handlers — session serialization", () => {
     expect(result.ok).toBe(true)
     expect(result.data).toEqual(complexObj)
   })
+
+  it("parallelizes topic fan-out payload formatting off main thread", async () => {
+    const topics = ["topic-1", "topic-2", "topic-3", "topic-4", "topic-5", "topic-6"]
+    const payload = { event: "broadcast", data: "test payload" }
+    const result = await pool.execute<Array<{ topic: string; payload: string; formattedAt: number }>>("fanout.topics", {
+      topics,
+      payload
+    })
+
+    expect(result.ok).toBe(true)
+    expect(result.data?.length).toBe(6)
+    expect(result.data?.[0].topic).toBe("topic-1")
+    expect(JSON.parse(result.data?.[0].payload!)).toEqual(payload)
+  })
 })
 
 describe("Orthogonality — multiple handler types in one pool", () => {

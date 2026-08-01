@@ -50,6 +50,12 @@ function getPool() {
           } else if (handler === 'ipc.transfer') {
             // Direct V8 structured clone transfer — zero JSON stringification
             parentPort.postMessage({ id, ok: true, data: input.payload });
+          } else if (handler === 'fanout.topics') {
+            // Parallel topic fan-out serialization across worker pool
+            const serialized = typeof input.payload === 'string' ? input.payload : JSON.stringify(input.payload);
+            const now = Date.now();
+            const results = input.topics.map(t => ({ topic: t, payload: serialized, formattedAt: now }));
+            parentPort.postMessage({ id, ok: true, data: results });
           } else if (handler === 'measure.size') {
             let chars = 0;
             for (const b of input.blocks) {
@@ -101,6 +107,10 @@ function getPool() {
               result = typeof input.session === 'string' ? input.session : JSON.stringify(input.session);
             } else if (handler === 'ipc.transfer') {
               result = input.payload;
+            } else if (handler === 'fanout.topics') {
+              const serialized = typeof input.payload === 'string' ? input.payload : JSON.stringify(input.payload);
+              const now = Date.now();
+              result = input.topics.map(t => ({ topic: t, payload: serialized, formattedAt: now }));
             } else if (handler === 'measure.size') {
               result = input.blocks.reduce((acc, b) => acc + JSON.stringify(b.arguments || {}).length, 0);
             } else {

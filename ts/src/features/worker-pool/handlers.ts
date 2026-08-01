@@ -66,6 +66,18 @@ export function ipcTransfer(input: { payload: unknown }): unknown {
   return input.payload
 }
 
+// ── Parallel topic fan-out handler (Ticket #6) ────────────────
+
+export function fanoutTopics(input: { topics: string[]; payload: unknown }): Array<{ topic: string; payload: string; formattedAt: number }> {
+  const serialized = typeof input.payload === "string" ? input.payload : JSON.stringify(input.payload)
+  const now = Date.now()
+  return input.topics.map(topic => ({
+    topic,
+    payload: serialized,
+    formattedAt: now,
+  }))
+}
+
 // ── Registration helper ────────────────────────────────────────
 
 export function registerBuiltinHandlers(pool: WorkerPool): void {
@@ -74,4 +86,5 @@ export function registerBuiltinHandlers(pool: WorkerPool): void {
   pool.register("compact.context", compactContext)
   pool.register("serialize.session", serializeSession)
   pool.register("ipc.transfer", ipcTransfer)
+  pool.register("fanout.topics", fanoutTopics)
 }
