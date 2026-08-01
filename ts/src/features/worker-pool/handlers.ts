@@ -68,9 +68,9 @@ export function ipcTransfer(input: { payload: unknown }): unknown {
 
 // ── Parallel topic fan-out handler (Ticket #6) ────────────────
 
-export function fanoutTopics(input: { topics: string[]; payload: unknown }): Array<{ topic: string; payload: string; formattedAt: number }> {
+export function fanoutTopics(input: { topics: string[]; payload: unknown; nowMs?: number }): Array<{ topic: string; payload: string; formattedAt: number }> {
   const serialized = typeof input.payload === "string" ? input.payload : JSON.stringify(input.payload)
-  const now = Date.now()
+  const now = input.nowMs ?? Date.now()
   return input.topics.map(topic => ({
     topic,
     payload: serialized,

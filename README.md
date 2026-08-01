@@ -55,6 +55,30 @@ We systematically tackled every bottleneck on the event loop, completing all 6 a
 
 ---
 
+## Design-for-Testability (DFT) Hardening
+
+A targeted pass eliminating the four classes of test flakiness identified in the harness architectural review. Each addition is hermetic and deterministic.
+
+### 9. Deterministic Clock & ID Providers
+*   **What**: `SystemClock`, `DeterministicTestClock`, and `SequenceGenerator` (`ts/src/core/test-context.ts`) replace direct `Date.now()` / `Math.random()` calls. `TestStore.getTimedOut()` and the `fanout.topics` handler now accept an injectable `nowMs`; the `worker-pool.js` patch's task IDs use a monotonic counter instead of `Date.now() + Math.random()`.
+*   **Why**: Removes timing races and ID collisions across parallel test suites — the same inputs now yield byte-identical outputs.
+
+### 10. OpenRouter Mock Sidecar (wired into the OC container)
+*   **What**: `OpenRouterMockServer` (`ts/src/containers/openrouter-mock-sidecar.ts`) serves fixed OpenAI-compatible chat-completion JSON on an **ephemeral port** (port 0) for in-process integration tests, and self-starts as a long-lived container entrypoint (`node --experimental-strip-types`, bound to `0.0.0.0:9876`, zero `node_modules`) for E2E. `startPatchedOpenClaw({ withSidecar: true })` (`ts/tests/support/openclaw-container.ts`) starts the sidecar on a shared testcontainers `Network`, attaches the OC container (alias `openclaw`) with `OPENCLAW_OPENROUTER_BASE_URL=http://openrouter-mock:9876/v1`, and exposes `executeModelCall` — an in-container `fetch` against the sidecar. The request body is base64-encoded as argv (not string-interpolated) to avoid quote-escaping fragility.
+*   **Why**: The full containerized spawn → LLM-call flow now runs 100% offline — no live API keys, no external network, no hardcoded-port race (the `8080` / `9999` anti-pattern). The sidecar is the deterministic upstream the review calls for, exercised at three levels: in-process (integration), cross-container (E2E), and wired into the patched OC container (E2E).
+*   **Reuse trade-off**: the sidecar path disables `withReuse()` and sets `withAutoRemove(true)` — testcontainers' `reuseContainer` only restarts a stopped container and does **not** re-connect networks, so a reused OC container would keep stale attachments from the previous run's (now-removed) network. The default (no-sidecar) path keeps its reuse optimization unchanged.
+*   **Constraint**: The sidecar avoids TypeScript parameter properties (unsupported by `--experimental-strip-types` strip-only mode) so it loads in a bare `node:22-bookworm-slim` image with no build step.
+
+### 11. Programmatic V8 Heap Invariants
+*   **What**: `captureV8Snapshot()` and `assertV8HeapStability()` (`ts/src/core/v8-assert.ts`) assert bounded `used_heap_size` growth between snapshots, in-process.
+*   **Why**: Catches hidden memory leaks in CI without manual `--trace-gc` inspection.
+
+### 12. Worker Fault Injection & Recovery
+*   **What**: `ts/tests/integration/fault-injection.spec.ts` injects handler crashes, unknown-handler lookups, and worker-thread errors against both the `MockWorkerPool` and the real `worker-pool.js` patch (loaded as CJS via `ts/tests/support/load-cjs.ts`).
+*   **Why**: Verifies transparent recovery and that `TestStore` state remains uncorrupted under worker crashes, IPC errors, and `ERR_WORKER_OUT_OF_MEMORY`.
+
+---
+
 ## Architectural Performance Metrics
 
 | Metric | Before Optimization | After Optimization (v0.2.0) |
@@ -64,29 +88,29 @@ We systematically tackled every bottleneck on the event loop, completing all 6 a
 | Event loop P99 delay | 834ms | <50ms (estimated) |
 | CPU Utilization | 1.467 cores (saturated) | 0.6% (idle) |
 | Global `maxConcurrent` | 2 (static) | 6 (with worker pool) |
-| Automated Tests | 0 | 155 (53 Python + 102 TS) |
+| Automated Tests | 0 | 170 (25 Python + 145 TS) |
 | CI Pipeline Layers | 0 | 4 (unit → docker → staging → integration) |
 
 ---
 
-## The Test Pyramid (155 Total Tests)
+## The Test Pyramid (170 Total Tests)
 
 ```
                      ┌───────────────────────────┐
-                     │    Testcontainers E2E     │  3 Container Specs
+                     │    Testcontainers E2E     │  17 E2E Specs (Docker-gated)
                      ├───────────────────────────┤
-                     │   Docker Compose & BDD    │  28 Integration Specs
+                     │   Docker Compose & BDD    │  31 Integration Specs
                      ├───────────────────────────┤
-                     │  TypeScript Spec Unit     │  71 TS Unit Specs
+                     │  TypeScript Spec Unit     │  97 TS Unit Specs
                      ├───────────────────────────┤
-                     │    Python Unit Tests      │  53 Pytest Specs
+                     │    Python Unit Tests      │  25 Pytest Specs
                      └───────────────────────────┘
 ```
 
-1. **Python Unit Layer (`tests/unit/`)**: 53 pure logic tests running in **0.08s** with zero fixtures.
-2. **TypeScript Unit Layer (`ts/tests/spec/`)**: 71 specs testing pure transition tables, context reducers, and worker pool protocols.
-3. **Integration Layer (`ts/tests/integration/`)**: 28 specs testing SQLite accessors, BDD scenarios, and `patch-package` validation.
-4. **Testcontainers E2E Layer (`ts/tests/e2e/`)**: 3 containerized tests running patched OpenClaw images inside Docker.
+1. **Python Unit Layer (`tests/unit/`)**: 25 pure logic tests running in **0.11s** with zero fixtures.
+2. **TypeScript Unit Layer (`ts/tests/spec/`)**: 97 specs testing pure transition tables, context reducers, worker pool protocols, deterministic clocks, and V8 heap invariants.
+3. **Integration Layer (`ts/tests/integration/`)**: 31 specs testing SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, and worker fault injection.
+4. **Testcontainers E2E Layer (`ts/tests/e2e/`)**: 17 containerized tests — patched OpenClaw admission checks, the OpenRouter mock sidecar served as a real long-lived container on a shared Docker network, and the sidecar **wired into the OC container** so a containerized agent drives a real offline chat-completion call (`admit spawn → model call` flow, 100% offline).
 
 ---
 

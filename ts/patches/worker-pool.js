@@ -26,6 +26,10 @@ let activeCount = 0;
 let completedCount = 0;
 let failedCount = 0;
 
+// Monotonic task counter — replaces non-deterministic Date.now()+Math.random()
+// for worker task IDs. Deterministic, collision-free, and IC-friendly (monomorphic).
+let taskCounter = 0;
+
 function getPool() {
   if (pool) return pool;
 
@@ -81,7 +85,7 @@ function getPool() {
         if (free) {
           free.busy = true;
           activeCount++;
-          const id = Date.now() + Math.random();
+          const id = ++taskCounter;
           let timer = null;
 
           const cleanup = () => {

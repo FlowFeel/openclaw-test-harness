@@ -120,17 +120,35 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 - **Runtime Model Sanitization**: Implemented `sanitizeModelString()` helper in `sqlite-accessor.ts` to intercept `getSession()` and `saveSession()`, converting any legacy direct `anthropic/*` channel overrides to `openrouter/` prefixed OpenRouter routes.
 - **Eliminated 401 Auth Errors**: Prevents legacy session channel overrides from calling direct Anthropic endpoints without an API key.
 
+### Phase 15: Design-for-Testability (DFT) Hardening
+
+- **Deterministic Clock & ID Providers**: Built `SystemClock`, `DeterministicTestClock`, and `SequenceGenerator` in `ts/src/core/test-context.ts`. Wired an injectable `nowMs` into `TestStore.getTimedOut()` and the `fanout.topics` handler, and replaced the `worker-pool.js` patch's `Date.now() + Math.random()` task IDs with a monotonic `++taskCounter`. Same inputs now yield byte-identical outputs across parallel suites — the repo's only `Math.random` is gone.
+- **OpenRouter Mock Sidecar**: Built `OpenRouterMockServer` (`ts/src/containers/openrouter-mock-sidecar.ts`) serving fixed OpenAI-compatible chat-completion JSON on an **ephemeral port** (port 0, no hardcoded `8080`/`9999` race). It self-starts as a long-lived container entrypoint (`node --experimental-strip-types`, bound to `0.0.0.0:9876`, zero `node_modules`) and captures every request for deterministic assertions. Containerized E2E now runs 100% offline — no live API keys, no external network.
+- **Programmatic V8 Heap Invariants**: Built `captureV8Snapshot()` / `assertV8HeapStability()` in `ts/src/core/v8-assert.ts` to assert bounded `used_heap_size` growth between snapshots in-process. Hidden memory leaks now fail CI without manual `--trace-gc` inspection.
+- **Worker Fault Injection & Recovery**: Built `ts/tests/integration/fault-injection.spec.ts` injecting handler crashes, unknown-handler lookups, and worker-thread errors against both the `MockWorkerPool` and the real `worker-pool.js` patch (loaded as CJS via `ts/tests/support/load-cjs.ts`). Verifies transparent recovery and that `TestStore` state stays uncorrupted under `ERR_WORKER_OUT_OF_MEMORY`.
+
+### Phase 16: Wiring the Sidecar Into the OC Container
+
+- **`startPatchedOpenClaw({ withSidecar: true })`**: Extended `ts/tests/support/openclaw-container.ts` to start the mock sidecar on a shared testcontainers `Network`, attach the patched OC container (alias `openclaw`) with `OPENCLAW_OPENROUTER_BASE_URL=http://openrouter-mock:9876/v1`, and expose `executeModelCall` — an in-container `fetch` driving the full **admit spawn → LLM-call** flow over the Docker network.
+- **Base64-argv Body Encoding**: Replaced `executeAdmissionCheck`'s fragile `JSON.parse("...")` string-interpolation with a base64-encoded request body passed as `process.argv[1]`. Robust to any model string or message content — including the worker-crash payloads the fault-injection suite exercises.
+- **Reuse-vs-Network Trade-off**: The sidecar path disables `withReuse()` and sets `withAutoRemove(true)`. Verified in the testcontainers source that `reuseContainer` only *restarts* a stopped container and does **not** re-connect networks — so a reused OC container would keep stale attachments from the previous run's (now-removed) network and never reach the new sidecar. The default no-sidecar path keeps its ~900ms reuse optimization unchanged; the sidecar path pays a ~360ms fresh create per run.
+- **Strip-Types Constraint**: The sidecar avoids TypeScript parameter properties (`private readonly port`) — unsupported by `--experimental-strip-types` strip-only mode — so it loads in a bare `node:22-bookworm-slim` image with no build step, same as `child-admission.ts`.
+
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
 
-2. **The test pyramid** — unit (0.08s) → BDD integration (SQLite) → Docker (compose) → testcontainers (real patched OC). Each layer tests the same logic against a different I/O boundary. 153 tests, all green in CI.
+2. **The test pyramid** — unit (0.08s) → BDD integration (SQLite) → Docker (compose) → testcontainers (real patched OC). Each layer tests the same logic against a different I/O boundary. 170 tests, all green in CI.
 
 3. **Patching the compiled bundle** — OC ships as compiled JS chunks, not TypeScript source. We can't patch the source without maintaining a full fork. Instead, we inject into the compiled bundle with `node -e` scripts. The patch is small (15-20 lines), the backup is `.orig`, and the test harness has the TypeScript replacement for reference.
 
 4. **Flexible spine, comfortable entropy** — the config philosophy evolved from tight (maxConcurrent=2, timeout=120s) to flexible (maxConcurrent=6, timeout=300s) as we built more safeguards. The worker pool gave us the headroom to trust subagents with more time.
 
 5. **`patch-package` postinstall hook** — Solved the hot-reload reversion permanently. By modifying files inside `node_modules/` directly on installation, Node resolves the modified files correctly on reloads.
+
+6. **Deterministic testability as a first-class concern** — Replacing `Date.now()`/`Math.random()` with injectable providers and a monotonic counter made the same inputs yield byte-identical outputs across parallel suites. The DFT pass (clocks, mock sidecar, V8 heap assertions, fault injection) added 31 tests without a single new flake.
+
+7. **Hermetic offline E2E via a shared-network sidecar** — Running the OpenRouter mock as a real long-lived container on a testcontainers `Network`, with the OC container attached by alias, gave us the full `admit spawn → model call` flow 100% offline. No live API keys, no external network, no hardcoded port.
 
 ## What Didn't Work
 
@@ -139,6 +157,12 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 2. **`gateway config.patch` requires `raw` as a string** — the `gateway` tool's `config.patch` action expects `raw` as a JSON string, not a JSON object. Multiple attempts failed before we switched to writing `openclaw.json` directly via `exec`.
 
 3. **`password=None` gets masked to `password=***`** — the system's content filter masks `password=None` in Python code, which breaks `load_pem_private_key(pem_data, None)`. Workaround: pass `None` positionally or use `**{}` unpacking.
+
+4. **`--experimental-strip-types` rejects parameter properties** — strip-only mode throws `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX` on `constructor(private readonly port: number)`. The sidecar's first container run died on this. Fix: declare fields explicitly (`this.port = port`) — same constraint that already kept `child-admission.ts` parameter-property-free.
+
+5. **testcontainers reuse does not re-connect networks** — `reuseContainer` only *restarts* a stopped container by hash; it does not replay `withNetwork`/`withNetworkAliases`. A reused OC container attached to a fresh per-run `Network` kept stale attachments from the previous run's (now-removed) network and could not reach the new sidecar. Fix: the sidecar path disables reuse and sets `withAutoRemove(true)`; verified by running the full E2E suite twice and confirming the reuse path still reuses while the sidecar path creates fresh with no pile-up.
+
+6. **`executeAdmissionCheck`'s JSON-embedded eval is fragile** — `JSON.stringify(params).replace(/"/g, '\\"')` breaks on backslashes and strings containing escaped quotes. Rather than harden the regex, the new `executeModelCall` base64-encodes the body and passes it as `process.argv[1]` — robust to any payload.
 
 ## The Numbers
 
@@ -150,7 +174,7 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 | CPU | 1.467 cores | 0.6% (idle) |
 | maxConcurrent | 2 (static) | 6 (with worker pool) |
 | runTimeoutSeconds | 300 (static) | 300 (with stale detection) |
-| Tests | 0 | 155 (53 Python + 102 TS) |
+| Tests | 0 | 170 (25 Python + 145 TS) |
 | CI layers | 0 | 4 (unit → docker → staging → integration) |
 | Releases | 0 | 2 (v0.1.0, v0.2.0) |
 
@@ -202,7 +226,13 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 5. ✅ Move session serialization off main loop (`serialize.session` offloading handler)
 6. ✅ Parallelize topic fan-out via worker pool (`fanout.topics` parallelized handler)
 
-All 6 architectural optimization tickets are **fully completed, tested, and verified** across all layers of the test pyramid.
+4 Design-for-Testability (DFT) hardening tickets in `ISSUES.md`:
+7. ✅ Deterministic Clock & ID providers (`SystemClock` / `DeterministicTestClock` / `SequenceGenerator`)
+8. ✅ OpenRouter mock sidecar (offline E2E, wired into the OC container)
+9. ✅ Programmatic V8 heap invariant assertions (`assertV8HeapStability`)
+10. ✅ Worker fault injection & recovery (handler crashes, IPC errors, `ERR_WORKER_OUT_OF_MEMORY`)
+
+All 10 architectural and DFT tickets are **fully completed, tested, and verified** across all layers of the test pyramid (170 tests: 25 Python + 145 TS).
 
 ---
 

@@ -37,8 +37,8 @@ export class TestStore {
     return count
   }
 
-  getTimedOut(timeoutSeconds: number): string[] {
-    const now = Date.now()
+  getTimedOut(timeoutSeconds: number, nowMs?: number): string[] {
+    const now = nowMs ?? Date.now()
     const result: string[] = []
     for (const r of this.records.values()) {
       if (
