@@ -1,0 +1,110 @@
+name: Ship Patches
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  ship:
+    name: Ship Patch Release
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for new patches since last release
+        id: check
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            echo "No previous release — skipping auto-ship"
+            echo "should_ship=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if any patch files changed since last release
+          CHANGES=$(git diff --name-only "$LAST_TAG"..HEAD -- ts/patches/ 2>/dev/null || echo "")
+          if [ -z "$CHANGES" ]; then
+            echo "No patch changes since $LAST_TAG"
+            echo "should_ship=false" >> $GITHUB_OUTPUT
+          else
+            echo "Patch changes detected:"
+            echo "$CHANGES"
+            echo "should_ship=true" >> $GITHUB_OUTPUT
+            # Generate version: patch count + OC version
+            PATCH_COUNT=$(ls ts/patches/*.ts 2>/dev/null | wc -l)
+            OC_VERSION="2026.6.8"
+            NEW_TAG="v0.${PATCH_COUNT}.0-oc-${OC_VERSION}"
+            echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up Node.js
+        if: steps.check.outputs.should_ship == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify patches pass tests
+        if: steps.check.outputs.should_ship == 'true'
+        working-directory: ts
+        run: |
+          npm ci --include=dev
+          npx tsc --noEmit
+          npx vitest run --reporter=dot
+
+      - name: Create release
+        if: steps.check.outputs.should_ship == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.check.outputs.new_tag }}"
+          echo "Creating release $TAG"
+
+          # Generate release notes from commits
+          NOTES=$(git log --oneline --format="- %s" $(git describe --tags --abbrev=0)..HEAD -- ts/patches/ 2>/dev/null | head -20)
+
+          # Create release with assets
+          gh release create "$TAG" \
+            --title "OC Patch $TAG" \
+            --notes "## Patches shipped automatically from CI
+
+          **Patches against:** OpenClaw 2026.6.8 (commit f47542c5)
+
+          ### Commits in this release
+          $NOTES
+
+          ### Test status
+          All tests passed in CI before shipping:
+          - Python unit tests
+          - TypeScript unit tests
+          - Docker integration
+          - Staging integration
+
+          ### Assets
+          - child-admission.ts — drop-in replacement file
+          - child-admission.patch — git diff patch" \
+            --prerelease
+
+          # Upload patch assets
+          for f in ts/patches/*.ts; do
+            name=$(basename "$f")
+            gh release upload "$TAG" "$f" --clobber
+            echo "Uploaded: $name"
+          done
+
+          for f in ts/patches/*.patch; do
+            name=$(basename "$f")
+            gh release upload "$TAG" "$f" --clobber
+            echo "Uploaded: $name"
+          done
+
+          echo "Release $TAG shipped!"
