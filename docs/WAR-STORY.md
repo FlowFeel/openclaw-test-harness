@@ -83,6 +83,12 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 - **Automatic Fallback Protection**: Ensures spawn admission checks automatically query the SQLite database for active session counts and stale subagent sessions at microsecond speeds while falling back cleanly in non-SQLite environments.
 - **100% Green Test Pyramid**: Validated across all 153 unit, BDD integration, and Docker Testcontainers E2E test suites.
 
+### Phase 9: Offloading Session Serialization to Worker Pool
+
+- **Main Thread CPU Relocation**: Extended `worker-pool.js` with dedicated `serialize.session` handlers to offload high-frequency session state `JSON.stringify` tasks off the single-threaded V8 loop.
+- **Worker Thread Execution & Fallback**: Configured worker pool worker_threads execution with an inline CPU fallback mechanism for high burst loads.
+- **Zero Event Loop Pauses**: Eliminates 200–500ms synchronous JSON serialization freezes per session turn.
+
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
