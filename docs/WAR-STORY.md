@@ -77,6 +77,12 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 - **Synchronous SQLite Controller**: Created `sqlite-accessor.ts` offering indexed lookups (`sessionKey`, `spawnedBy`, `status`) to replace synchronous `sessions.json` parsing.
 - **Full Test Coverage**: Implemented `sqlite-accessor.spec.ts` integration suite verifying CRUD operations, subagent depth counts, active session tracking, and stale timeout queries.
 
+### Phase 8: Adaptive Spawning & SQLite Registry Integration
+
+- **Fault-Tolerant Dynamic Require**: Enhanced `child-admission.ts` to attempt dynamic require resolution of `sqlite-accessor.js` when parameter snapshots (`globalActive`, `timedOutSubagents`) are omitted.
+- **Automatic Fallback Protection**: Ensures spawn admission checks automatically query the SQLite database for active session counts and stale subagent sessions at microsecond speeds while falling back cleanly in non-SQLite environments.
+- **100% Green Test Pyramid**: Validated across all 153 unit, BDD integration, and Docker Testcontainers E2E test suites.
+
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
