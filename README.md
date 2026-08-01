@@ -147,6 +147,7 @@ docker compose -f docker/docker-compose.test.yml up --build --abort-on-container
 ## Repository Details
 
 - **GitHub Repository**: [FlowFeel/openclaw-test-harness](https://github.com/FlowFeel/openclaw-test-harness) (Public Repository)
+- **Target OpenClaw Version**: `2026.6.8` (commit `f47542c5`)
 - **License**: MIT License
 - **Target Production Host**: EC2 Instance (Amazon Linux 2023, Node.js v22.22.2, 4 cores, 30GB RAM)
 - **Documentation**: See [WAR-STORY.md](file:///Users/edphillips/projects/new/openclaw-test-harness/docs/WAR-STORY.md) for full phase-by-phase timeline details.
