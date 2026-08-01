@@ -141,7 +141,7 @@ jobs:
             echo "=== Patch file exists ==="
             head -5 patches/child-admission.patch
             echo "=== Patched function compiles ==="
-            npx tsc --noEmit patches/child-admission.ts --moduleResolution bundler --module ESNext --target ES2024 || true
+            npx tsc --noEmit patches/child-admission.ts --moduleResolution bundler --module ESNext --target ES2024
           fi
       - name: Run Python integration tests
         run: |

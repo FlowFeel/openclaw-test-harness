@@ -64,37 +64,32 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 - **Acceptance tests**: 23 E2E tests verifying config policy, admission, lifecycle, worker pool, SQLite registry, and spawn performance.
 - **Continuous patch shipping**: `ship-patches.yml` auto-releases when CI passes.
 
+### Phase 6: The patch-package Refactor (Persistence across Reboots)
+
+- **Identified the Root Cause**: The compaction bundle was being restored from the npm package cache during gateway config hot-reloads.
+- **Adopted Path B (`patch-package`)**: Integrated `patch-package` into the `postinstall` life-cycle hook of `package.json`. Modifications are applied directly to `node_modules/openclaw` automatically on dependency installation.
+- **Dynamic E2E Verifications**: Configured Testcontainers to mount the host `/var/run/docker.sock` to support sibling container orchestration in Docker-in-Docker environments.
+- **Automated Validation Spec**: Implemented `patch-validator.ts` and `patch.spec.ts` to verify that patches compile cleanly, match diff files, and enforce concurrent/timeout guards without drift.
+
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
 
-2. **The test pyramid** — unit (0.08s) → BDD integration (SQLite) → Docker (compose) → testcontainers (real patched OC). Each layer tests the same logic against a different I/O boundary. 140 tests, all green in CI.
+2. **The test pyramid** — unit (0.08s) → BDD integration (SQLite) → Docker (compose) → testcontainers (real patched OC). Each layer tests the same logic against a different I/O boundary. 147 tests, all green in CI.
 
 3. **Patching the compiled bundle** — OC ships as compiled JS chunks, not TypeScript source. We can't patch the source without maintaining a full fork. Instead, we inject into the compiled bundle with `node -e` scripts. The patch is small (15-20 lines), the backup is `.orig`, and the test harness has the TypeScript replacement for reference.
 
 4. **Flexible spine, comfortable entropy** — the config philosophy evolved from tight (maxConcurrent=2, timeout=120s) to flexible (maxConcurrent=6, timeout=300s) as we built more safeguards. The worker pool gave us the headroom to trust subagents with more time.
 
+5. **`patch-package` postinstall hook** — Solved the hot-reload reversion permanently. By modifying files inside `node_modules/` directly on installation, Node resolves the modified files correctly on reloads.
+
 ## What Didn't Work
 
 1. **The cron watchdog backfired** — a `systemEvent`-based watchdog fired every 5 min, but `systemEvent` triggers a model call, which added load to the event loop. The "watchdog" was making the problem worse. Fixed by disabling it and using the heartbeat's SQLite sync instead.
 
-2. **The worker pool patch reverts on every gateway restart** — the `SIGUSR1` hot-reload reloads config but the compaction bundle gets restored from the npm package cache. The child-admission patch survives (different bundle), but the worker pool injection needs re-applying. This is a known issue — we need a startup script or a persistent patch mechanism.
+2. **`gateway config.patch` requires `raw` as a string** — the `gateway` tool's `config.patch` action expects `raw` as a JSON string, not a JSON object. Multiple attempts failed before we switched to writing `openclaw.json` directly via `exec`.
 
-3. **`gateway config.patch` requires `raw` as a string** — the `gateway` tool's `config.patch` action expects `raw` as a JSON string, not a JSON object. Multiple attempts failed before we switched to writing `openclaw.json` directly via `exec`.
-
-4. **`password=None` gets masked to `password=***`** — the system's content filter masks `password=None` in Python code, which breaks `load_pem_private_key(pem_data, None)`. Workaround: pass `None` positionally or use `**{}` unpacking.
-
-## The Recurring Issue
-
-The worker pool patch in the compaction bundle (`compaction-successor-transcript-Ncp4Uf5J.js`) gets reverted on every gateway restart. The child-admission patch survives because it's in a different bundle (`acp-spawn-FpIdWOvV.js`). The likely cause is that the hot-reload process re-reads the npm package's cached files for the compaction module but not the spawn module.
-
-**Proposed fix**: a startup script (`/home/node/.openclaw/scripts/apply-patches.sh`) that runs on boot and re-applies both patches. The script would:
-1. Copy `worker-pool-patch.cjs` to `dist/`
-2. Inject the worker pool import into the compaction bundle
-3. Inject the maxConcurrent + runTimeoutSeconds guards into the acp-spawn bundle
-4. Verify both patches with grep
-
-This script would run before OC starts, ensuring both patches are always live.
+3. **`password=None` gets masked to `password=***`** — the system's content filter masks `password=None` in Python code, which breaks `load_pem_private_key(pem_data, None)`. Workaround: pass `None` positionally or use `**{}` unpacking.
 
 ## The Numbers
 
@@ -106,7 +101,7 @@ This script would run before OC starts, ensuring both patches are always live.
 | CPU | 1.467 cores | 0.6% (idle) |
 | maxConcurrent | 2 (static) | 6 (with worker pool) |
 | runTimeoutSeconds | 300 (static) | 300 (with stale detection) |
-| Tests | 0 | 140 (53 Python + 87 TS) |
+| Tests | 0 | 147 (53 Python + 94 TS) |
 | CI layers | 0 | 4 (unit → docker → staging → integration) |
 | Releases | 0 | 2 (v0.1.0, v0.2.0) |
 
