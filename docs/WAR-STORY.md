@@ -114,6 +114,12 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 - **Non-Blocking SSE Stream Serialization**: Verified that incoming Server-Sent Event (SSE) response chunks from OpenRouter endpoints offload serialization to worker pool worker threads (`worker-pool.js`), preventing main event loop starvation during streaming.
 - **OpenRouter Rate Limit & Stalled Subagent Resilience**: Verified that 429 rate limit stalls trigger graceful state transition (`running` → `stale` → `yielding` → `archived`), allowing subagents to checkpoint without blocking new spawns.
 
+### Phase 14: Automated Channel Override Model Sanitization
+
+- **SQL Schema Migration**: Added automatic `UPDATE sessions SET model = 'openrouter/' || model WHERE model LIKE 'anthropic/%'` migration on SQLite registry initialization.
+- **Runtime Model Sanitization**: Implemented `sanitizeModelString()` helper in `sqlite-accessor.ts` to intercept `getSession()` and `saveSession()`, converting any legacy direct `anthropic/*` channel overrides to `openrouter/` prefixed OpenRouter routes.
+- **Eliminated 401 Auth Errors**: Prevents legacy session channel overrides from calling direct Anthropic endpoints without an API key.
+
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
