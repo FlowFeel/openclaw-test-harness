@@ -9,6 +9,7 @@
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ tests/",
+    "postinstall": "patch-package",
     "gate": "npm run typecheck && npm run lint && npm run test"
   },
   "dependencies": {

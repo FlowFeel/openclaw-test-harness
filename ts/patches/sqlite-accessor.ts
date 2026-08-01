@@ -4,6 +4,14 @@ import * as path from "path";
 const dbPath = path.resolve(process.env.OPENCLAW_REGISTRY_PATH || "./registry.db");
 const db = new Database(dbPath);
 
+// Enable Write-Ahead Logging (WAL) and busy timeout to prevent production SQLite lock deadlocks
+try {
+  db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
+} catch {
+  // Ignore pragma errors if unsupported
+}
+
 // Initialize DB schema
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (

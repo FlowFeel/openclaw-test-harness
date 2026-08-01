@@ -82,18 +82,40 @@ function getPool() {
           free.busy = true;
           activeCount++;
           const id = Date.now() + Math.random();
+          let timer = null;
+
+          const cleanup = () => {
+            if (timer) clearTimeout(timer);
+            free.worker.off('message', handler_fn);
+            free.busy = false;
+            activeCount--;
+          };
+
           const handler_fn = (msg) => {
             if (msg.id === id) {
-              free.worker.off('message', handler_fn);
-              free.busy = false;
-              activeCount--;
+              cleanup();
               completedCount++;
               if (msg.ok) resolve(msg.data);
               else reject(new Error(msg.error));
             }
           };
+
+          // Task execution timeout (10s safety guard against worker hangs)
+          timer = setTimeout(() => {
+            cleanup();
+            failedCount++;
+            reject(new Error(`Worker execution timed out for handler: ${handler}`));
+          }, 10000);
+
           free.worker.on('message', handler_fn);
-          free.worker.postMessage({ id, handler, input });
+
+          try {
+            free.worker.postMessage({ id, handler, input });
+          } catch (postErr) {
+            cleanup();
+            failedCount++;
+            reject(postErr);
+          }
         } else {
           // All workers busy — fallback to inline
           try {

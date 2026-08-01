@@ -50,6 +50,18 @@ const rejectChildAdmission = (
   error: string,
 ): ChildAdmissionResult => ({ ok: false, governingCap, error });
 
+let cachedSqlite: any = null;
+function getSqliteAccessor() {
+  if (cachedSqlite === null) {
+    try {
+      cachedSqlite = require("./sqlite-accessor.js");
+    } catch {
+      cachedSqlite = false;
+    }
+  }
+  return cachedSqlite || null;
+}
+
 // ── Patched admission function ─────────────────────────────────
 
 export function resolveChildAdmission(params: ChildAdmissionParams): ChildAdmissionResult {
@@ -67,14 +79,15 @@ export function resolveChildAdmission(params: ChildAdmissionParams): ChildAdmiss
 
   if (globalActive === undefined || !timedOutSubagents) {
     try {
-      // Dynamic require/import fallback for environments with sqlite-accessor
-      const sqlite = require("./sqlite-accessor.js");
-      if (globalActive === undefined && typeof sqlite.countActiveSessions === "function") {
-        globalActive = sqlite.countActiveSessions();
-      }
-      if (!timedOutSubagents && typeof sqlite.getTimedOut === "function") {
-        const timeout = params.runTimeoutSeconds ?? 300;
-        timedOutSubagents = sqlite.getTimedOut(timeout);
+      const sqlite = getSqliteAccessor();
+      if (sqlite) {
+        if (globalActive === undefined && typeof sqlite.countActiveSessions === "function") {
+          globalActive = sqlite.countActiveSessions();
+        }
+        if (!timedOutSubagents && typeof sqlite.getTimedOut === "function") {
+          const timeout = params.runTimeoutSeconds ?? 300;
+          timedOutSubagents = sqlite.getTimedOut(timeout);
+        }
       }
     } catch {
       // Ignore if sqlite-accessor or better-sqlite3 is not present
