@@ -134,6 +134,14 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 - **Reuse-vs-Network Trade-off**: The sidecar path disables `withReuse()` and sets `withAutoRemove(true)`. Verified in the testcontainers source that `reuseContainer` only *restarts* a stopped container and does **not** re-connect networks — so a reused OC container would keep stale attachments from the previous run's (now-removed) network and never reach the new sidecar. The default no-sidecar path keeps its ~900ms reuse optimization unchanged; the sidecar path pays a ~360ms fresh create per run.
 - **Strip-Types Constraint**: The sidecar avoids TypeScript parameter properties (`private readonly port`) — unsupported by `--experimental-strip-types` strip-only mode — so it loads in a bare `node:22-bookworm-slim` image with no build step, same as `child-admission.ts`.
 
+### Phase 17: Threading & Process Isolation (Era 3 opens)
+
+The harness architectural review surfaced two remaining structural anti-patterns in the multiagent/multitopic path that the prior eras hadn't touched: the **worker god function** (one string-eval'd dispatch blob holding every handler, duplicated between the worker body and the inline fallback) and the **god process** (one OC process + one global singleton pool serving all topics/agents, with `SubagentActor` self-described as "a lightweight actor-like wrapper" holding only a state string — owning no real process lifecycle). We opened `feat/multiagent-process-isolation` and ticketed a 7-ticket, 4-phase roadmap (`ISSUES.md` #11–#17), each grounded in file:line evidence.
+
+- **#11 Handler-Module Registry** ✅ — Killed the worker god function. Handler logic lives exactly once in a `handlers` registry map of pure, closure-free functions; `dispatch(handler, input)` is a generic `handlers[handler](input)` lookup with no handler-name literals. The worker body is generic scaffolding with the registry serialized in via `Function.prototype.toString` (`Object.entries(handlers).map(([n,fn]) => fn.toString())` + `dispatch.toString()`), so the worker runs the exact same handler logic as the inline path; the inline fallback calls `dispatch()` directly. This fixed drift the duplication had already caused: the inline fallback was **missing `json.parse` entirely** (silently returned null), `measure.size` used `.reduce()` inline vs a `for`-loop in the worker, and unknown handlers rejected in the worker but resolved null inline. `worker-pool-registry.spec.ts` (18 specs) proves worker `execute` === inline `dispatch` for every built-in handler and conformance with `handlers.ts`.
+- **#15 SubagentSupervisor Protocol** 🟡 — Scaffolded the god-process fix foundation, matching the repo's Protocol-first pattern. `SubagentSupervisor` Protocol (`supervisor.schema.ts`) + `MockSupervisor` (`mock-supervisor.ts`, in-process, deterministic) bind the pure `transitionSubagent` table to supervisor lifecycle events. The supervisor never invents a transition — it delegates every state change to the pure table. Restart backoff is computed from the injected `Clock` (#7); restart terminates the active run then creates a fresh `created → dispatched` actor with `retryCount+1` (respecting that the table forbids `failed → dispatch`). 9 specs verify lifecycle binding, invalid-transition no-ops, deterministic timestamps, backoff + `maxRetries`, and terminal reap. `WorkerSupervisor` (worker_threads) and an OC-patch `ProcessSupervisor` (child_process) are the #15 follow-ons.
+- **Roadmap** 📋 — #12 (real Piscina — `piscina-pool.ts` admits "run inline"), #13 (worker crash isolation — only `on('message')` today; a crashed worker stays in the rotation until the 10s timeout), #14 (per-topic fairness — `getPool()` is a module singleton), #16 (per-topic actor isolation — main process becomes a thin router), #17 (live `ProcessTelemetry` feeding admission).
+
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
@@ -174,7 +182,7 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 | CPU | 1.467 cores | 0.6% (idle) |
 | maxConcurrent | 2 (static) | 6 (with worker pool) |
 | runTimeoutSeconds | 300 (static) | 300 (with stale detection) |
-| Tests | 0 | 170 (25 Python + 145 TS) |
+| Tests | 0 | 197 (25 Python + 172 TS) |
 | CI layers | 0 | 4 (unit → docker → staging → integration) |
 | Releases | 0 | 2 (v0.1.0, v0.2.0) |
 
@@ -232,7 +240,16 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 9. ✅ Programmatic V8 heap invariant assertions (`assertV8HeapStability`)
 10. ✅ Worker fault injection & recovery (handler crashes, IPC errors, `ERR_WORKER_OUT_OF_MEMORY`)
 
-All 10 architectural and DFT tickets are **fully completed, tested, and verified** across all layers of the test pyramid (170 tests: 25 Python + 145 TS).
+7 Threading & Process Isolation tickets in `ISSUES.md` (Era 3, on `feat/multiagent-process-isolation`):
+11. ✅ Handler-module registry replaces the eval-blob dispatch (god function killed)
+12. 📋 Real Piscina integration (prod pool actually uses threads)
+13. 📋 Worker crash isolation & respawn (fix dead-slot degradation)
+14. 📋 Per-topic fairness & backpressure in the worker pool
+15. 🟡 SubagentSupervisor Protocol (scaffolded; `WorkerSupervisor`/`ProcessSupervisor` to follow)
+16. 📋 Per-topic actor isolation (main process becomes a thin router)
+17. 📋 Live process telemetry feeding admission
+
+All 11 completed tickets are **fully tested and verified** across all layers of the test pyramid (197 tests: 25 Python + 172 TS). The remaining 6 Era 3 tickets are planned on the active `feat/multiagent-process-isolation` branch.
 
 ---
 
