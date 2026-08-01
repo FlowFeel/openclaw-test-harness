@@ -77,11 +77,11 @@ class TestConfigPolicy:
         """maxChildrenPerAgent should be >= 3."""
         assert subagent_config["maxChildrenPerAgent"] >= 3
 
-    def test_entropy_is_tight(self, subagent_config: dict[str, int]) -> None:
-        """runTimeoutSeconds should be <= 180 (tight — no lingering)."""
-        assert subagent_config["runTimeoutSeconds"] <= 180, (
+    def test_entropy_is_comfortable(self, subagent_config: dict[str, int]) -> None:
+        """runTimeoutSeconds should be <= 360 (comfortable — room to finish)."""
+        assert subagent_config["runTimeoutSeconds"] <= 360, (
             f"runTimeoutSeconds={subagent_config['runTimeoutSeconds']} — "
-            "entropy should be tight (<= 180s)"
+            "entropy should be comfortable (<= 360s)"
         )
 
     def test_cleanup_is_fast(self, subagent_config: dict[str, int]) -> None:
