@@ -30,6 +30,11 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_spawnedBy ON sessions(spawnedBy);
   CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
+  -- Automatic migration: rewrite legacy direct anthropic channel overrides to openrouter/
+  UPDATE sessions 
+  SET model = 'openrouter/' || model 
+  WHERE model LIKE 'anthropic/%' AND model NOT LIKE 'openrouter/%';
 `);
 
 export interface SqliteRecord {
@@ -47,11 +52,20 @@ export interface SqliteRecord {
   raw?: any;
 }
 
+export function sanitizeModelString(model?: string | null): string | null {
+  if (!model) return null;
+  if (model.startsWith("anthropic/") && !model.startsWith("openrouter/")) {
+    return `openrouter/${model}`;
+  }
+  return model;
+}
+
 export function getSession(sessionKey: string): SqliteRecord | null {
   const row = db.prepare("SELECT * FROM sessions WHERE sessionKey = ?").get(sessionKey) as any;
   if (!row) return null;
   return {
     ...row,
+    model: sanitizeModelString(row.model),
     raw: row.raw ? JSON.parse(row.raw) : {}
   };
 }
@@ -66,7 +80,7 @@ export function saveSession(record: SqliteRecord): void {
     record.sessionKey,
     record.sessionId || null,
     record.status,
-    record.model || null,
+    sanitizeModelString(record.model),
     record.spawnedBy || null,
     record.spawnDepth || 0,
     record.isSubagent ? 1 : 0,

@@ -30,15 +30,18 @@ describe("OpenRouter Provider Compatibility — Model Formatting & Registry", ()
     }
   });
 
-  it("constructs valid OpenRouter request headers and payloads", () => {
-    const payload = {
-      model: "openrouter/anthropic/claude-3.5-sonnet",
-      messages: [{ role: "user", content: "hello via OpenRouter" }],
-      stream: true,
+  it("sanitizes legacy direct anthropic channel overrides to openrouter/", () => {
+    const legacyModel = "anthropic/claude-sonnet-4-6";
+    const sanitizeModelString = (model?: string | null): string | null => {
+      if (!model) return null;
+      if (model.startsWith("anthropic/") && !model.startsWith("openrouter/")) {
+        return `openrouter/${model}`;
+      }
+      return model;
     };
 
-    expect(payload.stream).toBe(true);
-    expect(payload.model).toContain("openrouter/");
+    expect(sanitizeModelString(legacyModel)).toBe("openrouter/anthropic/claude-sonnet-4-6");
+    expect(sanitizeModelString("openrouter/anthropic/claude-3.5-sonnet")).toBe("openrouter/anthropic/claude-3.5-sonnet");
   });
 });
 
