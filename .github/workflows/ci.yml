@@ -126,6 +126,10 @@ jobs:
           npx vitest run tests/spec/adaptive.spec.ts --reporter=verbose
       - name: Run BDD scenarios end-to-end
         working-directory: ts
+        env:
+          # CI gets a fresh container every run (no reuse) so Ryuk cleans up and
+          # there's no cross-run state leakage. Dev runs reuse by default.
+          TESTCONTAINERS_REUSE_ENABLE: "false"
         run: |
           npx vitest run tests/integration/ tests/e2e/ --reporter=verbose
       - name: Verify patch against OC source

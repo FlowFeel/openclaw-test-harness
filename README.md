@@ -152,35 +152,35 @@ The pyramid has three layers. Each layer tests the same logic against a differen
 
 **Conformance:** Pure functions, immutable dataclasses, CheckResult pattern, Protocol interfaces. Follows `python-axiomatics` skill standards — `from __future__ import annotations`, strict typing, Google docstrings, `ruff` lint, `pytest` with coverage.
 
-### Layer 2: Integration Tests (`tests/integration/`) — Planned
+### Layer 2: Integration Tests (`tests/integration/`) — Powered by Testcontainers
 
-**What:** Abstractions against a real OC container with our patches applied.
+**What:** Real-time verification of code modifications and patches applied directly to a running OpenClaw instance.
 
-**How:** Docker container running OC at version `2026.6.8` (commit `f47542c5`) with patch files applied. Tests run `resolve_admission()` against the container's real session store — not a mock, not a memory dict, but actual `sessions.json` state.
+**How:** Instead of using static, external Docker Compose configurations that are difficult to manage, configure, and teardown across test suites, this project utilizes **Testcontainers**. Testcontainers is an open-source library that allows us to spin up, configure, orchestrate, and stop Docker containers directly from our test code (`Vitest` or `pytest`).
 
-**What it will prove:**
-- Our `maxConcurrent` guard correctly counts active subagents from OC's session store
-- Our `runTimeoutSeconds` guard correctly detects timed-out subagents in real session data
-- The lifecycle state machine correctly derives state from OC's raw status strings
-- Patches to `child-admission.ts` don't break OC's existing spawn admission behavior
+**The Testcontainers Integration Workflow:**
+1. **Dynamic Build & Setup**: When the integration test suite starts, the test runner invokes `new GenericContainer("node:22-bookworm-slim")`.
+2. **On-the-Fly Patching**: The test runner programmatically mounts or copies our modified source files (such as `patches/child-admission.ts`) directly into the container filesystem, replacing OpenClaw's internal `src/agents/child-admission.ts`.
+3. **Isolation and Parallelism**: Testcontainers exposes the container's internal API ports (e.g., port `3000`) and binds them to ephemeral ports on the host system (e.g., `http://localhost:32768`). This ensures multiple tests can run concurrently on the same host or CI runner without port collisions.
+4. **Automatic Garbage Collection**: The Ryuk sidecar container runs alongside our test containers. If a test runner crashes, times out, or gets killed, Ryuk ensures all orphaned containers, volumes, and networks are completely destroyed, preventing environment pollution.
 
-**Container setup:** A Dockerfile that:
-1. Starts from the OC npm package at version `2026.6.8`
-2. Applies our patch files (`patches/child-admission.timeout.patch`, etc.)
-3. Runs OC with a test configuration
-4. Exposes the session store for test assertions
+**What it proves:**
+- Our `maxConcurrent` guard correctly counts active subagents from OC's session store.
+- Our `runTimeoutSeconds` guard correctly detects timed-out subagents in real session data.
+- The lifecycle state machine correctly derives state from OC's raw status strings.
+- Patches to `child-admission.ts` don't break OC's existing spawn admission behavior.
 
-### Layer 3: E2E Tests (`tests/e2e/`) — Planned
+### Layer 3: E2E Tests (`tests/e2e/`) — Powered by Testcontainers
 
 **What:** Full spawn → timeout → archive → cleanup cycle in a container.
 
-**How:** Spawn a real subagent in the test container, let it exceed `runTimeoutSeconds`, verify the heartbeat sweep detects and archives it, verify the registry is cleaned up.
+**How:** We use Testcontainers to spin up the full OpenClaw container topology (e.g. OpenClaw + SQLite registry sync daemon). The test runner sends API calls to the dynamic OpenClaw endpoints to trigger actions (such as spawning a subagent), manipulates virtual time, and verifies the end-to-end flow.
 
 **What it will prove:**
-- The entire pipeline works end-to-end: config → spawn → run → timeout → sweep → archive → registry cleanup
-- The heartbeat correctly calls `sweep_timeouts()` and `sweep_archives()`
-- `sessions.json` is correctly pruned after archival
-- SQLite registry stays in sync with JSON
+- The entire pipeline works end-to-end: config → spawn → run → timeout → sweep → archive → registry cleanup.
+- The heartbeat correctly calls `sweep_timeouts()` and `sweep_archives()`.
+- `sessions.json` is correctly pruned after archival.
+- SQLite registry stays in sync with JSON.
 
 ---
 
