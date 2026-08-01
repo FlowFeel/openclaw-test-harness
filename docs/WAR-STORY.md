@@ -108,6 +108,12 @@ We didn't try to fix OC upstream. We ran our own instance with dev privileges. T
 - **Module Require Caching**: Cached `sqlite-accessor.js` import at module scope in `child-admission.ts`.
 - **Automated Native Dependency Setup**: Added `"postinstall": "patch-package"` to `package.json` to ensure native compilation and patch application during bare-metal deployment.
 
+### Phase 13: OpenRouter Provider Compatibility & Stream Offloading
+
+- **OpenRouter Model Format Validation**: Verified seamless compatibility for OpenRouter model strings (`openrouter/anthropic/claude-3.5-sonnet`, `openrouter/deepseek/deepseek-r1`, `openrouter/@preset/glm-5-2`) stored in SQLite text fields.
+- **Non-Blocking SSE Stream Serialization**: Verified that incoming Server-Sent Event (SSE) response chunks from OpenRouter endpoints offload serialization to worker pool worker threads (`worker-pool.js`), preventing main event loop starvation during streaming.
+- **OpenRouter Rate Limit & Stalled Subagent Resilience**: Verified that 429 rate limit stalls trigger graceful state transition (`running` → `stale` → `yielding` → `archived`), allowing subagents to checkpoint without blocking new spawns.
+
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
