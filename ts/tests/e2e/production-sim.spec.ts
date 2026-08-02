@@ -103,6 +103,17 @@ console.log(JSON.stringify({ status: health.status, p99: health.eventLoopP99Ms }
 `,
 };
 
+
+// Extract the last line that looks like JSON (starts with {)
+function extractJson(output: string): string {
+  const lines = output.trim().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (line.startsWith("{")) return line;
+  }
+  return lines[lines.length - 1] ?? "{}";
+}
+
 describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
   let container: StartedTestContainer;
   let network: StartedNetwork;
@@ -115,9 +126,9 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
     // Write test scripts to temp files
     const scriptFiles: Array<{ source: string; target: string }> = [];
     for (const [name, content] of Object.entries(TEST_SCRIPTS)) {
-      const scriptPath = path.resolve(__dirname, `test-${name}.mts`);
+      const scriptPath = path.resolve(__dirname, `test-${name}.ts`);
       fs.writeFileSync(scriptPath, content);
-      scriptFiles.push({ source: scriptPath, target: `/app/test-${name}.mts` });
+      scriptFiles.push({ source: scriptPath, target: `/app/test-${name}.ts` });
     }
 
     network = await new Network().start();
@@ -144,7 +155,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
   afterAll(async () => {
     // Cleanup temp scripts
     for (const name of Object.keys(TEST_SCRIPTS)) {
-      try { fs.unlinkSync(path.resolve(__dirname, `test-${name}.mts`)); } catch { /* */ }
+      try { fs.unlinkSync(path.resolve(__dirname, `test-${name}.ts`)); } catch { /* */ }
     }
     if (container) await container.stop();
     if (network) await network.stop();
@@ -177,7 +188,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
        console.log(JSON.stringify({ id: m.id, tools: m.contracts.tools, onStartup: m.activation.onStartup }))`,
     ]);
     expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.output.trim().split("\n").pop()!);
+    const parsed = JSON.parse(extractJson(result.output));
     expect(parsed.id).toBe("oc-session-guard");
     expect(parsed.tools).toContain("session_health");
     expect(parsed.tools).toContain("session_cleanup");
@@ -191,7 +202,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
        console.log(JSON.stringify({ id: m.id, tools: m.contracts.tools }))`,
     ]);
     expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.output.trim().split("\n").pop()!);
+    const parsed = JSON.parse(extractJson(result.output));
     expect(parsed.id).toBe("oc-subagent-watchdog");
     expect(parsed.tools).toContain("subagent_health");
   });
@@ -203,17 +214,17 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
        console.log(JSON.stringify({ id: m.id, tools: m.contracts.tools }))`,
     ]);
     expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.output.trim().split("\n").pop()!);
+    const parsed = JSON.parse(extractJson(result.output));
     expect(parsed.id).toBe("oc-event-loop-monitor");
     expect(parsed.tools).toContain("event_loop_health");
   });
 
   it("session-cleanup pipeline runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-cleanup.mts",
+      "node", "--experimental-strip-types", "/app/test-cleanup.ts",
     ]);
     expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.output.trim().split("\n").pop()!);
+    const parsed = JSON.parse(extractJson(result.output));
     expect(parsed.purgedCount).toBe(1);
     expect(parsed.strippedFieldCount).toBe(1);
     expect(parsed.reductionPercent).toBeGreaterThan(0);
@@ -221,20 +232,20 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
 
   it("subagent-tracker runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-tracker.mts",
+      "node", "--experimental-strip-types", "/app/test-tracker.ts",
     ]);
     expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.output.trim().split("\n").pop()!);
+    const parsed = JSON.parse(extractJson(result.output));
     expect(parsed.active).toBe(1);
     expect(parsed.canSpawnMore).toBe(true);
   });
 
   it("telemetry-logic runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-telemetry.mts",
+      "node", "--experimental-strip-types", "/app/test-telemetry.ts",
     ]);
     expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.output.trim().split("\n").pop()!);
+    const parsed = JSON.parse(extractJson(result.output));
     expect(parsed.status).toBe("healthy");
     expect(parsed.p99).toBe(5);
   });
@@ -251,50 +262,55 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
   // These are conditional — if the gateway can't start (networking, config),
   // they skip rather than fail. The structural tests above still pass.
 
-  it("OC gateway can start with plugin config (if networking allows)", async () => {
-    // Create a minimal config
-    const config = {
-      agents: { defaults: { model: { primary: "openrouter/@preset/glm-5-2" } } },
-      models: {
-        providers: {
-          openrouter: {
-            baseUrl: "http://localhost:9999/v1",
-            apiKey: "test",
-            api: "openai-completions",
+  it(
+    "OC gateway can start with plugin config (if networking allows)",
+    async () => {
+      // Create a minimal config
+      const config = {
+        agents: { defaults: { model: { primary: "openrouter/@preset/glm-5-2" } } },
+        models: {
+          providers: {
+            openrouter: {
+              baseUrl: "http://localhost:9999/v1",
+              apiKey: "test",
+              api: "openai-completions",
+            },
           },
         },
-      },
-      plugins: {
-        entries: {
-          "oc-session-guard": { enabled: true, config: {} },
-          "oc-subagent-watchdog": { enabled: true, config: {} },
-          "oc-event-loop-monitor": { enabled: true, config: {} },
+        plugins: {
+          entries: {
+            "oc-session-guard": { enabled: true, config: {} },
+            "oc-subagent-watchdog": { enabled: true, config: {} },
+            "oc-event-loop-monitor": { enabled: true, config: {} },
+          },
+          allow: ["oc-session-guard", "oc-subagent-watchdog", "oc-event-loop-monitor"],
         },
-        allow: ["oc-session-guard", "oc-subagent-watchdog", "oc-event-loop-monitor"],
-      },
-    };
+      };
 
-    // Write config to container
-    const configPath = path.resolve(__dirname, "test-oc-config.json");
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    await container.exec(["sh", "-c", `cat > /app/workspace/openclaw.json << 'EOF'\n${JSON.stringify(config, null, 2)}\nEOF`]);
+      // Write config to container
+      await container.exec([
+        "sh", "-c",
+        `cat > /app/workspace/openclaw.json << 'EOF'\n${JSON.stringify(config, null, 2)}\nEOF`,
+      ]);
 
-    // Try to start OC — this may fail if the mock sidecar isn't reachable
-    const startResult = await container.exec([
-      "sh", "-c",
-      `timeout 15 node /app/node_modules/openclaw/openclaw.mjs gateway start --config /app/workspace/openclaw.json > /tmp/oc.log 2>&1 & sleep 10 && curl -s http://127.0.0.1:8787/health || echo "GATEWAY_NOT_READY"`,
-    ]);
+      // Try to start OC — this may fail if the mock sidecar isn't reachable
+      const startResult = await container.exec([
+        "sh", "-c",
+        `timeout 15 node /app/node_modules/openclaw/openclaw.mjs gateway start --config /app/workspace/openclaw.json > /tmp/oc.log 2>&1 & sleep 10 && curl -s http://127.0.0.1:8787/health || echo "GATEWAY_NOT_READY"`,
+      ]);
 
-    if (startResult.output.includes("GATEWAY_NOT_READY")) {
-      console.log("[prod-sim] OC gateway did not start (expected without real model provider)");
-      ocStarted = false;
-    } else {
-      ocStarted = startResult.output.includes('"ok"');
-    }
+      if (startResult.output.includes("GATEWAY_NOT_READY")) {
+        console.log("[prod-sim] OC gateway did not start (expected without real model provider)");
+        ocStarted = false;
+      } else {
+        ocStarted = startResult.output.includes('"ok"');
+      }
 
-    // This test passes either way — the structural tests above are the real gate
-    expect(true).toBe(true);
-  });
+      // This test passes either way — the structural tests above are the real gate
+      expect(true).toBe(true);
+    },
+    30000,
+  );
 
   it("OC plugin list works (if gateway started)", async () => {
     if (!ocStarted) {
