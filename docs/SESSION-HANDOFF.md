@@ -17,8 +17,8 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 ### Active branch
 
 - **Branch:** `feat/multiagent-process-isolation`
-- **HEAD:** `2fa92c5` — `feat(topic-router): #16 per-topic actor isolation — TDD pure seam + TopicRouter`
-- **Ahead of `main` by:** 11 commits; 2 behind. The feature commits: #13 (`a40294e`), the handoff + expansion (`5a08949`/`182360f`), Option D literate-compaction (`35167d2`), #12 real Piscina (`201e4d0`), the #12 handoff (`2a20c00`), #15 real Worker/Process supervisors (`4427d3b`), the #15 handoff (`8a45523`), #14 FairPool (`2aa8953`), the #14 handoff (`2e1da55`), and #16 TopicRouter (`2fa92c5`). **None of #13 / #12 / #15 / #14 / #16 / Option D are on `main` yet** — they await PR #3.
+- **HEAD:** `6ad8598` — `feat(pi): literate-compaction uses only the live session model`
+- **Ahead of `main` by:** 16 commits; 2 behind. Era 3 is **complete** — all of #11–#17 are ✅ Done. The feature commits: #13 (`a40294e`), the handoff + expansion (`5a08949`/`182360f`), Option D literate-compaction (`35167d2`), #12 real Piscina (`201e4d0`), the #12 handoff (`2a20c00`), #15 real Worker/Process supervisors (`4427d3b`), the #15 handoff (`8a45523`), #14 FairPool (`2aa8953`), the #14 handoff (`2e1da55`), #16 TopicRouter (`2fa92c5`), the #16 handoff (`f1dd0b1`), the apply() no-op fix (`c888917`), the GHA flake fix + regression (`dabd5ba`), #17 live telemetry (`57e2951`), the literate-compaction session-model simplification (`6ad8598`). **None of these are on `main` yet** — they await PR #3.
 
 ### `main` HEAD
 
@@ -28,7 +28,7 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 
 - **PR #1** (merged to `main`, `15651f0`): Era 3 roadmap (`ISSUES.md` #11–#17) + #11 handler registry + #15 supervisor scaffold + README three-era rewrite + WAR-STORY Phase 17.
 - **PR #2** (merged to `main`, `99a6660`): the Ship Patches CI fix — see the "Ship Patches CI" section below.
-- **PR #3** (not yet opened): #13 crash isolation + #12 real Piscina + #15 real Worker/Process supervisors + #14 FairPool + #16 TopicRouter + Option D literate-compaction extension. All on the feature branch, green, awaiting a PR.
+- **PR #3** (not yet opened): the COMPLETE Era 3 — #13 crash isolation + #12 real Piscina + #15 real Worker/Process supervisors + #14 FairPool + #16 TopicRouter + #17 live telemetry + Option D literate-compaction + the GHA flake fix. All on the feature branch, green, awaiting a PR.
 
 ### Remote
 
@@ -42,14 +42,14 @@ The suite is green at HEAD across all four layers. These counts are the single m
 
 ### Total counts
 
-- **Total: 287 tests, all green.**
+- **Total: 303 tests, all green.**
 - **Python: 25** — `uv run pytest tests/unit tests/integration` (~0.2s).
-- **TypeScript: 262** — `cd ts && ./node_modules/.bin/vitest run` (~2–7s; E2E needs Docker). 245 without E2E (`--exclude '**/e2e/**'`, ~2.7s).
+- **TypeScript: 278** — `cd ts && ./node_modules/.bin/vitest run` (~2–7s; E2E needs Docker). 261 without E2E (`--exclude '**/e2e/**'`, ~2.9s). Stable: 261/261 × 10 consecutive runs, zero flakes.
 
 ### TypeScript breakdown
 
 - **Spec (unit): 112** — pure transition tables, context reducers, worker-pool protocols, deterministic clocks, V8 heap invariants, the `SubagentSupervisor` Protocol.
-- **Integration: 112** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite, the #13 crash-isolation suite, the #12 real-Piscina integration suite, the #15 real-supervisor suites (WorkerSupervisor + ProcessSupervisor — 9 + 9), the #14 FairPool suite (per-topic fairness, backpressure, Protocol compliance — 14 specs), and the #16 TopicRouter suite (per-topic isolation, crash containment, attribution, lifecycle — 13 specs).
+- **Integration: 127** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite (+2 GHA-flake regression specs), the #13 crash-isolation suite, the #12 real-Piscina integration suite, the #15 real-supervisor suites (WorkerSupervisor + ProcessSupervisor — 9 + 9), the #14 FairPool suite (14 specs), the #16 TopicRouter suite (13 specs), and the #17 live-telemetry suite (real readings → admission — 5 specs).
 - **E2E (Testcontainers, Docker-gated): 17** — patched-OC admission checks, the OpenRouter mock sidecar as a real long-lived container, and the sidecar wired into the OC container for the offline `admit spawn → model call` flow.
 
 ### Typecheck
@@ -72,7 +72,7 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 | 14 | Per-topic fairness & backpressure | ✅ Done | FairPool round-robins; per-topic backpressure. |
 | 15 | SubagentSupervisor Protocol | ✅ Done | Mock + Worker + Process impls; real lifecycle bound. |
 | 16 | Per-topic actor isolation | ✅ Done | TopicRouter; crash contained per topic. |
-| 17 | Live telemetry → admission | 📋 Planned | Depends on #15, #16. |
+| 17 | Live telemetry → admission | ✅ Done | TelemetryCollector; real readings → SystemHealth. |
 
 ### #11 — Handler-Module Registry (✅ Done)
 
@@ -125,9 +125,24 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 - **What's scaffolded vs. planned:** The Protocol + `MockSupervisor` + 9 specs are done (the testable foundation). `WorkerSupervisor` (worker_threads) and an OC-patch `ProcessSupervisor` (child_process) are the #15 follow-ons — the real process-binding implementations.
 - **Proof:** `ts/tests/spec/supervisor.spec.ts` (9 specs): lifecycle binding, invalid-transition no-ops, deterministic event timestamps, restart backoff + `maxRetries`, terminal reap.
 
+### #17 — Live Telemetry → Admission (✅ Done)
+
+- **What:** A `ProcessTelemetry` seam (`ts/src/features/telemetry/`). The pure aggregation (`telemetry-logic.ts`: `aggregateSystemHealth(readings, active, stale) → SystemHealth`) takes the MAX across actors for eventLoopP99/utilization/cpuRatio (worst-actor pressure) and the SUM for usedHeapSize (additive); counts pass through verbatim. The I/O wiring (`telemetry-collector.ts`: `TelemetryCollector`) reads REAL signals — `perf_hooks.monitorEventLoopDelay` (percentile(99) → p99 ms), `performance.eventLoopUtilization()` (0–1), `v8.getHeapStatistics().used_heap_size` (#9's approach), `process.cpuUsage` (delta-style cpuRatio) — and feeds them through the pure aggregation into the `SystemHealth` the admission layer (`evaluateAdaptiveSpawn`) reads.
+- **Why it mattered:** `evaluateAdaptiveSpawn` consumed a `SystemHealth` snapshot, but in tests those values were hardcoded — nothing populated them from real processes. Adaptive admission was exercised against synthetic health, never real telemetry.
+- **The seam:** `aggregateSystemHealth` is pure (immutable `ProcessTelemetry[]` in, `SystemHealth` out). `TelemetryCollector` is the I/O wiring — the only source of real `SystemHealth`. The existing adaptive spec (26 specs, injected mock health) is untouched; the collector is a NEW source, not a change to the pure admission logic.
+- **The deterministic claim:** Under a 50ms busy loop, a `setTimeout(0)` is deterministically ~50ms late — the histogram records the delay, so p99 > 0. With `eventLoopP99Threshold=0` and activeSubagents ≥ softLimit, `evaluateAdaptiveSpawn` rejects with a reason containing the REAL p99 value. `usedHeapSize > 0` on every reading (the process always has a heap — proof the reading is REAL, not a fixture). The decision's `healthSnapshot` === the aggregated real health. Per-actor attribution: `collect(actorId)` carries the actorId.
+- **Proof:** `ts/tests/spec/telemetry-logic.spec.ts` (8 pure specs) + `ts/tests/integration/telemetry.spec.ts` (5 integration specs).
+
+### GHA TS Flake Fix (✅ Done)
+
+- **What:** `workerSource` moved from module-scope into `getPool()` in `patches/worker-pool.js`, so it is built from the CURRENT `handlers` at pool-init time (first `getPool()` call), not frozen at module-load. A regression test (`worker-pool-registry.spec.ts`, +2 specs) loads a fresh patch instance, adds a handler before `getPool()`, and asserts it reaches the worker (not 'Unknown handler').
+- **Why it mattered:** The GHA TS job flaked on `worker-crash-isolation.spec.ts` with 'Unknown handler: test.block'. The bug was DETERMINISTIC, not stochastic — `workerSource` was built at module-load from the initial `handlers`, so handlers added later (like `test.block`) never reached the workers. The test passed locally only because it hit the inline fallback; under GHA scheduling the worker path was taken, exposing the bug.
+- **The methodology (reproduce GHA bugs locally):** (1) Diagnose: the 'flake' was a deterministic bug hidden by a fallback path. (2) Reproduce: a debug script forcing the worker path with a late-added handler. (3) Encode: a regression test that reproduces the GHA condition deterministically. (4) Verify bidirectionally: RED against the buggy version, GREEN against the fixed. No more push-and-pray on CI.
+- **Proof:** `ts/tests/integration/worker-pool-registry.spec.ts` (+2 GHA-flake regression specs). Stress: 261/261 × 10 consecutive full-suite runs, zero flakes.
+
 ### Planned tickets (brief)
 
-- **#17 Live telemetry → admission** — `ProcessTelemetry` Protocol populates `SystemHealth` from real `monitorEventLoopDelay` / `captureV8Snapshot` readings; admission reacts to real pressure, not fixtures. Builds on #15/#16. (#14's `backpressure(topic)` and #16's `topicStats()`/`crashContainment()` are the per-topic signals that plug in here.)
+- **None.** Era 3 (#11–#17) is complete. The only remaining step is PR #3 to ship everything to `main`.
 
 ---
 
@@ -244,13 +259,10 @@ These building blocks are already merged to `main` and are depended on by Era 3 
 
 When resuming, start here.
 
-### 1. #17 — Live telemetry → admission
+### 1. PR #3 — ship the complete Era 3 to `main`
 
-- `ProcessTelemetry` Protocol feeds `SystemHealth` from real `monitorEventLoopDelay`/heap. Depends on #15/#16 (both ✅ Done). #14's `backpressure(topic)` and #16's `topicStats()`/`crashContainment()` are the per-topic signals that plug in.
-
-### 2. PR #3 — ship #13 + #12 + #15 + #14 + #16 + Option D to `main`
-
-- Open a PR from `feat/multiagent-process-isolation` → `main`. On green main CI, `Ship Patches` auto-runs and ships a content-hash-tagged release with all patch assets. No manual release step.
+- Open a PR from `feat/multiagent-process-isolation` → `main` with all 16 feature commits: #13, #12, #15, #14, #16, #17, Option D, the apply() no-op fix, the GHA flake fix + regression, the literate-compaction session-model simplification. On green main CI, `Ship Patches` auto-runs and ships a content-hash-tagged release with all patch assets. No manual release step.
+- **Before opening:** rebase onto `main` (2 commits behind — the Ship Patches CI fix `99a6660` + the PR #1 merge `15651f0`), resolve any conflicts, confirm tsc + full suite green post-rebase.
 
 ---
 
