@@ -36,16 +36,27 @@ jobs:
           if [ -z "$CHANGES" ]; then
             echo "No patch changes since $LAST_TAG"
             echo "should_ship=false" >> $GITHUB_OUTPUT
-          else
-            echo "Patch changes detected:"
-            echo "$CHANGES"
-            echo "should_ship=true" >> $GITHUB_OUTPUT
-            # Generate version: patch count + OC version
-            PATCH_COUNT=$(ls ts/patches/*.ts 2>/dev/null | wc -l)
-            OC_VERSION="2026.6.8"
-            NEW_TAG="v0.${PATCH_COUNT}.0-oc-${OC_VERSION}"
-            echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+            exit 0
           fi
+
+          echo "Patch changes detected:"
+          echo "$CHANGES"
+          echo "should_ship=true" >> $GITHUB_OUTPUT
+
+          # Version from a content hash of ALL patch files (source .ts/.js AND
+          # derived .patch). Any patch content change -> new hash -> new tag.
+          # This replaces the old count-based scheme (PATCH_COUNT=$(ls *.ts))
+          # which was static: it only counted .ts files, never counted the
+          # worker-pool.js patch, and so every run after v0.2.0 recomputed the
+          # same tag and failed with HTTP 422 "tag_name already exists".
+          # Same pattern as the testcontainers reuse hash (patch sha in a label).
+          PATCH_SHA=$(cat ts/patches/* 2>/dev/null | sha256sum | cut -c1-12)
+          PATCH_COUNT=$(ls ts/patches/* 2>/dev/null | wc -l | tr -d ' ')
+          OC_VERSION="2026.6.8"
+          NEW_TAG="v0.${PATCH_COUNT}.${PATCH_SHA}-oc-${OC_VERSION}"
+          echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+          echo "patch_sha=${PATCH_SHA}" >> $GITHUB_OUTPUT
+          echo "Computed tag: $NEW_TAG"
 
       - name: Set up Node.js
         if: steps.check.outputs.should_ship == 'true'
@@ -67,10 +78,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.check.outputs.new_tag }}"
+
+          # Idempotent: if a release with this content-hash tag already exists
+          # (e.g. a re-run of CI for the same patch state), skip instead of
+          # failing with HTTP 422. Different patch content -> different hash
+          # -> different tag -> ships a new release.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — skipping (idempotent)"
+            exit 0
+          fi
+
           echo "Creating release $TAG"
 
           # Generate release notes from commits
           NOTES=$(git log --oneline --format="- %s" $(git describe --tags --abbrev=0)..HEAD -- ts/patches/ 2>/dev/null | head -20)
+
+          # Build the asset list for the notes (uploaded below)
+          ASSET_LIST=$(ls ts/patches/* 2>/dev/null | xargs -n1 basename | sed 's/^/- /')
 
           # Create release with assets
           gh release create "$TAG" \
@@ -78,6 +102,7 @@ jobs:
             --notes "## Patches shipped automatically from CI
 
           **Patches against:** OpenClaw 2026.6.8 (commit f47542c5)
+          **Patch content sha:** ${{ steps.check.outputs.patch_sha }}
 
           ### Commits in this release
           $NOTES
@@ -90,18 +115,14 @@ jobs:
           - Staging integration
 
           ### Assets
-          - child-admission.ts — drop-in replacement file
-          - child-admission.patch — git diff patch" \
+          $ASSET_LIST" \
             --prerelease
 
-          # Upload patch assets
-          for f in ts/patches/*.ts; do
-            name=$(basename "$f")
-            gh release upload "$TAG" "$f" --clobber
-            echo "Uploaded: $name"
-          done
-
-          for f in ts/patches/*.patch; do
+          # Upload ALL patch assets (source .ts/.js AND derived .patch).
+          # The old loops only globbed *.ts and *.patch, so worker-pool.js was
+          # never uploaded as a release asset.
+          for f in ts/patches/*; do
+            [ -f "$f" ] || continue
             name=$(basename "$f")
             gh release upload "$TAG" "$f" --clobber
             echo "Uploaded: $name"
