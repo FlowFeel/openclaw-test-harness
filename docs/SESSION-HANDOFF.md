@@ -17,8 +17,8 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 ### Active branch
 
 - **Branch:** `feat/multiagent-process-isolation`
-- **HEAD:** `4427d3b` — `feat(supervision): #15 real Worker/Process supervisors — TDD real lifecycle`
-- **Ahead of `main` by:** 7 commits; 2 behind. The 7 ahead are: #13 crash isolation (`a40294e`), this handoff (`5a08949`) + its literate-style expansion (`182360f`), the Option D literate-compaction pi extension (`35167d2`), #12 real Piscina (`201e4d0`), the #12 handoff update (`2a20c00`), and #15 real Worker/Process supervisors (`4427d3b`). **None of #13 / #12 / Option D / #15-real are on `main` yet** — they await PR #3.
+- **HEAD:** `2aa8953` — `feat(worker-pool): #14 per-topic fairness & backpressure — TDD pure seam + FairPool`
+- **Ahead of `main` by:** 9 commits; 2 behind. The feature commits: #13 (`a40294e`), the handoff + expansion (`5a08949`/`182360f`), Option D literate-compaction (`35167d2`), #12 real Piscina (`201e4d0`), the #12 handoff (`2a20c00`), #15 real Worker/Process supervisors (`4427d3b`), the #15 handoff (`8a45523`), and #14 FairPool (`2aa8953`). **None of #13 / #12 / #15 / #14 / Option D are on `main` yet** — they await PR #3.
 
 ### `main` HEAD
 
@@ -28,7 +28,7 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 
 - **PR #1** (merged to `main`, `15651f0`): Era 3 roadmap (`ISSUES.md` #11–#17) + #11 handler registry + #15 supervisor scaffold + README three-era rewrite + WAR-STORY Phase 17.
 - **PR #2** (merged to `main`, `99a6660`): the Ship Patches CI fix — see the "Ship Patches CI" section below.
-- **PR #3** (not yet opened): #13 crash isolation + #12 real Piscina + #15 real Worker/Process supervisors + Option D literate-compaction extension. All on the feature branch, green, awaiting a PR.
+- **PR #3** (not yet opened): #13 crash isolation + #12 real Piscina + #15 real Worker/Process supervisors + #14 FairPool + Option D literate-compaction extension. All on the feature branch, green, awaiting a PR.
 
 ### Remote
 
@@ -42,14 +42,14 @@ The suite is green at HEAD across all four layers. These counts are the single m
 
 ### Total counts
 
-- **Total: 239 tests, all green.**
+- **Total: 264 tests, all green.**
 - **Python: 25** — `uv run pytest tests/unit tests/integration` (~0.2s).
-- **TypeScript: 214** — `cd ts && ./node_modules/.bin/vitest run` (~2–7s; E2E needs Docker). 197 without E2E (`--exclude '**/e2e/**'`, ~2.1s).
+- **TypeScript: 239** — `cd ts && ./node_modules/.bin/vitest run` (~2–7s; E2E needs Docker). 222 without E2E (`--exclude '**/e2e/**'`, ~2.2s).
 
 ### TypeScript breakdown
 
 - **Spec (unit): 112** — pure transition tables, context reducers, worker-pool protocols, deterministic clocks, V8 heap invariants, the `SubagentSupervisor` Protocol.
-- **Integration: 85** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite, the #13 crash-isolation suite, the #12 real-Piscina integration suite (off-main-thread identity, registry conformance, Protocol compliance), and the #15 real-supervisor suites (WorkerSupervisor worker_threads binding, ProcessSupervisor child_process binding — 9 + 9 specs).
+- **Integration: 99** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite, the #13 crash-isolation suite, the #12 real-Piscina integration suite, the #15 real-supervisor suites (WorkerSupervisor + ProcessSupervisor — 9 + 9), and the #14 FairPool suite (per-topic fairness, backpressure, Protocol compliance — 14 specs).
 - **E2E (Testcontainers, Docker-gated): 17** — patched-OC admission checks, the OpenRouter mock sidecar as a real long-lived container, and the sidecar wired into the OC container for the offline `admit spawn → model call` flow.
 
 ### Typecheck
@@ -69,7 +69,7 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 | 11 | Handler-module registry | ✅ Done | Killed the god function. |
 | 12 | Real Piscina integration | ✅ Done | Prod pool now uses real threads. |
 | 13 | Worker crash isolation & respawn | ✅ Done | Fixed dead-slot degradation. |
-| 14 | Per-topic fairness & backpressure | 📋 Planned | `getPool()` is a singleton. |
+| 14 | Per-topic fairness & backpressure | ✅ Done | FairPool round-robins; per-topic backpressure. |
 | 15 | SubagentSupervisor Protocol | ✅ Done | Mock + Worker + Process impls; real lifecycle bound. |
 | 16 | Per-topic actor isolation | 📋 Planned | Depends on #15. |
 | 17 | Live telemetry → admission | 📋 Planned | Depends on #15, #16. |
@@ -96,6 +96,14 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 - **The deterministic claim:** The off-main-thread proof is a `threadId` probe (serialized via `toString`): the main thread is `threadId 0`, workers are `≥ 1` — a non-zero tid is deterministic proof of real worker execution, not "it's fast." Registry conformance is deep-equal (`PiscinaWorkerPool.execute` === patch `dispatch`) for all 7 built-in handlers. The unknown-handler error identity matches the patch's `dispatch` (`"Unknown handler: <name>"`) — the pre-worker fast path uses the SAME message so pool-level and worker-level paths share one identity (the #11 no-drift principle, extended to #12).
 - **Proof:** `ts/tests/integration/piscina-pool.spec.ts` (18 specs across 3 invariants: off-main-thread, registry conformance, Protocol compliance).
 
+### #14 — Per-Topic Fairness & Backpressure (✅ Done)
+
+- **What:** `FairPool` (`fair-pool.ts`) implements `WorkerPool`, wrapping an inner pool (Mock/Piscina) and adding per-topic fairness. The pure seam (`fair-scheduler.ts`): `pickNextTopic(nonEmpty, cursor)` (round-robin — advance past cursor, wrap cyclically, restart at head if drained) + `evaluateBackpressure(depth, threshold)` (strict `>` → `BackpressureResult { apply, queueDepth, threshold }`). `executeForTopic(topic, handler, input)` enters a per-topic queue; `pump()` dispatches while `inFlight < maxConcurrent` via the pure scheduler — FairPool is the scheduling bottleneck, so dispatch ORDER is the deterministic fairness guarantee. `backpressure(topic)` returns the pure result the admission layer reads (per-topic). No-topic `execute()` goes straight to inner (backward compatible). `drain()` waits for queued + in-flight; `destroy()` rejects pending with "pool destroyed".
+- **Why it mattered:** `getPool()` was a module singleton; `execute()` grabbed the first free worker (`find(w => !w.busy)`) with no per-topic queue or fairness. A single topic's burst (6-way `fanout.topics` + serial `serialize.session`) could consume every worker and starve sibling topics' latency-sensitive stream-ingestion work.
+- **The seam:** `pickNextTopic` / `evaluateBackpressure` are pure (immutable snapshots in, result out, no I/O). FairPool is the I/O wiring around them — the phosphene "pure logic as the seam" convention, same as #12/#15. Round-robin, not DRR (uniform-cost fairness; DRR is the documented extension point for per-task-cost weighting).
+- **The deterministic claim:** The fairness proof is dispatch ORDER, not wall-clock. Under flood (maxConcurrent=1, A×5 + B×1), completion order is `[A0, B0, A1, A2, A3, A4]` — B at index 1, not 5 (round-robin interleaves). Alternation (`A,B,A,B,...`), drained-topic-skip, and maxConcurrent=2 (`[A0,A1,B0,A2,A3]`) are also deep-equal assertions. Backpressure flips `apply=true` at depth > threshold, per-topic (A floods, B stays false). Bounded-latency (<2000ms) is a secondary sanity check, never the load-bearing claim.
+- **Proof:** `ts/tests/spec/fair-scheduler.spec.ts` (11 pure specs) + `ts/tests/integration/fair-pool.spec.ts` (14 integration specs: fairness / backpressure / Protocol compliance).
+
 ### #15 — SubagentSupervisor Protocol (✅ Done)
 
 - **What:** The `SubagentSupervisor` Protocol binds the pure `transitionSubagent` table to real process/thread lifecycle. The shared spine lives in `BaseSupervisor` (`base-supervisor.ts`) — actor map, listeners, injected `Clock` (#7), `RestartPolicy`, counters, `apply()`/`require()`/`mapEvent()`/`emit()`/`snapshot()` — with `doSpawn`/`doTerminate` as the only seams. Three implementations: `MockSupervisor` (no-op seams, in-process), `WorkerSupervisor` (`new Worker` per actor; `'online'`→start, `'message'{ok:true}`→finish, `'error'`/non-zero `'exit'`→error; `doTerminate` = detach + `terminate()`), `ProcessSupervisor` (`child_process.spawn` per actor; `'spawn'`→start, `'exit'` 0→finish, non-zero/`'error'`→error; `doTerminate` = detach + `SIGKILL`). Actor entries are constructor-injected (mirrors #12).
@@ -111,9 +119,8 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 
 ### Planned tickets (brief)
 
-- **#14 Per-topic fairness** — `getPool()` is a module singleton; no per-topic queue/fairness. A `FairPool` Protocol with per-topic queues + a backpressure signal feeding admission.
-- **#16 Per-topic actor isolation** — each topic runs as an isolated supervised actor; main process becomes a thin router. Builds on #15 (now ✅ Done — `WorkerSupervisor`/`ProcessSupervisor` are the real actor backends).
-- **#17 Live telemetry → admission** — `ProcessTelemetry` Protocol populates `SystemHealth` from real `monitorEventLoopDelay` / `captureV8Snapshot` readings; admission reacts to real pressure, not fixtures. Builds on #15/#16.
+- **#16 Per-topic actor isolation** — each topic runs as an isolated supervised actor; main process becomes a thin router. Builds on #15 (now ✅ Done — `WorkerSupervisor`/`ProcessSupervisor` are the real actor backends). #14 FairPool now gives per-topic fairness/backpressure to feed admission.
+- **#17 Live telemetry → admission** — `ProcessTelemetry` Protocol populates `SystemHealth` from real `monitorEventLoopDelay` / `captureV8Snapshot` readings; admission reacts to real pressure, not fixtures. Builds on #15/#16. (#14's `backpressure(topic)` is the per-topic signal that plugs in here.)
 
 ---
 
@@ -126,6 +133,11 @@ These are the files touched most often. Knowing their role and their literate co
 - **Role:** The CJS patch that ships into OC's `dist/`. #11 (handler registry + `dispatch` + `Function.prototype.toString` worker source) and #13 (`createSlot`/`die`/`finish` crash isolation) live here.
 - **Literate convention:** The header docblock and each key function carry narrative `why` prose — not just `what`. Read the header before editing; it states the anti-pattern being fixed and the constraint (closure-free handlers) that makes the fix work.
 - **Exports:** `{ getPool, dispatch, handlers }`. `dispatch` and `handlers` are exported for testability (the #11 registry spec asserts against them).
+
+### `ts/src/features/worker-pool/fair-scheduler.ts` & `fair-pool.ts`
+
+- **Role:** The #14 pure scheduler seam (`fair-scheduler.ts`: `pickNextTopic` round-robin + `evaluateBackpressure`) and the `FairPool` class (`fair-pool.ts`) wrapping an inner `WorkerPool` with per-topic fairness + backpressure.
+- **Convention:** The scheduler functions are pure (immutable snapshots in, result out) — the testable seam. `FairPool` is the I/O wiring. `executeForTopic(topic, ...)` is the fairness surface; `backpressure(topic)` is the per-topic admission signal. No-topic `execute()` is backward-compatible (straight to inner).
 
 ### `ts/tests/support/load-cjs.ts`
 
@@ -220,19 +232,15 @@ These building blocks are already merged to `main` and are depended on by Era 3 
 
 When resuming, start here.
 
-### 1. #14 — Per-topic fairness & backpressure
+### 1. #16 — Per-topic actor isolation
 
-- `getPool()` is a module singleton; a `FairPool` Protocol with per-topic queues + a backpressure signal feeding admission. Standalone (no deps); more design-heavy than #12/#15.
+- Each topic runs as an isolated supervised actor (a `WorkerSupervisor`/`ProcessSupervisor` actor per topic); main process becomes a thin router. Builds on #15 (✅ Done). #14 FairPool (✅ Done) gives the per-topic fairness/backpressure the router's admission layer reads.
 
-### 2. #16 — Per-topic actor isolation
+### 2. #17 — Live telemetry → admission
 
-- Each topic runs as an isolated supervised actor (a `WorkerSupervisor`/`ProcessSupervisor` actor per topic); main process becomes a thin router. Builds on #15 (now ✅ Done).
+- `ProcessTelemetry` Protocol feeds `SystemHealth` from real `monitorEventLoopDelay`/heap. Depends on #15/#16. #14's `backpressure(topic)` is the per-topic signal that plugs in.
 
-### 3. #17 — Live telemetry → admission
-
-- `ProcessTelemetry` Protocol feeds `SystemHealth` from real `monitorEventLoopDelay`/heap. Depends on #15/#16.
-
-### 4. PR #3 — ship #13 + #12 + #15 + Option D to `main`
+### 3. PR #3 — ship #13 + #12 + #15 + #14 + Option D to `main`
 
 - Open a PR from `feat/multiagent-process-isolation` → `main`. On green main CI, `Ship Patches` auto-runs and ships a content-hash-tagged release with all patch assets. No manual release step.
 
