@@ -10,8 +10,7 @@
  *      + turnPrefixMessages) — same "summarize everything" approach as
  *      custom-compaction.ts.
  *   2. Build a literate-style prompt via the pure buildLiteratePrompt().
- *   3. Summarize with a fast model (Gemini Flash preferred; falls back to the
- *      active session model).
+ *   3. Summarize with the active session model (no separate model lookup).
  *   4. Validate the result via validateLiterateSummary(). If the summary is
  *      structurally incomplete, fall back to default compaction rather than
  *      shipping a malformed summary.
@@ -36,15 +35,19 @@ export default function (pi: ExtensionAPI) {
 		const { messagesToSummarize, turnPrefixMessages, tokensBefore, firstKeptEntryId, previousSummary, customInstructions } =
 			preparation;
 
-		// Prefer a fast/cheap model for summarization; fall back to the active model.
-		// Gemini Flash is the default choice; if unavailable, the active model works.
-		const flash = ctx.modelRegistry.find("google", "gemini-2.5-flash");
-		const model = flash ?? ctx.model;
+		// Use the active session model for summarization — no separate model
+		// lookup. The session model is already authenticated and configured, so
+		// there's no provider/model resolution or secondary auth to fail.
+		const model = ctx.model;
 		if (!model) {
 			ctx.ui.notify("Literate compaction: no model available, using default compaction", "warning");
 			return; // fall back to default
 		}
 
+		// Resolve the session model's API credentials to pass to complete(). This is
+		// credential resolution for the HTTP call, NOT a separate model lookup —
+		// the model is the live session model above, already authenticated by the
+		// session. If credentials are somehow missing, fall back to default.
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 		if (!auth.ok || !auth.apiKey) {
 			ctx.ui.notify(

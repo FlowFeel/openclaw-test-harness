@@ -24,7 +24,7 @@ This split is the phosphene "pure logic as the seam" convention (see `docs/SESSI
 
 1. **Serialize the full conversation** — `messagesToSummarize` + `turnPrefixMessages` via `serializeConversation(convertToLlm(...))`. This is the "discard all old turns" approach: more aggressive context recovery than the default (which keeps the last 20k tokens of turns verbatim).
 2. **Build the literate prompt** — `buildLiteratePrompt()` assembles the style contract (six rules), the required structure (five sections), the conversation, and any iterative context (previous summary + custom `/compact` instructions).
-3. **Summarize with a fast model** — Gemini Flash preferred (cheaper/faster); falls back to the active session model if Flash is unavailable.
+3. **Summarize with the active session model** — no separate model lookup. The session model is already authenticated, so there's no provider resolution or secondary auth to fail.
 4. **Validate the result** — `validateLiterateSummary()` checks all five required sections are present and a bold (`**`) or blockquote (`>`) abstract appears in the first 8 lines. A malformed summary falls back to default compaction rather than shipping.
 
 ### Graceful fallback
