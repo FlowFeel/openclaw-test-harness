@@ -1,7 +1,7 @@
 {
   "name": "openclaw-test-harness-ts",
   "version": "0.1.0",
-  "description": "TypeScript test harness for OpenClaw modifications \u2014 Effect Schema, XState v5, Vitest, Playwright",
+  "description": "TypeScript test harness for OpenClaw modifications — Effect Schema, XState v5, Vitest, Playwright",
   "type": "module",
   "scripts": {
     "test": "vitest run",
@@ -9,6 +9,7 @@
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ tests/",
+    "postinstall": "patch-package",
     "gate": "npm run typecheck && npm run lint && npm run test"
   },
   "dependencies": {
@@ -25,14 +26,14 @@
     "@playwright/test": "^1.49.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.0.0",
-    "@vitest/coverage-v8": "2.1.9",
+    "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^9.0.0",
     "patch-package": "^8.0.0",
     "testcontainers": "^10.18.0",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "2.1.9"
+    "vitest": "^2.1.0"
   },
   "optionalDependencies": {
     "@rollup/rollup-darwin-x64": "^4.62.4"
