@@ -1,0 +1,25 @@
+{
+  "id": "oc-session-guard",
+  "name": "OC Session Guard",
+  "description": "Session bloat management — strips bloat fields after compaction and purges stale subagents. No sidecar needed.",
+  "contracts": {
+    "tools": ["session_health", "session_cleanup"]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "maxAgeHours": { "type": "number", "default": 15 },
+      "stripBloatFields": { "type": "boolean", "default": true },
+      "bloatFields": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": ["compactionCheckpoints", "systemPromptReport", "skillsSnapshot", "contextBudgetStatus", "usageFamilySessionIds", "lastHeartbeatText"]
+      },
+      "sessionsPath": { "type": "string", "description": "Override path to sessions.json" }
+    }
+  }
+}
