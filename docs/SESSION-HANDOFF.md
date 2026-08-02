@@ -49,7 +49,7 @@ The suite is green at HEAD across all four layers. These counts are the single m
 ### TypeScript breakdown
 
 - **Spec (unit): 112** — pure transition tables, context reducers, worker-pool protocols, deterministic clocks, V8 heap invariants, the `SubagentSupervisor` Protocol.
-- **Integration: 127** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite (+2 GHA-flake regression specs), the #13 crash-isolation suite, the #12 real-Piscina integration suite, the #15 real-supervisor suites (WorkerSupervisor + ProcessSupervisor — 9 + 9), the #14 FairPool suite (14 specs), the #16 TopicRouter suite (13 specs), and the #17 live-telemetry suite (real readings → admission — 5 specs).
+- **Integration: 149** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite (+2 GHA-flake regression specs), the #13 crash-isolation suite, the #12 real-Piscina integration suite, the #15 real-supervisor suites (WorkerSupervisor + ProcessSupervisor — 9 + 9), the #14 FairPool suite (14 specs), the #16 TopicRouter suite (13 specs), and the #17 live-telemetry suite (real readings → admission — 5 specs).
 - **E2E (Testcontainers, Docker-gated): 17** — patched-OC admission checks, the OpenRouter mock sidecar as a real long-lived container, and the sidecar wired into the OC container for the offline `admit spawn → model call` flow.
 
 ### Typecheck
@@ -58,9 +58,9 @@ The suite is green at HEAD across all four layers. These counts are the single m
 
 ---
 
-## Era 3 — Threading & Process Isolation
+## Era 3 — Threading & Process Isolation (Completed ✅)
 
-The active era. It targets the two structural anti-patterns the prior eras left untouched: the **worker god function** (one string-eval'd dispatch blob, duplicated between worker body and inline fallback) and the **god process** (one OC process + one global singleton pool serving all topics/agents, with `SubagentActor` owning no real process lifecycle). The full ticket specs with file:line evidence live in `ISSUES.md` #11–#17.
+The completed era eliminated the two structural anti-patterns: the **worker god function** (one string-eval'd dispatch blob, duplicated between worker body and inline fallback) and the **god process** (one OC process + one global singleton pool serving all topics/agents). The full ticket specs live in `ISSUES.md` #11–#17.
 
 ### Ticket status
 

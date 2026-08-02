@@ -41,17 +41,17 @@ A targeted pass eliminating the four classes of test flakiness flagged in the ha
 9. **Programmatic V8 Heap Invariants** — `captureV8Snapshot()` / `assertV8HeapStability()` (`ts/src/core/v8-assert.ts`) assert bounded `used_heap_size` growth in-process. Hidden leaks fail CI without manual `--trace-gc`.
 10. **Worker Fault Injection & Recovery** — `fault-injection.spec.ts` injects handler crashes, unknown-handler lookups, and worker-thread errors against both `MockWorkerPool` and the real `worker-pool.js` patch (CJS-loaded via `load-cjs.ts`). Asserts transparent recovery and `TestStore` integrity under `ERR_WORKER_OUT_OF_MEMORY`.
 
-### Era 3 — Threading & Process Isolation (tickets #11–#17, in progress on `feat/multiagent-process-isolation`)
+### Era 3 — Threading & Process Isolation (tickets #11–#17) ✅
 
 Eliminating the two remaining structural anti-patterns in the multiagent/multitopic path: the **worker god function** and the **god process**.
 
-11. **Handler-Module Registry** ✅ — Killed the worker god function. Handler logic lives once in a `handlers` registry; the worker body is generic dispatch with the registry serialized in via `Function.prototype.toString`; the inline fallback calls the same `dispatch()`. Zero duplication — fixed drift where the inline path was missing `json.parse` (silently returned null) and `measure.size` diverged. Proven by `worker-pool-registry.spec.ts` (worker execute === inline dispatch for every handler).
-12. **Real Piscina Integration** 📋 — `piscina-pool.ts` currently admits "run inline"; will point Piscina's `filename` at the #11 registry worker entry so prod actually uses threads (prod ≠ spec today).
-13. **Worker Crash Isolation & Respawn** 📋 — Only `on('message')` today; a crashed worker stays in the rotation and wastes its slot until the 10s timeout. Per-worker `error`/`exit` listeners → immediate reject + slot removal + respawn.
-14. **Per-Topic Fairness & Backpressure** 📋 — `getPool()` is a module singleton; no per-topic queue/fairness. A `FairPool` Protocol with per-topic queues + a backpressure signal feeding admission.
-15. **SubagentSupervisor Protocol** 🟡 — Binds the pure `transitionSubagent` table to real process lifecycle. `SubagentActor` was "a lightweight actor-like wrapper" holding only a state string. Scaffolded: `SubagentSupervisor` Protocol + `MockSupervisor` (in-process, deterministic, delegates all transitions to the pure table, backoff from the injected Clock) + 9 specs. `WorkerSupervisor`/`ProcessSupervisor` to follow.
-16. **Per-Topic Actor Isolation** 📋 — Each active topic runs as an isolated supervised actor; the main process becomes a thin router. A topic crash is contained; siblings unaffected. Builds on #15.
-17. **Live Process Telemetry → Admission** 📋 — `ProcessTelemetry` Protocol populates `SystemHealth` from real `monitorEventLoopDelay` / `captureV8Snapshot` readings; admission reacts to real pressure, not fixtures.
+11. **Handler-Module Registry** ✅ — Killed the worker god function. Handler logic lives once in a `handlers` registry; the worker body is generic dispatch with the registry serialized in via `Function.prototype.toString`; the inline fallback calls the same `dispatch()`. Proven by `worker-pool-registry.spec.ts`.
+12. **Real Piscina Integration** ✅ — `piscina-pool.ts` serializes its handler registry into worker threads via `toString`. Proven by threadId ≥ 1 off-main-thread assertions in `piscina-pool.spec.ts`.
+13. **Worker Crash Isolation & Respawn** ✅ — Added `'error'`/`'exit'` listeners (`die()`), immediate task rejection under worker crashes, slot removal, and transparent replacement spawning in `worker-crash-isolation.spec.ts`.
+14. **Per-Topic Fairness & Backpressure** ✅ — `FairPool` protocol wrapping round-robin scheduling across topics and per-topic backpressure signals (`fair-pool.spec.ts`).
+15. **SubagentSupervisor Protocol** ✅ — Binds `transitionSubagent` state transitions to real process & thread lifecycle across `MockSupervisor`, `WorkerSupervisor` (worker_threads), and `ProcessSupervisor` (child_process).
+16. **Per-Topic Actor Isolation** ✅ — `TopicRouter` isolates each active Telegram topic into a supervised actor thread, providing sibling crash containment (`topic-router.spec.ts`).
+17. **Live Process Telemetry → Admission** ✅ — `ProcessTelemetry` protocol aggregates `monitorEventLoopDelay` and `captureV8Snapshot` readings into `SystemHealth` to drive real adaptive admission (`telemetry.spec.ts`).
 
 See [`ISSUES.md`](./ISSUES.md) for the full ticket spec with file:line evidence, and [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) for the phase-by-phase narrative.
 
@@ -66,29 +66,29 @@ See [`ISSUES.md`](./ISSUES.md) for the full ticket spec with file:line evidence,
 | Event loop P99 delay | 834ms | <50ms (estimated) |
 | CPU utilization | 1.467 cores (saturated) | 0.6% (idle) |
 | Global `maxConcurrent` | 2 (static) | 6 (with worker pool) |
-| Automated tests | 0 | **197** (25 Python + 172 TS) |
+| Automated tests | 0 | **303** (25 Python + 278 TS) |
 | CI pipeline layers | 0 | 4 (unit → docker → staging → integration) |
 
 ---
 
-## The Test Pyramid (197 Total Tests)
+## The Test Pyramid (303 Total Tests)
 
 ```
                      ┌───────────────────────────┐
                      │    Testcontainers E2E     │  17 E2E Specs (Docker-gated)
                      ├───────────────────────────┤
-                     │   Docker Compose & BDD    │  49 Integration Specs
+                     │   Docker Compose & BDD    │  149 Integration Specs
                      ├───────────────────────────┤
-                     │  TypeScript Spec Unit     │  106 TS Unit Specs
+                     │  TypeScript Spec Unit     │  112 TS Unit Specs
                      ├───────────────────────────┤
                      │    Python Unit Tests      │  25 Pytest Specs
                      └───────────────────────────┘
 ```
 
 1. **Python Unit Layer (`tests/unit/`)** — 25 pure logic tests in ~0.11s, zero fixtures.
-2. **TypeScript Unit Layer (`ts/tests/spec/`)** — 106 specs: pure transition tables, context reducers, worker-pool protocols, deterministic clocks, V8 heap invariants, and the `SubagentSupervisor` Protocol.
-3. **Integration Layer (`ts/tests/integration/`)** — 49 specs: SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, and the handler-registry conformance suite.
-4. **Testcontainers E2E Layer (`ts/tests/e2e/`)** — 17 containerized specs: patched-OC admission checks, the OpenRouter mock sidecar as a real long-lived container on a shared Docker network, and the sidecar **wired into the OC container** so a containerized agent drives a real offline chat-completion call (`admit spawn → model call`, 100% offline).
+2. **TypeScript Unit Layer (`ts/tests/spec/`)** — 112 specs: pure transition tables, context reducers, worker-pool protocols, deterministic clocks, V8 heap invariants, and `SubagentSupervisor` protocols.
+3. **Integration Layer (`ts/tests/integration/`)** — 149 specs: SQLite accessors, BDD scenarios, `patch-package` validation, mock sidecars, worker crash isolation, Piscina pool integration, FairPool scheduling, supervisor actors, topic routing, and live process telemetry.
+4. **Testcontainers E2E Layer (`ts/tests/e2e/`)** — 17 containerized specs: patched-OC admission checks, sidecar network isolation, and containerized offline model execution.
 
 ---
 
