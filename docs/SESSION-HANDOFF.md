@@ -17,8 +17,8 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 ### Active branch
 
 - **Branch:** `feat/multiagent-process-isolation`
-- **HEAD:** `201e4d0` — `feat(worker-pool): #12 real Piscina integration — TDD off-main-thread`
-- **Ahead of `main` by:** 5 commits; 2 behind. The 5 ahead are: #13 crash isolation (`a40294e`), this handoff (`5a08949`) + its literate-style expansion (`182360f`), the Option D literate-compaction pi extension (`35167d2`), and #12 real Piscina (`201e4d0`). **None of #13 / #12 / Option D are on `main` yet** — they await PR #3. Correction: the prior handoff's claim that #13 merged via PR #1 was wrong. PR #1 (`15651f0`) merged #11 + #15 scaffold + the README/WAR-STORY rewrite only; `main`'s `worker-pool.js` has the #11 registry but not #13's `createSlot`/`die`/`deadWorkers`.
+- **HEAD:** `4427d3b` — `feat(supervision): #15 real Worker/Process supervisors — TDD real lifecycle`
+- **Ahead of `main` by:** 7 commits; 2 behind. The 7 ahead are: #13 crash isolation (`a40294e`), this handoff (`5a08949`) + its literate-style expansion (`182360f`), the Option D literate-compaction pi extension (`35167d2`), #12 real Piscina (`201e4d0`), the #12 handoff update (`2a20c00`), and #15 real Worker/Process supervisors (`4427d3b`). **None of #13 / #12 / Option D / #15-real are on `main` yet** — they await PR #3.
 
 ### `main` HEAD
 
@@ -28,7 +28,7 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 
 - **PR #1** (merged to `main`, `15651f0`): Era 3 roadmap (`ISSUES.md` #11–#17) + #11 handler registry + #15 supervisor scaffold + README three-era rewrite + WAR-STORY Phase 17.
 - **PR #2** (merged to `main`, `99a6660`): the Ship Patches CI fix — see the "Ship Patches CI" section below.
-- **PR #3** (not yet opened): #13 crash isolation + #12 real Piscina + Option D literate-compaction extension. All three are on the feature branch, green, awaiting a PR.
+- **PR #3** (not yet opened): #13 crash isolation + #12 real Piscina + #15 real Worker/Process supervisors + Option D literate-compaction extension. All on the feature branch, green, awaiting a PR.
 
 ### Remote
 
@@ -42,14 +42,14 @@ The suite is green at HEAD across all four layers. These counts are the single m
 
 ### Total counts
 
-- **Total: 221 tests, all green.**
+- **Total: 239 tests, all green.**
 - **Python: 25** — `uv run pytest tests/unit tests/integration` (~0.2s).
-- **TypeScript: 196** — `cd ts && ./node_modules/.bin/vitest run` (~1–6s; E2E needs Docker). 179 without E2E (`--exclude '**/e2e/**'`, ~1.7s).
+- **TypeScript: 214** — `cd ts && ./node_modules/.bin/vitest run` (~2–7s; E2E needs Docker). 197 without E2E (`--exclude '**/e2e/**'`, ~2.1s).
 
 ### TypeScript breakdown
 
 - **Spec (unit): 112** — pure transition tables, context reducers, worker-pool protocols, deterministic clocks, V8 heap invariants, the `SubagentSupervisor` Protocol.
-- **Integration: 67** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite, the #13 crash-isolation suite, and the #12 real-Piscina integration suite (off-main-thread identity, registry conformance, Protocol compliance).
+- **Integration: 85** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite, the #13 crash-isolation suite, the #12 real-Piscina integration suite (off-main-thread identity, registry conformance, Protocol compliance), and the #15 real-supervisor suites (WorkerSupervisor worker_threads binding, ProcessSupervisor child_process binding — 9 + 9 specs).
 - **E2E (Testcontainers, Docker-gated): 17** — patched-OC admission checks, the OpenRouter mock sidecar as a real long-lived container, and the sidecar wired into the OC container for the offline `admit spawn → model call` flow.
 
 ### Typecheck
@@ -70,7 +70,7 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 | 12 | Real Piscina integration | ✅ Done | Prod pool now uses real threads. |
 | 13 | Worker crash isolation & respawn | ✅ Done | Fixed dead-slot degradation. |
 | 14 | Per-topic fairness & backpressure | 📋 Planned | `getPool()` is a singleton. |
-| 15 | SubagentSupervisor Protocol | 🟡 Scaffolded | `MockSupervisor` done; real impls to follow. |
+| 15 | SubagentSupervisor Protocol | ✅ Done | Mock + Worker + Process impls; real lifecycle bound. |
 | 16 | Per-topic actor isolation | 📋 Planned | Depends on #15. |
 | 17 | Live telemetry → admission | 📋 Planned | Depends on #15, #16. |
 
@@ -96,7 +96,13 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 - **The deterministic claim:** The off-main-thread proof is a `threadId` probe (serialized via `toString`): the main thread is `threadId 0`, workers are `≥ 1` — a non-zero tid is deterministic proof of real worker execution, not "it's fast." Registry conformance is deep-equal (`PiscinaWorkerPool.execute` === patch `dispatch`) for all 7 built-in handlers. The unknown-handler error identity matches the patch's `dispatch` (`"Unknown handler: <name>"`) — the pre-worker fast path uses the SAME message so pool-level and worker-level paths share one identity (the #11 no-drift principle, extended to #12).
 - **Proof:** `ts/tests/integration/piscina-pool.spec.ts` (18 specs across 3 invariants: off-main-thread, registry conformance, Protocol compliance).
 
-### #15 — SubagentSupervisor Protocol (🟡 Scaffolded)
+### #15 — SubagentSupervisor Protocol (✅ Done)
+
+- **What:** The `SubagentSupervisor` Protocol binds the pure `transitionSubagent` table to real process/thread lifecycle. The shared spine lives in `BaseSupervisor` (`base-supervisor.ts`) — actor map, listeners, injected `Clock` (#7), `RestartPolicy`, counters, `apply()`/`require()`/`mapEvent()`/`emit()`/`snapshot()` — with `doSpawn`/`doTerminate` as the only seams. Three implementations: `MockSupervisor` (no-op seams, in-process), `WorkerSupervisor` (`new Worker` per actor; `'online'`→start, `'message'{ok:true}`→finish, `'error'`/non-zero `'exit'`→error; `doTerminate` = detach + `terminate()`), `ProcessSupervisor` (`child_process.spawn` per actor; `'spawn'`→start, `'exit'` 0→finish, non-zero/`'error'`→error; `doTerminate` = detach + `SIGKILL`). Actor entries are constructor-injected (mirrors #12).
+- **Why it mattered:** `SubagentActor` was a purely logical state machine holding only a `currentState` string — it owned no process, no thread, no IPC. The whole multiagent system ran inside the single OC god process; a crash of one agent took down the event loop for all topics, and the state machine could not observe real exits.
+- **The seam:** `doSpawn`/`doTerminate` on `BaseSupervisor`. Every transition still delegates to `transitionSubagent` via `apply()` — the supervisor binds real events to the table, it never invents a transition. Listeners detach BEFORE terminating so a reap/restart cannot re-enter `apply()` via the dying resource's terminal event. The MockSupervisor specs (9) guard the extraction — they pass unchanged against the base.
+- **The deterministic claim:** A real thread/process exists per actor (WorkerSupervisor `threadId` ≥ 1 — main is 0; ProcessSupervisor `pid` ≥ 1) — proof of real execution, not "it's fast." The event SEQUENCE `[spawned, started, completed]`/`[spawned, started, failed]` proves the `started`/`completed`/`failed` came from the resource's REAL `'online'`/`'message'`/`'spawn'`/`'exit'` events, not from caller `signal()`. `restart()` produces a DIFFERENT `pid` (fresh spawn, not reuse) with `retryCount+1`. The real binding still honors caller-driven `signal()` (e.g. watchdog `timeout`) alongside auto-observed events.
+- **Proof:** `ts/tests/spec/supervisor.spec.ts` (9 Mock specs, unchanged) + `ts/tests/integration/worker-supervisor.spec.ts` (9) + `ts/tests/integration/process-supervisor.spec.ts` (9).
 
 - **What:** A `SubagentSupervisor` Protocol (`ts/src/features/supervision/supervisor.schema.ts`) + `MockSupervisor` (`mock-supervisor.ts`) that bind the pure `transitionSubagent` table to supervisor lifecycle events. The supervisor never invents a transition — it delegates every state change to the pure table. Restart backoff is computed from the injected `Clock` (#7); restart terminates the active run then creates a fresh `created → dispatched` actor with `retryCount+1` (respecting that the table forbids `failed → dispatch`).
 - **Why it mattered:** `SubagentActor` was self-described as "a lightweight, zero-dependency actor-like wrapper" holding only a `currentState` string — it owned no process, no thread, no IPC. The lifecycle states (`dispatched → running → yielding → completed`) were purely logical; nothing bound them to real process lifecycle, so the whole multiagent system ran inside the single OC god process.
@@ -106,8 +112,8 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 ### Planned tickets (brief)
 
 - **#14 Per-topic fairness** — `getPool()` is a module singleton; no per-topic queue/fairness. A `FairPool` Protocol with per-topic queues + a backpressure signal feeding admission.
-- **#16 Per-topic actor isolation** — each topic runs as an isolated supervised actor; main process becomes a thin router. Builds on #15.
-- **#17 Live telemetry → admission** — `ProcessTelemetry` Protocol populates `SystemHealth` from real `monitorEventLoopDelay` / `captureV8Snapshot` readings; admission reacts to real pressure, not fixtures.
+- **#16 Per-topic actor isolation** — each topic runs as an isolated supervised actor; main process becomes a thin router. Builds on #15 (now ✅ Done — `WorkerSupervisor`/`ProcessSupervisor` are the real actor backends).
+- **#17 Live telemetry → admission** — `ProcessTelemetry` Protocol populates `SystemHealth` from real `monitorEventLoopDelay` / `captureV8Snapshot` readings; admission reacts to real pressure, not fixtures. Builds on #15/#16.
 
 ---
 
@@ -126,10 +132,10 @@ These are the files touched most often. Knowing their role and their literate co
 - **Role:** `loadCjsModule()` — loads a CJS patch's source in the ESM harness via `vm.compileFunction`, evaluating it in a CJS module wrapper with a real `require`. Required because the repo is `"type":"module"` but the production patch is CJS.
 - **Why it exists:** Without it, `require()` of a `.js` patch fails with "require is not defined in ES module scope." This helper is the seam that lets the integration specs exercise the *real* patch rather than a reimplemented copy.
 
-### `ts/src/features/supervision/supervisor.schema.ts` & `mock-supervisor.ts`
+### `ts/src/features/supervision/` (`supervisor.schema.ts`, `base-supervisor.ts`, `mock-supervisor.ts`, `worker-supervisor.ts`, `process-supervisor.ts`)
 
-- **Role:** The #15 `SubagentSupervisor` Protocol + Effect schemas (`ActorHandle`, `RestartPolicy`, `SupervisorEvent`) and the `MockSupervisor` in-process implementation.
-- **Convention:** The supervisor delegates *all* state transitions to the pure `transitionSubagent` table — it never invents a transition. This keeps `*.machine.ts` pure and I/O-free, with the supervisor as the only component that owns real process lifecycle.
+- **Role:** The #15 `SubagentSupervisor` Protocol + Effect schemas (`ActorHandle`, `RestartPolicy`, `SupervisorEvent`) and the three implementations. `BaseSupervisor` holds the shared lifecycle spine (actor map, listeners, injected `Clock`, `apply()`→`transitionSubagent`); `MockSupervisor`/`WorkerSupervisor`/`ProcessSupervisor` override only the `doSpawn`/`doTerminate` seams.
+- **Convention:** The supervisor delegates *all* state transitions to the pure `transitionSubagent` table — it never invents a transition. This keeps `*.machine.ts` pure and I/O-free, with the supervisor as the only component that owns real process lifecycle. `WorkerSupervisor` wires real `'online'`/`'message'`/`'error'`/`'exit'`; `ProcessSupervisor` wires real `'spawn'`/`'exit'`/`'error'`. Actor entries are constructor-injected (mirrors #12).
 
 ### `ISSUES.md`
 
@@ -214,19 +220,19 @@ These building blocks are already merged to `main` and are depended on by Era 3 
 
 When resuming, start here.
 
-### 1. #15 follow-on — real supervisor implementations
+### 1. #14 — Per-topic fairness & backpressure
 
-- `WorkerSupervisor` (worker_threads) and `ProcessSupervisor` (child_process) implementations of the scaffolded `SubagentSupervisor` Protocol. The `MockSupervisor` is the test double; these bind the Protocol to real process lifecycle.
+- `getPool()` is a module singleton; a `FairPool` Protocol with per-topic queues + a backpressure signal feeding admission. Standalone (no deps); more design-heavy than #12/#15.
 
-### 2. #14 — Per-topic fairness & backpressure
+### 2. #16 — Per-topic actor isolation
 
-- `getPool()` is a module singleton; a `FairPool` Protocol with per-topic queues + a backpressure signal feeding admission. More design-heavy than #12; standalone.
+- Each topic runs as an isolated supervised actor (a `WorkerSupervisor`/`ProcessSupervisor` actor per topic); main process becomes a thin router. Builds on #15 (now ✅ Done).
 
-### 3. #16 / #17 — per-topic actor isolation + live telemetry → admission
+### 3. #17 — Live telemetry → admission
 
-- Depends on #15 follow-on. Each topic runs as an isolated supervised actor; `ProcessTelemetry` feeds `SystemHealth` from real `monitorEventLoopDelay`/heap.
+- `ProcessTelemetry` Protocol feeds `SystemHealth` from real `monitorEventLoopDelay`/heap. Depends on #15/#16.
 
-### 4. PR #3 — ship #13 + #12 + Option D to `main`
+### 4. PR #3 — ship #13 + #12 + #15 + Option D to `main`
 
 - Open a PR from `feat/multiagent-process-isolation` → `main`. On green main CI, `Ship Patches` auto-runs and ships a content-hash-tagged release with all patch assets. No manual release step.
 
