@@ -1,18 +1,5 @@
-/**
- * Sidecar plugin tests — pure logic, no OC runtime needed.
- *
- * @dft principles:
- * - Deterministic: mock fetch, mock spawn, deterministic clocks
- * - Pure logic: handlers are pure functions (input → output)
- * - Protocol interfaces: SidecarClient is a protocol (mockable)
- * - No fixtures: all data is inline
- * - Fast: no real processes, no real HTTP
- */
-
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createSidecarClient } from "../../../src/plugins/oc-sidecar/src/sidecar-client.ts";
-
-// ── SidecarClient tests ───────────────────────────────────────
+import { describe, it, expect, vi } from "vitest";
+import { createSidecarClient } from "../../../src/plugins/oc-sidecar/src/sidecar-client.js";
 
 describe("SidecarClient", () => {
   it("GET returns parsed JSON on success", async () => {
@@ -23,7 +10,7 @@ describe("SidecarClient", () => {
       })
     );
     const client = createSidecarClient("http://127.0.0.1:18900", {
-      fetchFn: mockFetch as any,
+      fetchFn: mockFetch as unknown as typeof fetch,
     });
     const result = await client.get("/health");
     expect(result).toEqual({ ok: true, status: "live" });
@@ -41,7 +28,7 @@ describe("SidecarClient", () => {
       })
     );
     const client = createSidecarClient("http://127.0.0.1:18900", {
-      fetchFn: mockFetch as any,
+      fetchFn: mockFetch as unknown as typeof fetch,
     });
     const result = await client.post("/exec", {
       operation: "json.stringify",
@@ -65,7 +52,7 @@ describe("SidecarClient", () => {
       new Response("Internal Server Error", { status: 500 })
     );
     const client = createSidecarClient("http://127.0.0.1:18900", {
-      fetchFn: mockFetch as any,
+      fetchFn: mockFetch as unknown as typeof fetch,
     });
     await expect(client.get("/health")).rejects.toThrow("returned 500");
   });
@@ -84,23 +71,17 @@ describe("SidecarClient", () => {
         })
     );
     const client = createSidecarClient("http://127.0.0.1:18900", {
-      fetchFn: mockFetch as any,
+      fetchFn: mockFetch as unknown as typeof fetch,
       timeoutMs: 50,
     });
     await expect(client.get("/health")).rejects.toThrow();
   });
 });
 
-// ── Worker handler tests (pure functions) ──────────────────────
-
-describe("Worker handlers", () => {
-  it("json.stringify produces correct output", async () => {
-    const { default: handlerMod } = await import(
-      "../../../src/plugins/oc-sidecar/src/worker-entry.ts"
-    ).catch(() => ({}));
-    // Inline test since handlers are not exported
-    const input = { data: { a: 1, b: [2, 3] }, indent: 2 };
-    const result = JSON.stringify(input.data, null, input.indent);
+describe("Worker handlers (pure functions)", () => {
+  it("json.stringify produces correct output", () => {
+    const data = { a: 1, b: [2, 3] };
+    const result = JSON.stringify(data, null, 2);
     expect(result).toBe('{\n  "a": 1,\n  "b": [\n    2,\n    3\n  ]\n}');
   });
 
@@ -128,7 +109,6 @@ describe("Worker handlers", () => {
     const maxBytes = 100;
     const originalSize = Buffer.byteLength(transcript, "utf8");
     expect(originalSize).toBeLessThanOrEqual(maxBytes);
-    // When under limit, returns original unchanged
   });
 
   it("serialize.session produces JSON string", () => {

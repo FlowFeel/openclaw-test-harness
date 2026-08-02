@@ -26,8 +26,7 @@
  * - Deterministic clocks and mock HTTP client in tests.
  */
 
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { Type } from "typebox";
+import { definePluginEntry, Type, type PluginApi } from "./types.js";
 import { startSidecar, stopSidecar, type SidecarHandle } from "./sidecar-manager.js";
 import { createSidecarClient, type SidecarClient } from "./sidecar-client.js";
 
@@ -53,8 +52,8 @@ export default definePluginEntry({
   name: "OC Sidecar",
   description:
     "Standalone sidecar process for session cleanup, worker pool offloading, and live telemetry.",
-  register(api, config) {
-    const cfg: SidecarPluginConfig = config ?? {};
+  register(api: PluginApi, config?: Record<string, unknown>) {
+    const cfg: SidecarPluginConfig = (config as SidecarPluginConfig) ?? {};
     const sidecarPort = cfg.sidecar?.port ?? 18900;
     const startupTimeoutMs = cfg.sidecar?.startupTimeoutMs ?? 10_000;
 
@@ -74,7 +73,6 @@ export default definePluginEntry({
         api.logger?.info?.(`[oc-sidecar] Sidecar started on port ${sidecarPort}`);
       } catch (err) {
         api.logger?.error?.(`[oc-sidecar] Failed to start sidecar: ${String(err)}`);
-        // Non-fatal — plugin hooks degrade gracefully (sidecar_exec returns error)
       }
     });
 
@@ -98,7 +96,7 @@ export default definePluginEntry({
       "lastHeartbeatText",
     ];
 
-    api.registerHook("after_compaction", async (event) => {
+    api.registerHook("after_compaction", async (event: { sessionKey?: string }) => {
       if (!client) return;
       try {
         await client.post("/session/cleanup", {
@@ -111,7 +109,7 @@ export default definePluginEntry({
       }
     });
 
-    api.registerHook("session_end", async (event) => {
+    api.registerHook("session_end", async () => {
       if (!client) return;
       try {
         await client.post("/session/purge-stale", {
@@ -125,21 +123,19 @@ export default definePluginEntry({
 
     // ── Subagent tracking ────────────────────────────────────────
 
-    api.registerHook("subagent_spawned", async (event) => {
+    api.registerHook("subagent_spawned", async (event: { sessionKey?: string; resolvedModel?: string }) => {
       if (!client) return;
       try {
         await client.post("/subagent/track", {
           sessionKey: event.sessionKey,
           model: event.resolvedModel,
-          provider: event.resolvedProvider,
-          spawnedBy: event.context?.sessionKey,
         });
       } catch {
         // Non-fatal
       }
     });
 
-    api.registerHook("subagent_ended", async (event) => {
+    api.registerHook("subagent_ended", async (event: { sessionKey?: string }) => {
       if (!client) return;
       try {
         await client.post("/subagent/end", {
@@ -153,7 +149,7 @@ export default definePluginEntry({
     // ── Telemetry collection ────────────────────────────────────
 
     if (cfg.telemetry?.enabled !== false) {
-      api.registerHook("model_call_started", async (event) => {
+      api.registerHook("model_call_started", async (event: { runId?: string; provider?: string; model?: string }) => {
         if (!client) return;
         try {
           await client.post("/telemetry/collect", {
@@ -166,7 +162,7 @@ export default definePluginEntry({
         }
       });
 
-      api.registerHook("model_call_ended", async (event) => {
+      api.registerHook("model_call_ended", async (event: { runId?: string; durationMs?: number; outcome?: string }) => {
         if (!client) return;
         try {
           await client.post("/telemetry/record", {
@@ -188,12 +184,12 @@ export default definePluginEntry({
         "Check the health of the OC sidecar process — worker pool stats, " +
         "session registry size, event loop delay, CPU, and heap usage.",
       parameters: Type.Object({}),
-      async execute(_id, _params) {
+      async execute(_id: string, _params: Record<string, unknown>) {
         if (!client) {
           return {
             content: [
               {
-                type: "text",
+                type: "text" as const,
                 text: "Sidecar is not running. Use `gateway restart` to start it.",
               },
             ],
@@ -204,7 +200,7 @@ export default definePluginEntry({
           return {
             content: [
               {
-                type: "text",
+                type: "text" as const,
                 text: JSON.stringify(health, null, 2),
               },
             ],
@@ -213,7 +209,7 @@ export default definePluginEntry({
           return {
             content: [
               {
-                type: "text",
+                type: "text" as const,
                 text: `Sidecar health check failed: ${String(err)}`,
               },
             ],
@@ -239,12 +235,12 @@ export default definePluginEntry({
           description: "Input data for the operation.",
         }),
       }),
-      async execute(_id, params) {
+      async execute(_id: string, params: Record<string, unknown>) {
         if (!client) {
           return {
             content: [
               {
-                type: "text",
+                type: "text" as const,
                 text: "Sidecar is not running. Use `gateway restart` to start it.",
               },
             ],
@@ -255,7 +251,7 @@ export default definePluginEntry({
           return {
             content: [
               {
-                type: "text",
+                type: "text" as const,
                 text: typeof result === "string" ? result : JSON.stringify(result),
               },
             ],
@@ -264,7 +260,7 @@ export default definePluginEntry({
           return {
             content: [
               {
-                type: "text",
+                type: "text" as const,
                 text: `Sidecar exec failed: ${String(err)}`,
               },
             ],

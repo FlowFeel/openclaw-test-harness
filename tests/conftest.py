@@ -1,8 +1,9 @@
 """Shared test fixtures for the openclaw-test-harness."""
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 
 @pytest.fixture

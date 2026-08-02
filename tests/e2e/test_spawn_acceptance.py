@@ -4,7 +4,6 @@ Updated for plugin strategy: worker pool bundle patches are no longer applied.
 The sidecar plugin handles worker offloading via HTTP proxy to a standalone process.
 """
 
-import pytest
 from pathlib import Path
 
 
@@ -12,7 +11,9 @@ class TestConfigPolicy:
     """Config values match the 'flexible spine, comfortable entropy' policy."""
 
     def test_max_concurrent_is_flexible(self, subagent_config: dict[str, int]) -> None:
-        assert subagent_config["maxConcurrent"] >= 4, "maxConcurrent should allow parallel work"
+        assert subagent_config["maxConcurrent"] >= 4, (
+            "maxConcurrent should allow parallel work"
+        )
 
     def test_entropy_is_comfortable(self, subagent_config: dict[str, int]) -> None:
         """runTimeoutSeconds should be <= 360 (comfortable — room to finish)."""
@@ -79,7 +80,10 @@ class TestWorkerPoolAcceptance:
     def test_plugin_manifest_declares_tools(self) -> None:
         """The plugin manifest declares sidecar_health and sidecar_exec tools."""
         import json
-        manifest = json.loads(Path("ts/src/plugins/oc-sidecar/openclaw.plugin.json").read_text())
+
+        manifest = json.loads(
+            Path("ts/src/plugins/oc-sidecar/openclaw.plugin.json").read_text()
+        )
         tools = manifest.get("contracts", {}).get("tools", [])
         assert "sidecar_health" in tools
         assert "sidecar_exec" in tools
@@ -87,5 +91,8 @@ class TestWorkerPoolAcceptance:
     def test_plugin_activates_on_startup(self) -> None:
         """The plugin activates on gateway startup."""
         import json
-        manifest = json.loads(Path("ts/src/plugins/oc-sidecar/openclaw.plugin.json").read_text())
+
+        manifest = json.loads(
+            Path("ts/src/plugins/oc-sidecar/openclaw.plugin.json").read_text()
+        )
         assert manifest.get("activation", {}).get("onStartup") is True
