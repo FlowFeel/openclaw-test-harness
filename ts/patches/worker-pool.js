@@ -23,6 +23,15 @@
  * different implementation (.reduce vs for-loop), and unknown handlers rejected
  * in the worker but resolved null inline.
  *
+ * Crash isolation & respawn (ticket #13): each worker owns 'error'/'exit'
+ * listeners that reject any in-flight task immediately (the 'message' listener
+ * never fires on a dead thread), retire the slot, and spawn a replacement to
+ * hold the target thread count. This fixes the prior dead-slot degradation
+ * where a crashed worker stayed in the rotation, was re-selected, and wasted
+ * its slot until the 10s watchdog — and the watchdog only rejected, never
+ * restored the slot, so a death permanently shrank the pool until process
+ * restart.
+ *
  * Handlers:
  * - 'json.stringify' — JSON.stringify(input.data, input.replacer, input.indent)
  * - 'json.parse' — JSON.parse(input.text)
@@ -108,57 +117,105 @@ function getPool() {
   if (pool) return pool;
 
   const workers = [];
-  for (let i = 0; i < MAX_THREADS; i++) {
-    const worker = new Worker(workerSource, { eval: true });
-    workers.push({ worker, busy: false });
+  let deadWorkers = 0;
+
+  // ── Slot lifecycle (ticket #13 — crash isolation & respawn) ──────────
+  // A slot bundles one worker thread with its in-flight task state. The
+  // worker's 'error' and 'exit' listeners are the only code path that can
+  // reject an in-flight task when the thread dies: the 'message' listener
+  // never fires on a dead thread, so without these the task would hang until
+  // the 10s watchdog — and the watchdog only rejected, it never restored the
+  // slot, so a death permanently shrank the pool. On death we: reject the
+  // in-flight task at once, retire the slot from the rotation, and spawn a
+  // replacement so the target thread count holds. The 'dead' flag makes
+  // die() idempotent — 'error' and 'exit' can both fire for one death.
+  function createSlot() {
+    const slot = { worker: null, busy: false, current: null, dead: false };
+    slot.worker = new Worker(workerSource, { eval: true });
+
+    const die = (reason) => {
+      if (slot.dead) return; // handle once even if both 'error' and 'exit' fire
+      slot.dead = true;
+      deadWorkers++;
+
+      // Reject the in-flight task immediately (no 10s wait). An idle worker
+      // (no current task) just retires and respawns.
+      const cur = slot.current;
+      if (cur) {
+        if (cur.timer) clearTimeout(cur.timer);
+        activeCount--;
+        failedCount++;
+        cur.reject(new Error('Worker thread terminated: ' + reason));
+      }
+
+      // Retire the slot, then hold the target thread count with a replacement
+      // so a death never permanently shrinks the pool. (Auto-respawn is
+      // bounded by the caller's task rate; systematic kill-loops are a #14
+      // backpressure concern, not handled here.)
+      const idx = workers.indexOf(slot);
+      if (idx !== -1) workers.splice(idx, 1);
+      if (workers.length < MAX_THREADS) workers.push(createSlot());
+    };
+
+    slot.worker.on('error', (e) => die('error: ' + e.message));
+    slot.worker.on('exit', (code) => die('exit code ' + code));
+    return slot;
   }
+
+  for (let i = 0; i < MAX_THREADS; i++) workers.push(createSlot());
 
   pool = {
     workers,
     execute(handler, input) {
       return new Promise((resolve, reject) => {
-        const free = workers.find(w => !w.busy);
+        const free = workers.find(w => !w.busy && !w.dead);
         if (free) {
           free.busy = true;
           activeCount++;
           const id = ++taskCounter;
-          let timer = null;
 
-          const cleanup = () => {
-            if (timer) clearTimeout(timer);
-            free.worker.off('message', handler_fn);
+          // finish() is the single settle path for the message and watchdog
+          // outcomes. It is a no-op if the slot already died — die() settled
+          // the task via the exit listener and cleared the timer that could
+          // call finish() — so message, watchdog, and death never
+          // double-settle the same task.
+          function finish(outcome) {
+            if (free.dead) return;
+            if (free.current && free.current.timer) clearTimeout(free.current.timer);
+            free.worker.off('message', onMessage);
             free.busy = false;
+            free.current = null;
             activeCount--;
-          };
+            if (outcome.ok) { completedCount++; resolve(outcome.value); }
+            else { failedCount++; reject(outcome.error); }
+          }
 
-          const handler_fn = (msg) => {
-            if (msg.id === id) {
-              cleanup();
-              completedCount++;
-              if (msg.ok) resolve(msg.data);
-              else reject(new Error(msg.error));
-            }
-          };
+          function onMessage(msg) {
+            if (msg.id !== id) return;
+            if (msg.ok) finish({ ok: true, value: msg.data });
+            else finish({ ok: false, error: new Error(msg.error) });
+          }
 
-          // Task execution timeout (10s safety guard against worker hangs)
-          timer = setTimeout(() => {
-            cleanup();
-            failedCount++;
-            reject(new Error(`Worker execution timed out for handler: ${handler}`));
-          }, 10000);
+          // current holds the in-flight task so die() can reject it from the
+          // exit listener. The watchdog is the last-resort guard for a worker
+          // that hangs without dying (neither 'message' nor 'exit' fires);
+          // crash death is handled faster by die().
+          free.current = { id: id, resolve: resolve, reject: reject, timer: null };
+          free.current.timer = setTimeout(
+            function () { finish({ ok: false, error: new Error('Worker execution timed out for handler: ' + handler) }); },
+            10000,
+          );
 
-          free.worker.on('message', handler_fn);
+          free.worker.on('message', onMessage);
 
           try {
-            free.worker.postMessage({ id, handler, input });
+            free.worker.postMessage({ id: id, handler: handler, input: input });
           } catch (postErr) {
-            cleanup();
-            failedCount++;
-            reject(postErr);
+            finish({ ok: false, error: postErr });
           }
         } else {
-          // All workers busy — fallback to inline dispatch through the SAME
-          // registry. No handler logic is duplicated; unknown handlers reject
+          // All workers busy — inline fallback through the SAME registry (#11).
+          // No handler logic is duplicated; unknown handlers reject
           // (consistent with the worker path), not silently resolve null.
           try {
             const result = dispatch(handler, input);
@@ -172,7 +229,13 @@ function getPool() {
       });
     },
     stats() {
-      return { active: activeCount, completed: completedCount, failed: failedCount, poolSize: workers.length };
+      return {
+        active: activeCount,
+        completed: completedCount,
+        failed: failedCount,
+        poolSize: workers.length,
+        deadWorkers: deadWorkers,
+      };
     }
   };
 
