@@ -75,7 +75,7 @@ export default definePluginEntry({
       } catch (err) {
         api.logger?.error?.(`[oc-session-guard] after_compaction failed: ${String(err)}`);
       }
-    });
+    }, { name: "oc-session-guard-after-compaction" });
 
     // ── Hook: session_end — purge stale subagents ───────────
     api.registerHook("session_end", async () => {
@@ -94,7 +94,7 @@ export default definePluginEntry({
       } catch (err) {
         api.logger?.error?.(`[oc-session-guard] session_end failed: ${String(err)}`);
       }
-    });
+    }, { name: "oc-session-guard-session-end" });
 
     // ── Tool: session_health ────────────────────────────────
     api.registerTool({

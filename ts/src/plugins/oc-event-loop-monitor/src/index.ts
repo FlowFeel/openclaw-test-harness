@@ -94,7 +94,7 @@ export default definePluginEntry({
       } catch {
         // Non-fatal
       }
-    });
+    }, { name: "oc-monitor-model-call-started" });
 
     // ── Hook: model_call_ended — collect post-call metrics ───
     api.registerHook("model_call_ended", async () => {
@@ -103,12 +103,12 @@ export default definePluginEntry({
       } catch {
         // Non-fatal
       }
-    });
+    }, { name: "oc-monitor-model-call-ended" });
 
     // ── Hook: gateway_stop — cleanup ─────────────────────────
     api.registerHook("gateway_stop", async () => {
       collector.stop();
-    });
+    }, { name: "oc-monitor-gateway-stop" });
 
     // ── Tool: event_loop_health ──────────────────────────────
     api.registerTool({

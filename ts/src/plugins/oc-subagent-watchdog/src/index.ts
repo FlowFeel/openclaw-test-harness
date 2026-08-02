@@ -52,7 +52,7 @@ export default definePluginEntry({
         `[oc-watchdog] Tracked spawn: ${event.sessionKey} ` +
         `(active: ${getActiveCount(subagents)}/${maxConcurrent})`
       );
-    });
+    }, { name: "oc-watchdog-subagent-spawned" });
 
     // ── Hook: subagent_ended ─────────────────────────────────
     api.registerHook("subagent_ended", async (event: { sessionKey?: string }) => {
@@ -62,7 +62,7 @@ export default definePluginEntry({
         `[oc-watchdog] Tracked end: ${event.sessionKey} ` +
         `(active: ${getActiveCount(subagents)}/${maxConcurrent})`
       );
-    });
+    }, { name: "oc-watchdog-subagent-ended" });
 
     // ── Tool: subagent_health ───────────────────────────────
     api.registerTool({

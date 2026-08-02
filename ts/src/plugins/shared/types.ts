@@ -1,14 +1,8 @@
 /**
  * Local type declarations for the OC plugin API surface.
- *
- * These are minimal declarations that match the OC plugin SDK contract.
+ * These match the real OC plugin SDK contract.
  * In production, the real types come from `openclaw/plugin-sdk/plugin-entry`.
- * In CI (without OC installed), these local declarations provide type safety.
- *
- * @dft: types are structural (duck-typed) — testable without the real SDK.
  */
-
-// ── Typebox substitute (minimal) ──────────────────────────────
 
 export const Type = {
   Object(properties: Record<string, unknown>) {
@@ -21,8 +15,6 @@ export const Type = {
     return { type: "any", ...opts };
   },
 };
-
-// ── Plugin API types ──────────────────────────────────────────
 
 export interface ToolResult {
   content: Array<{ type: "text"; text: string }>;
@@ -39,11 +31,10 @@ export interface HookEvent {
   [key: string]: unknown;
 }
 
-export interface HookContext {
-  sessionKey?: string;
-  agentId?: string;
-  runId?: string;
-  [key: string]: unknown;
+export interface HookOptions {
+  name: string;
+  priority?: number;
+  timeoutMs?: number;
 }
 
 export interface PluginApi {
@@ -54,8 +45,8 @@ export interface PluginApi {
   };
   registerHook: (
     events: string | string[],
-    handler: (event: HookEvent) => Promise<void>,
-    opts?: { priority?: number }
+    handler: (event: HookEvent) => Promise<void> | void,
+    opts?: HookOptions
   ) => void;
   registerTool: (tool: ToolDefinition, opts?: Record<string, unknown>) => void;
 }
@@ -66,8 +57,6 @@ export interface PluginDefinition {
   description: string;
   register: (api: PluginApi, config?: Record<string, unknown>) => void;
 }
-
-// ── Minimal definePluginEntry ─────────────────────────────────
 
 export function definePluginEntry(def: PluginDefinition): PluginDefinition {
   return def;
