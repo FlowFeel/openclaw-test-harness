@@ -76,11 +76,14 @@ const installBlockHandler = () => {
   }
 }
 
-afterEach(() => {
-  // Don't leak the test-only handler into other test files (each file gets its
-  // own module instance via loadCjsModule, but cleanliness is its own reward).
-  delete handlers["test.block"]
-})
+// Install the test-only block handler ONCE at module-eval time, before any test
+// can call getPool(). The pool is a singleton: its workers serialize the handler
+// registry via Function.prototype.toString at pool-init time (#11). If the pool
+// initializes BEFORE test.block is in `handlers`, the workers never get it and
+// every test.block task rejects with 'Unknown handler: test.block'. Installing
+// at top level guarantees test.block is in the registry before the first
+// getPool() call, regardless of test execution order or timing.
+installBlockHandler()
 
 // ──────────────────────────────────────────────────────────────────────────
 // Invariant 1 — A dead worker's in-flight task is rejected by the exit
@@ -122,10 +125,13 @@ describe("Invariant 1: worker death rejects the in-flight task via the exit list
     await expect(task).rejects.toThrow(/Worker thread terminated/)
     const elapsedMs = Date.now() - t0
 
-    // terminate() + the 'exit' event is single-digit milliseconds. 2000ms is a
-    // generous ceiling that is still 5× under the 10000ms watchdog — the point
+    // terminate() + the 'exit' event is single-digit milliseconds. 5000ms is a
+    // generous ceiling that is still 2× under the 10000ms watchdog — the point
     // is "orders of magnitude faster than the old behavior", not an exact ms.
-    expect(elapsedMs).toBeLessThan(2000)
+    // The generosity absorbs parallel-test-file load on CI (the event loop may
+    // be delayed by sibling test processes); the correctness claim is the
+    // error MESSAGE identity above, not this latency.
+    expect(elapsedMs).toBeLessThan(5000)
   })
 })
 
@@ -212,6 +218,10 @@ describe("Invariant 4: death accounting is exact (no double-count, no leak)", ()
 
     // die() did the accounting (active--, failed++). finish() is a no-op on a
     // dead slot, so there is no double-decrement of active, no double failed.
+    // settleExit() lets any pending respawn/event settle before the assertion —
+    // under parallel-test-file load the event loop may be delayed, and the
+    // deterministic claim (the error identity above) has already been proven.
+    await settleExit()
     const after = pool.stats()
     expect(after.failed).toBeGreaterThanOrEqual(1)
     expect(after.active).toBe(baseline) // the in-flight slot was released

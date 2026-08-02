@@ -98,7 +98,17 @@ function dispatch(handler, input) {
 // worker thread runs the exact same handler logic as the inline path — no
 // hand-maintained parallel copy. The worker is a stateless dispatcher: it
 // looks up the handler by name in the registry and posts back the result.
-const workerSource = `
+function getPool() {
+  if (pool) return pool;
+
+  // Build the worker source from the CURRENT `handlers` at pool-init time
+  // (#11 seam: Function.prototype.toString). This is built HERE, not at
+  // module-load time, so handlers added to the registry after module-load but
+  // before the first getPool() call (e.g. the test-only test.block handler) ARE
+  // serialized into the workers. Building at module-load time would freeze the
+  // registry at its initial built-ins, and later additions would never reach
+  // the workers — the worker would reject them with 'Unknown handler'.
+  const workerSource = `
 const { parentPort } = require('node:worker_threads');
 const handlers = {
 ${Object.entries(handlers).map(([name, fn]) => `  ${JSON.stringify(name)}: ${fn.toString()}`).join(',\n')}
@@ -112,9 +122,6 @@ parentPort.on('message', ({ id, handler, input }) => {
   }
 });
 `;
-
-function getPool() {
-  if (pool) return pool;
 
   const workers = [];
   let deadWorkers = 0;
