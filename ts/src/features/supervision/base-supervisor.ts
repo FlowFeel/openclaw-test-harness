@@ -232,16 +232,25 @@ export abstract class BaseSupervisor implements SubagentSupervisor {
     supervisorType: SupervisorEvent["type"],
   ): void {
     const from = actor.state
-    actor.state = transitionSubagent(actor.state, event)
+    const next = transitionSubagent(actor.state, event)
+    // Invalid transition (next === from) is a true no-op: no event, no counter.
+    // This is what makes the event sequence deterministic under real worker
+    // races — e.g. the happy worker's 'message' can fire before 'online' under
+    // CI scheduling; without this guard, apply(finish) on 'dispatched' would
+    // emit a spurious 'completed' event (finish is invalid from dispatched).
+    // The transition table is the authority; an invalid event produces no
+    // observable side effect.
+    if (next === from) return
+    actor.state = next
     this.emit({
       type: supervisorType,
       sessionKey: actor.sessionKey,
       atMs: this.clock.now(),
       retryCount: actor.retryCount,
       fromState: from,
-      toState: actor.state,
+      toState: next,
     })
-    if (actor.state === "failed") this.totalFailed++
+    if (next === "failed") this.totalFailed++
   }
 
   protected emit(e: SupervisorEvent): void {

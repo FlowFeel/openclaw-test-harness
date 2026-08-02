@@ -44,6 +44,24 @@ describe("MockSupervisor — Protocol lifecycle binding", () => {
     expect(supervisor.get("a:1")?.state).toBe("dispatched")
   })
 
+  it("signal() emits NO event on an invalid transition (no spurious event from a no-op)", () => {
+    // Guards the GHA flake fix: apply() must be a TRUE no-op on invalid
+    // transitions — no event, no counter. Without this, a real worker's
+    // 'message' racing ahead of 'online' under CI scheduling would emit a
+    // spurious 'completed' event (finish is invalid from dispatched), producing
+    // a non-deterministic event sequence [spawned, completed, started, completed]
+    // instead of [spawned, started, completed]. The transition table is the
+    // authority; an invalid event produces no observable side effect.
+    const events: SupervisorEvent[] = []
+    supervisor.onEvent((e) => events.push(e))
+    supervisor.spawn({ sessionKey: "a:1" }) // spawned (valid: created → dispatched)
+    expect(events.map((e) => e.type)).toEqual(["spawned"])
+    supervisor.signal("a:1", "finish") // invalid from dispatched — no-op, NO event
+    expect(events.map((e) => e.type)).toEqual(["spawned"])
+    supervisor.signal("a:1", "start") // valid: dispatched → running
+    expect(events.map((e) => e.type)).toEqual(["spawned", "started"])
+  })
+
   it("emits lifecycle events with deterministic timestamps from the injected clock", () => {
     const events: SupervisorEvent[] = []
     supervisor.onEvent((e) => events.push(e))
