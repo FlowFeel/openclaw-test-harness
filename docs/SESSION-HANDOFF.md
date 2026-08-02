@@ -17,8 +17,8 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 ### Active branch
 
 - **Branch:** `feat/multiagent-process-isolation`
-- **HEAD:** `5a08949` — `docs: add SESSION-HANDOFF for context recovery after /n compaction`
-- **Ahead of `main` by:** 1 commit (this file). The substantive Era 3 commits — #11, #13, #15 scaffold, the README/WAR-STORY rewrite — already merged to `main` via PR #1.
+- **HEAD:** `201e4d0` — `feat(worker-pool): #12 real Piscina integration — TDD off-main-thread`
+- **Ahead of `main` by:** 5 commits; 2 behind. The 5 ahead are: #13 crash isolation (`a40294e`), this handoff (`5a08949`) + its literate-style expansion (`182360f`), the Option D literate-compaction pi extension (`35167d2`), and #12 real Piscina (`201e4d0`). **None of #13 / #12 / Option D are on `main` yet** — they await PR #3. Correction: the prior handoff's claim that #13 merged via PR #1 was wrong. PR #1 (`15651f0`) merged #11 + #15 scaffold + the README/WAR-STORY rewrite only; `main`'s `worker-pool.js` has the #11 registry but not #13's `createSlot`/`die`/`deadWorkers`.
 
 ### `main` HEAD
 
@@ -26,8 +26,9 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 
 ### Pull requests
 
-- **PR #1** (merged to `main`): Era 3 roadmap (`ISSUES.md` #11–#17) + #11 handler registry + #15 supervisor scaffold + README three-era rewrite + WAR-STORY Phase 17.
-- **PR #2** (merged to `main`): the Ship Patches CI fix — see the "Ship Patches CI" section below.
+- **PR #1** (merged to `main`, `15651f0`): Era 3 roadmap (`ISSUES.md` #11–#17) + #11 handler registry + #15 supervisor scaffold + README three-era rewrite + WAR-STORY Phase 17.
+- **PR #2** (merged to `main`, `99a6660`): the Ship Patches CI fix — see the "Ship Patches CI" section below.
+- **PR #3** (not yet opened): #13 crash isolation + #12 real Piscina + Option D literate-compaction extension. All three are on the feature branch, green, awaiting a PR.
 
 ### Remote
 
@@ -41,14 +42,14 @@ The suite is green at HEAD across all four layers. These counts are the single m
 
 ### Total counts
 
-- **Total: 203 tests, all green.**
+- **Total: 221 tests, all green.**
 - **Python: 25** — `uv run pytest tests/unit tests/integration` (~0.2s).
-- **TypeScript: 178** — `cd ts && ./node_modules/.bin/vitest run` (~1–6s; E2E needs Docker).
+- **TypeScript: 196** — `cd ts && ./node_modules/.bin/vitest run` (~1–6s; E2E needs Docker). 179 without E2E (`--exclude '**/e2e/**'`, ~1.7s).
 
 ### TypeScript breakdown
 
 - **Spec (unit): 112** — pure transition tables, context reducers, worker-pool protocols, deterministic clocks, V8 heap invariants, the `SubagentSupervisor` Protocol.
-- **Integration: 49** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite, the #13 crash-isolation suite.
+- **Integration: 67** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite, the #13 crash-isolation suite, and the #12 real-Piscina integration suite (off-main-thread identity, registry conformance, Protocol compliance).
 - **E2E (Testcontainers, Docker-gated): 17** — patched-OC admission checks, the OpenRouter mock sidecar as a real long-lived container, and the sidecar wired into the OC container for the offline `admit spawn → model call` flow.
 
 ### Typecheck
@@ -66,7 +67,7 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 | # | Ticket | Status | Notes |
 |---|--------|--------|-------|
 | 11 | Handler-module registry | ✅ Done | Killed the god function. |
-| 12 | Real Piscina integration | 📋 Planned | Prod pool admits "run inline". |
+| 12 | Real Piscina integration | ✅ Done | Prod pool now uses real threads. |
 | 13 | Worker crash isolation & respawn | ✅ Done | Fixed dead-slot degradation. |
 | 14 | Per-topic fairness & backpressure | 📋 Planned | `getPool()` is a singleton. |
 | 15 | SubagentSupervisor Protocol | 🟡 Scaffolded | `MockSupervisor` done; real impls to follow. |
@@ -87,6 +88,14 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 - **The deterministic claim:** The spec proves the exit-listener path fired by the *error message identity* (`"Worker thread terminated"`, not `"timed out"`) — not by "it didn't hang." Bounded-latency (<2000ms vs 10000ms watchdog) is a secondary sanity check. `poolSize` invariance across N killings is the deterministic core of "no permanent loss."
 - **Proof:** `ts/tests/integration/worker-crash-isolation.spec.ts` (6 specs, 4 invariants).
 
+### #12 — Real Piscina Integration (✅ Done)
+
+- **What:** `PiscinaWorkerPool` (the production `WorkerPool` Protocol transport) now uses real worker_threads. Its handler registry is serialized into a CJS worker file via `Function.prototype.toString` — the #11 seam — and `execute()` posts `{ handler, input }` to Piscina (`pool.run`), which dispatches on a real worker thread. The registry is constructor-injected (defaults to the `handlers.ts` builtins; the conformance spec passes the patch's `handlers` object so the Piscina worker runs the patch's code verbatim). `register()` bakes a handler into the worker file at init time (must precede first `execute()`; throws after init — the pre-#12 `register()` silently stored handlers in a Map that `execute()` never read). `minThreads === maxThreads` pins the thread count. `drain()` polls `activeTasks` to zero without closing (Protocol: drain = wait, destroy = terminate).
+- **Why it mattered:** Pre-#12 `PiscinaWorkerPool.execute()` called `fn(input)` inline on the main thread — it used **no worker_threads**, so prod was functionally identical to `MockWorkerPool`. The Protocol abstraction was undermined: swapping implementations changed nothing about execution. The only real parallelism lived inside the #11 god-function patch; the "production" Protocol impl was a no-op.
+- **The seam:** `Function.prototype.toString` is the #11 seam, reused here. Purity is what makes it work across the process boundary — every handler is closure-free, so its serialized body reconstructs faithfully in the worker realm. Piscina workers are real files (Piscina can't `eval` a string source the way `worker_threads` can), and `workerData` can't carry the registry (functions aren't structured-cloneable), so `toString` is the only seam.
+- **The deterministic claim:** The off-main-thread proof is a `threadId` probe (serialized via `toString`): the main thread is `threadId 0`, workers are `≥ 1` — a non-zero tid is deterministic proof of real worker execution, not "it's fast." Registry conformance is deep-equal (`PiscinaWorkerPool.execute` === patch `dispatch`) for all 7 built-in handlers. The unknown-handler error identity matches the patch's `dispatch` (`"Unknown handler: <name>"`) — the pre-worker fast path uses the SAME message so pool-level and worker-level paths share one identity (the #11 no-drift principle, extended to #12).
+- **Proof:** `ts/tests/integration/piscina-pool.spec.ts` (18 specs across 3 invariants: off-main-thread, registry conformance, Protocol compliance).
+
 ### #15 — SubagentSupervisor Protocol (🟡 Scaffolded)
 
 - **What:** A `SubagentSupervisor` Protocol (`ts/src/features/supervision/supervisor.schema.ts`) + `MockSupervisor` (`mock-supervisor.ts`) that bind the pure `transitionSubagent` table to supervisor lifecycle events. The supervisor never invents a transition — it delegates every state change to the pure table. Restart backoff is computed from the injected `Clock` (#7); restart terminates the active run then creates a fresh `created → dispatched` actor with `retryCount+1` (respecting that the table forbids `failed → dispatch`).
@@ -96,7 +105,6 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 
 ### Planned tickets (brief)
 
-- **#12 Real Piscina** — `piscina-pool.ts:105` admits "run inline"; point Piscina's `filename` at a worker entry importing the #11 registry so prod actually uses threads. Can adopt the #13 slot/respawn pattern against Piscina's task lifecycle.
 - **#14 Per-topic fairness** — `getPool()` is a module singleton; no per-topic queue/fairness. A `FairPool` Protocol with per-topic queues + a backpressure signal feeding admission.
 - **#16 Per-topic actor isolation** — each topic runs as an isolated supervised actor; main process becomes a thin router. Builds on #15.
 - **#17 Live telemetry → admission** — `ProcessTelemetry` Protocol populates `SystemHealth` from real `monitorEventLoopDelay` / `captureV8Snapshot` readings; admission reacts to real pressure, not fixtures.
@@ -126,6 +134,11 @@ These are the files touched most often. Knowing their role and their literate co
 ### `ISSUES.md`
 
 - **Role:** The authoritative ticket spec. #11–#17 each carry file:line evidence for the problem, the solution, the acceptance criteria, and the status. Update a ticket's status line when its work lands.
+
+### `.pi/extensions/literate-compaction/` (Option D — pi extension)
+
+- **Role:** A pi extension that replaces the default compaction summary with one in the phosphene literate style (terse labels paired with their Why). Hooks `session_before_compact`; the pure logic (`buildLiteratePrompt`, `buildSummaryMessages`, `validateLiterateSummary`) is the testable seam, TDD'd with `node:test` (13 specs, green); `index.ts` is thin wiring (Gemini Flash preferred, falls back to the active model, then to default compaction on any failure). **Not on `main`** — feature-branch-only, awaits PR #3.
+- **Why it exists:** Pi's built-in compaction preserves the *what* but can lose the *why*. This extension makes the summary literate, matching the prose density of this very file. `/reload` to load; `/compact` to invoke.
 
 ---
 
@@ -201,17 +214,21 @@ These building blocks are already merged to `main` and are depended on by Era 3 
 
 When resuming, start here.
 
-### 1. #12 — Real Piscina integration
-
-- `piscina-pool.ts:105` admits "run inline — real Piscina integration requires serializable handlers." Point Piscina's `filename` at a worker entry that imports the #11 registry. The registry is now a real seam (#11), so this is wiring, not redesign. Consider adopting the #13 slot/respawn pattern against Piscina's task lifecycle so prod and the harness patch converge on one crash model.
-
-### 2. #15 follow-on — real supervisor implementations
+### 1. #15 follow-on — real supervisor implementations
 
 - `WorkerSupervisor` (worker_threads) and `ProcessSupervisor` (child_process) implementations of the scaffolded `SubagentSupervisor` Protocol. The `MockSupervisor` is the test double; these bind the Protocol to real process lifecycle.
 
-### 3. PRs & shipping
+### 2. #14 — Per-topic fairness & backpressure
 
-- Open PRs against `main`. On green main CI, `Ship Patches` auto-runs and ships a content-hash-tagged release with all patch assets. No manual release step.
+- `getPool()` is a module singleton; a `FairPool` Protocol with per-topic queues + a backpressure signal feeding admission. More design-heavy than #12; standalone.
+
+### 3. #16 / #17 — per-topic actor isolation + live telemetry → admission
+
+- Depends on #15 follow-on. Each topic runs as an isolated supervised actor; `ProcessTelemetry` feeds `SystemHealth` from real `monitorEventLoopDelay`/heap.
+
+### 4. PR #3 — ship #13 + #12 + Option D to `main`
+
+- Open a PR from `feat/multiagent-process-isolation` → `main`. On green main CI, `Ship Patches` auto-runs and ships a content-hash-tagged release with all patch assets. No manual release step.
 
 ---
 
