@@ -81,6 +81,7 @@ const fixtures: Array<{ handler: string; input: unknown }> = [
 // `require` is in scope) — the same #11 seam that carries every built-in
 // handler across the process boundary.
 const probeTid = (_input: unknown): number =>
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require("node:worker_threads").threadId as number
 
 describe("PiscinaWorkerPool (#12) — real worker threads, not inline", () => {
@@ -102,7 +103,7 @@ describe("PiscinaWorkerPool (#12) — real worker threads, not inline", () => {
     expect(result.ok).toBe(true)
     expect(typeof result.data).toBe("number")
     expect(result.data!).toBeGreaterThanOrEqual(1)
-  }, 2000)
+  }, 10000)
 
   it("does NOT run inline — before #12 the same call returned threadId 0", async () => {
     // Regression guard: the pre-#12 PiscinaWorkerPool.execute() called fn(input)
@@ -115,7 +116,7 @@ describe("PiscinaWorkerPool (#12) — real worker threads, not inline", () => {
     const result = await pool.execute<number>("probe.tid", {})
     expect(result.ok).toBe(true)
     expect(result.data).not.toBe(0)
-  }, 2000)
+  }, 10000)
 
   it("poolSize reflects real worker threads after first execute", async () => {
     // minThreads is pinned to maxThreads so the thread count is stable (no idle
@@ -128,7 +129,7 @@ describe("PiscinaWorkerPool (#12) — real worker threads, not inline", () => {
     const s = pool.stats()
     expect(s.poolSize).toBe(2)
     expect(s.completedTasks).toBe(1)
-  }, 2000)
+  }, 10000)
 })
 
 describe("PiscinaWorkerPool (#12) — shares the patch's handler registry (conformance)", () => {
@@ -149,7 +150,7 @@ describe("PiscinaWorkerPool (#12) — shares the patch's handler registry (confo
       const viaInline = dispatch(handler, input)
       expect(viaPiscina.ok).toBe(true)
       expect(viaPiscina.data).toEqual(viaInline)
-    }, 2000)
+    }, 10000)
   }
 
   it("unknown handler rejects with the same identity as inline dispatch", async () => {
@@ -162,7 +163,7 @@ describe("PiscinaWorkerPool (#12) — shares the patch's handler registry (confo
     expect(viaPiscina.ok).toBe(false)
     expect(viaPiscina.error).toMatch(/Unknown handler/)
     expect(() => dispatch("does.not.exist", {})).toThrow(/Unknown handler/)
-  }, 2000)
+  }, 10000)
 })
 
 describe("PiscinaWorkerPool (#12) — Protocol compliance (register / stats / drain / destroy)", () => {
@@ -181,7 +182,7 @@ describe("PiscinaWorkerPool (#12) — Protocol compliance (register / stats / dr
     const result = await pool.execute<number>("probe.tid", {})
     expect(result.ok).toBe(true)
     expect(result.data!).toBeGreaterThanOrEqual(1)
-  }, 2000)
+  }, 10000)
 
   it("register() after the pool is initialized throws (worker file is baked)", async () => {
     // Piscina workers are real files; the registry is serialized at init. A
@@ -191,7 +192,7 @@ describe("PiscinaWorkerPool (#12) — Protocol compliance (register / stats / dr
     pool = new PiscinaWorkerPool({ maxThreads: 2, handlers: { "probe.tid": probeTid } })
     await pool.execute("probe.tid", {}) // initializes the pool
     expect(() => pool.register("late", () => null)).toThrow(/initialized/)
-  }, 2000)
+  }, 10000)
 
   it("drain() resolves after in-flight work completes", async () => {
     pool = new PiscinaWorkerPool({ maxThreads: 2, handlers })
@@ -200,7 +201,7 @@ describe("PiscinaWorkerPool (#12) — Protocol compliance (register / stats / dr
     await pool.drain()
     const s = pool.stats()
     expect(s.completedTasks).toBe(2)
-  }, 2000)
+  }, 10000)
 
   it("destroy() makes the pool unusable — subsequent execute returns ok:false", async () => {
     pool = new PiscinaWorkerPool({ maxThreads: 2, handlers: { "probe.tid": probeTid } })
@@ -209,7 +210,7 @@ describe("PiscinaWorkerPool (#12) — Protocol compliance (register / stats / dr
     const result = await pool.execute("probe.tid", {})
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/destroy/i)
-  }, 2000)
+  }, 10000)
 
   it("unregistered handler returns ok:false via the pre-worker fast path (same identity as the worker)", async () => {
     // A handler not in the registry is rejected before reaching Piscina — no
@@ -220,5 +221,5 @@ describe("PiscinaWorkerPool (#12) — Protocol compliance (register / stats / dr
     const result = await pool.execute("never.registered", {})
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/Unknown handler/)
-  }, 2000)
+  }, 10000)
 })

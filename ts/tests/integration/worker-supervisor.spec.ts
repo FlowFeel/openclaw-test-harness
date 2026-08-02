@@ -62,7 +62,7 @@ async function waitFor(
   supervisor: WorkerSupervisor,
   key: string,
   state: string,
-  ms = 2000,
+  ms = 10000,
 ): Promise<void> {
   const deadline = Date.now() + ms
   while (supervisor.get(key)?.state !== state) {

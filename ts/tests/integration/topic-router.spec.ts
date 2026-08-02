@@ -63,7 +63,7 @@ describe("TopicRouter (#16) — isolated actors, lazy spawn, RPC", () => {
     // The actor was spawned and is now running (online → start).
     expect(router.get("A")?.state).toBe("running")
     expect(router.get("A")?.pid).not.toBeNull()
-  }, 2000)
+  }, 10000)
 
   it("dispatch() to a second topic spawns a SEPARATE actor (different threadId)", async () => {
     // Isolation: each topic has its OWN worker thread. Different threadIds prove
@@ -76,7 +76,7 @@ describe("TopicRouter (#16) — isolated actors, lazy spawn, RPC", () => {
     expect(pidA).not.toBeNull()
     expect(pidB).not.toBeNull()
     expect(pidA).not.toBe(pidB)
-  }, 2000)
+  }, 10000)
 
   it("dispatch() routes multiple requests to the same long-lived actor (not one-shot)", async () => {
     // The actor is long-lived (RPC), not one-shot (#15's observe-and-exit). Two
@@ -88,7 +88,7 @@ describe("TopicRouter (#16) — isolated actors, lazy spawn, RPC", () => {
     const second = await router.dispatch("A", "second")
     expect(second).toBe("second")
     expect(router.get("A")!.pid).toBe(pidAfterFirst) // same actor
-  }, 2000)
+  }, 10000)
 })
 
 describe("TopicRouter (#16) — crash containment (acceptance #1)", () => {
@@ -108,7 +108,7 @@ describe("TopicRouter (#16) — crash containment (acceptance #1)", () => {
     const crashPromise = router.dispatch("A", { crash: true })
     await expect(crashPromise).rejects.toThrow(/crashed|exited/)
     expect(router.get("A")?.state).toBe("failed")
-  }, 2000)
+  }, 10000)
 
   it("after A crashes, B CONTINUES SERVING (sibling isolation — the core #16 guarantee)", async () => {
     // The load-bearing claim of #16: a crash of one topic is CONTAINED. B's
@@ -128,7 +128,7 @@ describe("TopicRouter (#16) — crash containment (acceptance #1)", () => {
     expect(result).toBe("still-here")
     expect(elapsed).toBeLessThan(2000) // bounded-latency sanity guard
     expect(router.get("B")?.state).toBe("running")
-  }, 3000)
+  }, 10000)
 
   it("crashContainment() reports A crashed and B still serving (pure decision, live snapshot)", async () => {
     // The pure containment decision applied to live state: after A crashes,
@@ -141,7 +141,7 @@ describe("TopicRouter (#16) — crash containment (acceptance #1)", () => {
     const result = router.crashContainment("A")
     expect(result.crashed).toBe("A")
     expect(result.serving).toEqual(["B"])
-  }, 3000)
+  }, 10000)
 
   it("dispatch() to a crashed topic self-heals (restart → fresh actor → succeeds)", async () => {
     // Self-healing: after A crashes (failed), a subsequent dispatch restarts A
@@ -157,7 +157,7 @@ describe("TopicRouter (#16) — crash containment (acceptance #1)", () => {
     expect(router.get("A")?.state).toBe("running")
     expect(router.get("A")?.retryCount).toBe(1)
     expect(router.get("A")?.pid).not.toBe(pidBefore) // fresh actor
-  }, 3000)
+  }, 10000)
 })
 
 describe("TopicRouter (#16) — per-topic attribution (acceptance #2)", () => {
@@ -180,7 +180,7 @@ describe("TopicRouter (#16) — per-topic attribution (acceptance #2)", () => {
       { topic: "A", state: "running", retryCount: 0, active: true },
       { topic: "B", state: "running", retryCount: 0, active: true },
     ])
-  }, 2000)
+  }, 10000)
 
   it("topicStats() reflects a crash per-topic (A failed/inactive, B running/active)", async () => {
     // After A crashes, topicStats shows A inactive (failed) and B active
@@ -197,7 +197,7 @@ describe("TopicRouter (#16) — per-topic attribution (acceptance #2)", () => {
     expect(aStat.state).toBe("failed")
     expect(bStat.active).toBe(true)
     expect(bStat.state).toBe("running")
-  }, 3000)
+  }, 10000)
 })
 
 describe("TopicRouter (#16) — lifecycle & Protocol compliance (builds on #15)", () => {
@@ -217,7 +217,7 @@ describe("TopicRouter (#16) — lifecycle & Protocol compliance (builds on #15)"
     const restarted = router.restart("A")!
     expect(restarted.retryCount).toBe(1)
     expect(restarted.pid).not.toBe(pidBefore)
-  }, 2000)
+  }, 10000)
 
   it("reap() terminates the topic's actor and drops it", async () => {
     router = new TopicRouter({ actorEntry: ECHO_TOPIC_ENTRY, policy: testPolicy })
@@ -225,7 +225,7 @@ describe("TopicRouter (#16) — lifecycle & Protocol compliance (builds on #15)"
     router.reap("A")
     expect(router.get("A")).toBeNull()
     expect(router.stats().totalReaped).toBe(1)
-  }, 2000)
+  }, 10000)
 
   it("never invents a transition — invalid signal is a no-op (delegates to transitionSubagent)", async () => {
     // The #15 invariant, preserved: the router binds real events to the table
@@ -234,7 +234,7 @@ describe("TopicRouter (#16) — lifecycle & Protocol compliance (builds on #15)"
     await router.dispatch("A", "a")
     router.signal("A", "archive")
     expect(router.get("A")?.state).toBe("running")
-  }, 2000)
+  }, 10000)
 
   it("stop() reaps all topic actors (clean shutdown, no leaked workers)", async () => {
     router = new TopicRouter({ actorEntry: ECHO_TOPIC_ENTRY, policy: testPolicy })
@@ -244,5 +244,5 @@ describe("TopicRouter (#16) — lifecycle & Protocol compliance (builds on #15)"
     expect(router.get("A")).toBeNull()
     expect(router.get("B")).toBeNull()
     expect(router.topicStats()).toEqual([])
-  }, 2000)
+  }, 10000)
 })

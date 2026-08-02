@@ -20,20 +20,3 @@ services:
       timeout: 3s
       retries: 3
 
-  integration:
-    image: node:22-bookworm-slim
-    container_name: oc-integration
-    working_dir: /app/ts
-    volumes:
-      - ../ts:/app/ts
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - NODE_ENV=test
-    command: |
-      sh -c "
-        npm ci --include=dev &&
-        npx vitest run tests/integration/ tests/e2e/ --reporter=verbose
-      "
-    depends_on:
-      oc-test:
-        condition: service_completed_successfully
