@@ -126,3 +126,61 @@ describe("worker-pool registry conformance with handlers.ts (derived-from, not r
     expect(dispatch("fanout.topics", input)).toEqual(fanoutTopics(input as any))
   })
 })
+
+// ──────────────────────────────────────────────────────────────────────────
+// GHA flake regression (ticket #11/#13): a handler added to the registry
+// BEFORE the first getPool() call must reach the WORKER, not just the inline
+// fallback. Before the fix, workerSource was built at MODULE-LOAD time from the
+// initial handlers — so any handler added later (e.g. the crash-isolation
+// suite's test.block) never reached the workers. The test passed locally only
+// because it hit the inline fallback (which reads live handlers); under GHA's
+// scheduling the worker path was taken, exposing 'Unknown handler: test.block'.
+//
+// This test reproduces the GHA condition DETERMINISTICALLY: a fresh module
+// instance, a handler added before pool-init, forced worker-path execution.
+// Before the fix it failed with 'Unknown handler'; after, it succeeds.
+// ──────────────────────────────────────────────────────────────────────────
+describe("worker-pool registry — handlers added before pool-init reach the workers (GHA flake regression)", () => {
+  // Load a FRESH patch instance so the singleton pool is null — this isolates
+  // the test from the shared module-level singleton the other tests use.
+  function freshPatch() {
+    return loadCjsModule(patchPath) as {
+      getPool: () => {
+        execute: (handler: string, input: unknown) => Promise<unknown>
+        stats: () => { poolSize: number }
+      }
+      dispatch: (handler: string, input: unknown) => unknown
+      handlers: Record<string, (input: any) => unknown>
+    }
+  }
+
+  it("a handler added to the registry before getPool() reaches the worker (not 'Unknown handler')", async () => {
+    // The GHA condition: add a handler AFTER module-load but BEFORE the first
+    // getPool() call. workerSource is built inside getPool() from the CURRENT
+    // handlers — so the handler is serialized into the workers. Before the fix,
+    // workerSource was built at module-load time and the handler never reached
+    // the workers; the worker path rejected with 'Unknown handler: late.handler'.
+    const mod = freshPatch()
+    mod.handlers["late.handler"] = (input: { tag: string }) => `worker-saw:${input.tag}`
+    const pool = mod.getPool() // initializes the pool — workerSource built NOW
+    const result = await pool.execute("late.handler", { tag: "late" })
+    expect(result).toBe("worker-saw:late")
+  })
+
+  it("the late handler is NOT in the module-load-time registry (proves the fix is pool-init-time serialization)", () => {
+    // Sanity: a fresh module's initial handlers do NOT include late.handler.
+    // This proves the handler reaches the workers via pool-init-time
+    // serialization (the fix), not because it was in the initial registry.
+    const mod = freshPatch()
+    expect("late.handler" in mod.handlers).toBe(false)
+    expect(Object.keys(mod.handlers).sort()).toEqual([
+      "compact.transcript",
+      "fanout.topics",
+      "ipc.transfer",
+      "json.parse",
+      "json.stringify",
+      "measure.size",
+      "serialize.session",
+    ])
+  })
+})

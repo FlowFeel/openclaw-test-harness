@@ -180,7 +180,7 @@ describe("Built-in handlers — session serialization", () => {
     expect(result.ok).toBe(true)
     expect(result.data?.length).toBe(6)
     expect(result.data?.[0].topic).toBe("topic-1")
-    expect(JSON.parse(result.data?.[0].payload!)).toEqual(payload)
+    expect(JSON.parse((result.data?.[0] as any).payload)).toEqual(payload)
   })
 })
 
