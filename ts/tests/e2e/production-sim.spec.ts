@@ -88,13 +88,13 @@ const { report } = cleanupSessions(sessions, {
 console.log(JSON.stringify(report));
 `,
   tracker: `
-import { trackSpawn, getActiveCount, canSpawn } from '/app/workspace/plugins/oc-subagent-watchdog/src/subagent-tracker.js';
+import { trackSpawn, getActiveCount, canSpawn } from '/app/workspace/plugins/oc-subagent-watchdog/src/subagent-tracker.ts';
 let map = new Map();
 map = trackSpawn(map, { sessionKey: 'sub-1', startedAtMs: 1000000 }, 1000000);
 console.log(JSON.stringify({ active: getActiveCount(map), canSpawnMore: canSpawn(map, 2) }));
 `,
   telemetry: `
-import { aggregateSystemHealth } from '/app/workspace/plugins/shared/telemetry-logic.js';
+import { aggregateSystemHealth } from '/app/workspace/plugins/shared/telemetry-logic.ts';
 const health = aggregateSystemHealth([{
   actorId: 'main', eventLoopP99Ms: 5, eventLoopUtilization: 0.05,
   usedHeapSize: 50000000, cpuRatio: 0.01,
