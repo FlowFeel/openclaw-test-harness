@@ -17,8 +17,8 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 ### Active branch
 
 - **Branch:** `feat/multiagent-process-isolation`
-- **HEAD:** `2aa8953` — `feat(worker-pool): #14 per-topic fairness & backpressure — TDD pure seam + FairPool`
-- **Ahead of `main` by:** 9 commits; 2 behind. The feature commits: #13 (`a40294e`), the handoff + expansion (`5a08949`/`182360f`), Option D literate-compaction (`35167d2`), #12 real Piscina (`201e4d0`), the #12 handoff (`2a20c00`), #15 real Worker/Process supervisors (`4427d3b`), the #15 handoff (`8a45523`), and #14 FairPool (`2aa8953`). **None of #13 / #12 / #15 / #14 / Option D are on `main` yet** — they await PR #3.
+- **HEAD:** `2fa92c5` — `feat(topic-router): #16 per-topic actor isolation — TDD pure seam + TopicRouter`
+- **Ahead of `main` by:** 11 commits; 2 behind. The feature commits: #13 (`a40294e`), the handoff + expansion (`5a08949`/`182360f`), Option D literate-compaction (`35167d2`), #12 real Piscina (`201e4d0`), the #12 handoff (`2a20c00`), #15 real Worker/Process supervisors (`4427d3b`), the #15 handoff (`8a45523`), #14 FairPool (`2aa8953`), the #14 handoff (`2e1da55`), and #16 TopicRouter (`2fa92c5`). **None of #13 / #12 / #15 / #14 / #16 / Option D are on `main` yet** — they await PR #3.
 
 ### `main` HEAD
 
@@ -28,7 +28,7 @@ The current locus of work is a feature branch one commit ahead of `main`; `main`
 
 - **PR #1** (merged to `main`, `15651f0`): Era 3 roadmap (`ISSUES.md` #11–#17) + #11 handler registry + #15 supervisor scaffold + README three-era rewrite + WAR-STORY Phase 17.
 - **PR #2** (merged to `main`, `99a6660`): the Ship Patches CI fix — see the "Ship Patches CI" section below.
-- **PR #3** (not yet opened): #13 crash isolation + #12 real Piscina + #15 real Worker/Process supervisors + #14 FairPool + Option D literate-compaction extension. All on the feature branch, green, awaiting a PR.
+- **PR #3** (not yet opened): #13 crash isolation + #12 real Piscina + #15 real Worker/Process supervisors + #14 FairPool + #16 TopicRouter + Option D literate-compaction extension. All on the feature branch, green, awaiting a PR.
 
 ### Remote
 
@@ -42,14 +42,14 @@ The suite is green at HEAD across all four layers. These counts are the single m
 
 ### Total counts
 
-- **Total: 264 tests, all green.**
+- **Total: 287 tests, all green.**
 - **Python: 25** — `uv run pytest tests/unit tests/integration` (~0.2s).
-- **TypeScript: 239** — `cd ts && ./node_modules/.bin/vitest run` (~2–7s; E2E needs Docker). 222 without E2E (`--exclude '**/e2e/**'`, ~2.2s).
+- **TypeScript: 262** — `cd ts && ./node_modules/.bin/vitest run` (~2–7s; E2E needs Docker). 245 without E2E (`--exclude '**/e2e/**'`, ~2.7s).
 
 ### TypeScript breakdown
 
 - **Spec (unit): 112** — pure transition tables, context reducers, worker-pool protocols, deterministic clocks, V8 heap invariants, the `SubagentSupervisor` Protocol.
-- **Integration: 99** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite, the #13 crash-isolation suite, the #12 real-Piscina integration suite, the #15 real-supervisor suites (WorkerSupervisor + ProcessSupervisor — 9 + 9), and the #14 FairPool suite (per-topic fairness, backpressure, Protocol compliance — 14 specs).
+- **Integration: 112** — SQLite accessors, BDD scenarios, `patch-package` validation, the OpenRouter mock sidecar, worker fault injection, the #11 handler-registry conformance suite, the #13 crash-isolation suite, the #12 real-Piscina integration suite, the #15 real-supervisor suites (WorkerSupervisor + ProcessSupervisor — 9 + 9), the #14 FairPool suite (per-topic fairness, backpressure, Protocol compliance — 14 specs), and the #16 TopicRouter suite (per-topic isolation, crash containment, attribution, lifecycle — 13 specs).
 - **E2E (Testcontainers, Docker-gated): 17** — patched-OC admission checks, the OpenRouter mock sidecar as a real long-lived container, and the sidecar wired into the OC container for the offline `admit spawn → model call` flow.
 
 ### Typecheck
@@ -71,7 +71,7 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 | 13 | Worker crash isolation & respawn | ✅ Done | Fixed dead-slot degradation. |
 | 14 | Per-topic fairness & backpressure | ✅ Done | FairPool round-robins; per-topic backpressure. |
 | 15 | SubagentSupervisor Protocol | ✅ Done | Mock + Worker + Process impls; real lifecycle bound. |
-| 16 | Per-topic actor isolation | 📋 Planned | Depends on #15. |
+| 16 | Per-topic actor isolation | ✅ Done | TopicRouter; crash contained per topic. |
 | 17 | Live telemetry → admission | 📋 Planned | Depends on #15, #16. |
 
 ### #11 — Handler-Module Registry (✅ Done)
@@ -104,6 +104,14 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 - **The deterministic claim:** The fairness proof is dispatch ORDER, not wall-clock. Under flood (maxConcurrent=1, A×5 + B×1), completion order is `[A0, B0, A1, A2, A3, A4]` — B at index 1, not 5 (round-robin interleaves). Alternation (`A,B,A,B,...`), drained-topic-skip, and maxConcurrent=2 (`[A0,A1,B0,A2,A3]`) are also deep-equal assertions. Backpressure flips `apply=true` at depth > threshold, per-topic (A floods, B stays false). Bounded-latency (<2000ms) is a secondary sanity check, never the load-bearing claim.
 - **Proof:** `ts/tests/spec/fair-scheduler.spec.ts` (11 pure specs) + `ts/tests/integration/fair-pool.spec.ts` (14 integration specs: fairness / backpressure / Protocol compliance).
 
+### #16 — Per-Topic Actor Isolation (✅ Done)
+
+- **What:** `TopicRouter` (`topic-router.ts`) `extends BaseSupervisor` (#15's lifecycle spine) and adds an RPC layer. Each topic runs as an ISOLATED supervised actor — a dedicated long-lived worker_thread. `dispatch(topic, request)` routes to the topic's actor (lazy-spawn; terminal → restart/self-heal; live → route), awaits the reply. The pure seam (`topic-router-logic.ts`): `selectActorForTopic` (route-vs-spawn), `aggregateTopicStats` (per-topic attribution), `crashContainment` (after a crash, which topics still serve). `doSpawn` wires `'online'`→start, `'message'`→RPC-reply-routing-by-id (NOT one-shot `finish` — the actor is long-lived), `'error'`/non-zero `'exit'`→error+reject-in-flight. The main process is a thin router.
+- **Why it mattered:** Every topic shared the one OC process and the one global pool (#14). Topic fan-out and per-turn serialization competed on the same event loop; a pathological topic (runaway subagent, huge compaction) degraded every other topic. There was no isolation boundary between topics.
+- **The seam:** `selectActorForTopic` / `aggregateTopicStats` / `crashContainment` are pure (immutable `ActorHandle[]` in, result out). `TopicRouter` is the I/O wiring, extending `BaseSupervisor` (reusing #15's `apply()`→`transitionSubagent`, restart, reap, stats). The ONLY specialization is `doSpawn`/`doTerminate`: long-lived RPC actors vs #15's one-shot observe-and-exit. Actor entries are constructor-injected (mirrors #12/#15).
+- **The deterministic claim:** Crash containment is proven by VALUE/REJECTION identity, not wall-clock. After A crashes (dispatch `{crash:true}` → `process.exit(1)`): A's in-flight dispatch REJECTS with "crashed"/"exited" (exit-listener identity, not a hang); B's dispatch SUCCEEDS with the exact echoed value (B's worker is a separate thread — deep-equal, not "B is fast"); `crashContainment("A")` → `{ crashed: "A", serving: ["B"] }` (pure, live); dispatch to A after crash self-heals (restart → fresh threadId, retryCount+1). Per-topic attribution: `topicStats()` shows A `failed`/inactive, B `running`/active (crash attributed to A only). Each topic gets a SEPARATE threadId (isolation). Bounded-latency (<2000ms/<3000ms) is a secondary sanity guard.
+- **Proof:** `ts/tests/spec/topic-router-logic.spec.ts` (10 pure specs) + `ts/tests/integration/topic-router.spec.ts` (13 integration specs: isolation / crash-containment / attribution / lifecycle).
+
 ### #15 — SubagentSupervisor Protocol (✅ Done)
 
 - **What:** The `SubagentSupervisor` Protocol binds the pure `transitionSubagent` table to real process/thread lifecycle. The shared spine lives in `BaseSupervisor` (`base-supervisor.ts`) — actor map, listeners, injected `Clock` (#7), `RestartPolicy`, counters, `apply()`/`require()`/`mapEvent()`/`emit()`/`snapshot()` — with `doSpawn`/`doTerminate` as the only seams. Three implementations: `MockSupervisor` (no-op seams, in-process), `WorkerSupervisor` (`new Worker` per actor; `'online'`→start, `'message'{ok:true}`→finish, `'error'`/non-zero `'exit'`→error; `doTerminate` = detach + `terminate()`), `ProcessSupervisor` (`child_process.spawn` per actor; `'spawn'`→start, `'exit'` 0→finish, non-zero/`'error'`→error; `doTerminate` = detach + `SIGKILL`). Actor entries are constructor-injected (mirrors #12).
@@ -119,8 +127,7 @@ The active era. It targets the two structural anti-patterns the prior eras left 
 
 ### Planned tickets (brief)
 
-- **#16 Per-topic actor isolation** — each topic runs as an isolated supervised actor; main process becomes a thin router. Builds on #15 (now ✅ Done — `WorkerSupervisor`/`ProcessSupervisor` are the real actor backends). #14 FairPool now gives per-topic fairness/backpressure to feed admission.
-- **#17 Live telemetry → admission** — `ProcessTelemetry` Protocol populates `SystemHealth` from real `monitorEventLoopDelay` / `captureV8Snapshot` readings; admission reacts to real pressure, not fixtures. Builds on #15/#16. (#14's `backpressure(topic)` is the per-topic signal that plugs in here.)
+- **#17 Live telemetry → admission** — `ProcessTelemetry` Protocol populates `SystemHealth` from real `monitorEventLoopDelay` / `captureV8Snapshot` readings; admission reacts to real pressure, not fixtures. Builds on #15/#16. (#14's `backpressure(topic)` and #16's `topicStats()`/`crashContainment()` are the per-topic signals that plug in here.)
 
 ---
 
@@ -148,6 +155,11 @@ These are the files touched most often. Knowing their role and their literate co
 
 - **Role:** The #15 `SubagentSupervisor` Protocol + Effect schemas (`ActorHandle`, `RestartPolicy`, `SupervisorEvent`) and the three implementations. `BaseSupervisor` holds the shared lifecycle spine (actor map, listeners, injected `Clock`, `apply()`→`transitionSubagent`); `MockSupervisor`/`WorkerSupervisor`/`ProcessSupervisor` override only the `doSpawn`/`doTerminate` seams.
 - **Convention:** The supervisor delegates *all* state transitions to the pure `transitionSubagent` table — it never invents a transition. This keeps `*.machine.ts` pure and I/O-free, with the supervisor as the only component that owns real process lifecycle. `WorkerSupervisor` wires real `'online'`/`'message'`/`'error'`/`'exit'`; `ProcessSupervisor` wires real `'spawn'`/`'exit'`/`'error'`. Actor entries are constructor-injected (mirrors #12).
+
+### `ts/src/features/topic-router/` (`topic-router-logic.ts`, `topic-router.ts`)
+
+- **Role:** The #16 per-topic actor isolation. `TopicRouter extends BaseSupervisor` (reuses #15's lifecycle spine) and adds an RPC layer: `dispatch(topic, request)` routes to the topic's isolated long-lived worker actor. The pure seam (`topic-router-logic.ts`): `selectActorForTopic` (route-vs-spawn), `aggregateTopicStats` (per-topic attribution), `crashContainment` (isolation guarantee).
+- **Convention:** The routing/attribution/containment decisions are pure (immutable `ActorHandle[]` in, result out). `TopicRouter` is the I/O wiring. The ONLY specialization over #15 is `doSpawn`/`doTerminate`: long-lived RPC actors (`'message'` routes replies by id, does NOT drive `finish`) vs #15's one-shot observe-and-exit. Crash containment: a crash of one topic rejects its in-flight dispatch; siblings (separate workers) continue serving.
 
 ### `ISSUES.md`
 
@@ -232,15 +244,11 @@ These building blocks are already merged to `main` and are depended on by Era 3 
 
 When resuming, start here.
 
-### 1. #16 — Per-topic actor isolation
+### 1. #17 — Live telemetry → admission
 
-- Each topic runs as an isolated supervised actor (a `WorkerSupervisor`/`ProcessSupervisor` actor per topic); main process becomes a thin router. Builds on #15 (✅ Done). #14 FairPool (✅ Done) gives the per-topic fairness/backpressure the router's admission layer reads.
+- `ProcessTelemetry` Protocol feeds `SystemHealth` from real `monitorEventLoopDelay`/heap. Depends on #15/#16 (both ✅ Done). #14's `backpressure(topic)` and #16's `topicStats()`/`crashContainment()` are the per-topic signals that plug in.
 
-### 2. #17 — Live telemetry → admission
-
-- `ProcessTelemetry` Protocol feeds `SystemHealth` from real `monitorEventLoopDelay`/heap. Depends on #15/#16. #14's `backpressure(topic)` is the per-topic signal that plugs in.
-
-### 3. PR #3 — ship #13 + #12 + #15 + #14 + Option D to `main`
+### 2. PR #3 — ship #13 + #12 + #15 + #14 + #16 + Option D to `main`
 
 - Open a PR from `feat/multiagent-process-isolation` → `main`. On green main CI, `Ship Patches` auto-runs and ships a content-hash-tagged release with all patch assets. No manual release step.
 
