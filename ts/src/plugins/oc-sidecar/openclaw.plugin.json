@@ -3,7 +3,7 @@
   "name": "OC Sidecar",
   "description": "Standalone sidecar process for session cleanup, worker pool offloading, and live telemetry. No core patches — plugin hooks + tool registration only.",
   "contracts": {
-    "tools": ["sidecar_health", "sidecar_exec"]
+        "tools": ["sidecar_health", "sidecar_exec", "session_health"]
   },
   "activation": {
     "onStartup": true

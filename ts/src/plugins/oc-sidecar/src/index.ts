@@ -176,6 +176,33 @@ export default definePluginEntry({
       });
     }
 
+    // ── Tool: session_health ─────────────────────────────────────
+
+    api.registerTool({
+      name: "session_health",
+      description:
+        "Check sessions.json health — file size, entry count, subagent count. " +
+        "Run before and after compaction to monitor bloat.",
+      parameters: Type.Object({}),
+      async execute(_id: string, _params: Record<string, unknown>) {
+        if (!client) {
+          return {
+            content: [{ type: "text" as const, text: "Sidecar is not running." }],
+          };
+        }
+        try {
+          const health = await client.get("/session/health");
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(health, null, 2) }],
+          };
+        } catch (err) {
+          return {
+            content: [{ type: "text" as const, text: `Session health check failed: ${String(err)}` }],
+          };
+        }
+      },
+    });
+
     // ── Tool: sidecar_health ─────────────────────────────────────
 
     api.registerTool({
