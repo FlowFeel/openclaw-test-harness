@@ -650,4 +650,181 @@ describe("Feature: Hook Lifecycle", () => {
     // Queue should be cleared
     expect(api.logs.some((l) => l.includes("Shut down"))).toBe(true);
   });
+
+  it("Scenario: gateway_start hook does not throw on empty event", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    const hook = api.hooks.find((h) => h.event === "gateway_start")!;
+    await expect(hook.handler({})).resolves.toBeUndefined();
+  });
+
+  it("Scenario: model_call_started hook does not throw on empty event", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    const hook = api.hooks.find((h) => h.event === "model_call_started")!;
+    await expect(hook.handler({})).resolves.toBeUndefined();
+  });
+
+  it("Scenario: model_call_ended hook does not throw on empty event", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    const hook = api.hooks.find((h) => h.event === "model_call_ended")!;
+    await expect(hook.handler({})).resolves.toBeUndefined();
+  });
+
+  it("Scenario: session_end hook does not throw on empty event", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    const hook = api.hooks.find((h) => h.event === "session_end")!;
+    await expect(hook.handler({})).resolves.toBeUndefined();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+
+describe("Feature: queue_results Tool", () => {
+  it("Scenario: No active queue returns 'No active work queue'", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    const tool = api.tools.find((t) => t.name === "queue_results")!;
+    const result: any = await tool.execute("test", {});
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe("text");
+    expect(result.content[0].text).toContain("No active work queue");
+  });
+
+  it("Scenario: After queuing, results show task statuses", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    // Queue work
+    const queueTool = api.tools.find((t) => t.name === "queue_work")!;
+    await queueTool.execute("test", {
+      tasks: [
+        { id: "t1", prompt: "search A", priority: "high" },
+        { id: "t2", prompt: "search B", priority: "normal" },
+      ],
+    });
+
+    // Get results
+    const tool = api.tools.find((t) => t.name === "queue_results")!;
+    const result: any = await tool.execute("test", {});
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe("text");
+
+    const parsed = JSON.parse(result.content[0].text);
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed.length).toBe(2);
+
+    // Each entry should have id, status, hasResult
+    for (const entry of parsed) {
+      expect(entry).toHaveProperty("id");
+      expect(entry).toHaveProperty("status");
+      expect(entry).toHaveProperty("hasResult");
+    }
+  });
+
+  it("Scenario: queue_results with merge=true returns formatted document", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    // Queue work — need at least one task so queue is active
+    const queueTool = api.tools.find((t) => t.name === "queue_work")!;
+    await queueTool.execute("test", {
+      tasks: [{ id: "t1", prompt: "search A", priority: "high" }],
+    });
+
+    // Get results with merge=true (no completed results, so no merge happens)
+    const tool = api.tools.find((t) => t.name === "queue_results")!;
+    const result: any = await tool.execute("test", { merge: true });
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe("text");
+
+    // Should still return task status JSON (no completed subagent results to merge)
+    const parsed = JSON.parse(result.content[0].text);
+    expect(Array.isArray(parsed)).toBe(true);
+  });
+
+  it("Scenario: Handles undefined merge param gracefully", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    const queueTool = api.tools.find((t) => t.name === "queue_work")!;
+    await queueTool.execute("test", {
+      tasks: [{ id: "t1", prompt: "search A" }],
+    });
+
+    const tool = api.tools.find((t) => t.name === "queue_results")!;
+    const result: any = await tool.execute("test", {});
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe("text");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+
+describe("Feature: session_health Tool (no file system)", () => {
+  it("Scenario: Returns zeroes when no sessions.json exists", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    const originalHome = process.env.HOME;
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "session-health-test-"));
+    process.env.HOME = tmpDir;
+
+    try {
+      mod.default.register(api as any, { maxAgeHours: 15 });
+
+      const tool = api.tools.find((t) => t.name === "session_health")!;
+      const result = await tool.execute("test", {});
+      const parsed = JSON.parse((result as any).content[0].text);
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.fileSizeBytes).toBe(0);
+      expect(parsed.entryCount).toBe(0);
+      expect(parsed.subagentEntryCount).toBe(0);
+      expect(parsed).toHaveProperty("bloatFieldsTracked");
+      expect(parsed).toHaveProperty("maxAgeHours");
+      expect(parsed).toHaveProperty("staleSubagentCount");
+      expect(parsed).toHaveProperty("cacheSize");
+      expect(parsed).toHaveProperty("cacheHitRate");
+    } finally {
+      process.env.HOME = originalHome;
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("Scenario: Returns staleSubagentCount=0 when no subagents", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    const originalHome = process.env.HOME;
+    const tmpDir = mkdtempSync(resolve(tmpdir(), "session-health-test-"));
+    process.env.HOME = tmpDir;
+
+    try {
+      mod.default.register(api as any, { maxAgeHours: 15 });
+
+      const tool = api.tools.find((t) => t.name === "session_health")!;
+      const result = await tool.execute("test", {});
+      const parsed = JSON.parse((result as any).content[0].text);
+
+      expect(parsed.staleSubagentCount).toBe(0);
+      expect(parsed.cacheSize).toBe(0);
+    } finally {
+      process.env.HOME = originalHome;
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

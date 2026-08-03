@@ -8,6 +8,7 @@ export default defineConfig({
       "tests/spec/**/*.spec.ts",
       "tests/integration/**/*.spec.ts",
       "tests/plugins/**/*.spec.ts",
+      "tests/e2e/**/*.spec.ts",
     ],
     coverage: {
       provider: "v8",
