@@ -74,7 +74,7 @@ export default definePluginEntry({
       } catch (err) {
         api.logger?.error?.(`[oc-sidecar] Failed to start sidecar: ${String(err)}`);
       }
-    });
+    }, { name: "oc-sidecar-gateway-start" });
 
     api.registerHook("gateway_stop", async () => {
       if (sidecar) {
@@ -83,7 +83,7 @@ export default definePluginEntry({
         client = null;
         api.logger?.info?.("[oc-sidecar] Sidecar stopped");
       }
-    });
+    }, { name: "oc-sidecar-gateway-stop" });
 
     // ── Session cleanup hooks ────────────────────────────────────
 
@@ -107,7 +107,7 @@ export default definePluginEntry({
       } catch {
         // Sidecar unavailable — non-fatal
       }
-    });
+    }, { name: "oc-sidecar-after-compaction" });
 
     api.registerHook("session_end", async () => {
       if (!client) return;
@@ -119,7 +119,7 @@ export default definePluginEntry({
       } catch {
         // Sidecar unavailable — non-fatal
       }
-    });
+    }, { name: "oc-sidecar-session-end" });
 
     // ── Subagent tracking ────────────────────────────────────────
 
@@ -133,7 +133,7 @@ export default definePluginEntry({
       } catch {
         // Non-fatal
       }
-    });
+    }, { name: "oc-sidecar-subagent-spawned" });
 
     api.registerHook("subagent_ended", async (event: { sessionKey?: string }) => {
       if (!client) return;
@@ -144,7 +144,7 @@ export default definePluginEntry({
       } catch {
         // Non-fatal
       }
-    });
+    }, { name: "oc-sidecar-subagent-ended" });
 
     // ── Telemetry collection ────────────────────────────────────
 
@@ -160,7 +160,7 @@ export default definePluginEntry({
         } catch {
           // Non-fatal
         }
-      });
+      }, { name: "oc-sidecar-model-call-started" });
 
       api.registerHook("model_call_ended", async (event: { runId?: string; durationMs?: number; outcome?: string }) => {
         if (!client) return;
@@ -173,7 +173,7 @@ export default definePluginEntry({
         } catch {
           // Non-fatal
         }
-      });
+      }, { name: "oc-sidecar-model-call-ended" });
     }
 
     // ── Tool: session_health ─────────────────────────────────────

@@ -55,7 +55,7 @@ export interface PluginApi {
   registerHook: (
     events: string | string[],
     handler: (event: HookEvent) => Promise<void>,
-    opts?: { priority?: number }
+    opts?: { priority?: number; name?: string }
   ) => void;
   registerTool: (tool: ToolDefinition, opts?: Record<string, unknown>) => void;
 }
