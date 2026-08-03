@@ -90,6 +90,10 @@ describe("OC Session Guard Plugin E2E (Testcontainers)", () => {
           source: path.resolve(__dirname, "../../src/plugins/shared/types.ts"),
           target: "/app/shared/types.ts",
         },
+        {
+          source: path.resolve(__dirname, "../../src/plugins/shared/regex-library.ts"),
+          target: "/app/shared/regex-library.ts",
+        },
       ])
       .withLabels({ "plugin.sha": pluginSha })
       .withCommand(["tail", "-f", "/dev/null"])
