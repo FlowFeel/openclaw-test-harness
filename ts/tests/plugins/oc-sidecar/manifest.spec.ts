@@ -19,10 +19,10 @@ describe("oc-sidecar plugin manifest", () => {
     expect(manifest.description).toContain("sidecar");
   });
 
-  it("declares tools in contracts", () => {
+  it("declares exactly 2 tools in contracts", () => {
+    expect(manifest.contracts.tools).toHaveLength(2);
     expect(manifest.contracts.tools).toContain("sidecar_health");
     expect(manifest.contracts.tools).toContain("sidecar_exec");
-        expect(manifest.contracts.tools).toContain("session_health");
   });
 
   it("activates on startup", () => {

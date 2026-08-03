@@ -48,10 +48,14 @@ import {
 } from "../../shared/depth-limiter.ts";
 import {
   getAdmissionDecision,
+  classifyHealth,
   type SystemHealthSnapshot,
   type AdmissionThresholds,
   DEFAULT_THRESHOLDS,
 } from "../../shared/adaptive-admission.ts";
+import { monitorEventLoopDelay, performance, type EventLoopUtilization } from "node:perf_hooks";
+import { getHeapStatistics } from "node:v8";
+import process from "node:process";
 import {
   mergeResults,
   formatMergedDocument,
@@ -93,6 +97,8 @@ import {
   cleanupSessions,
   type SessionsMap,
 } from "../../shared/session-cleanup.ts";
+import { readSessions, writeSessions } from "../../shared/sessions-io.ts";
+import { SUBAGENT_KEY } from "../../shared/regex-library.ts";
 
 // ── Plugin state (in-memory, per-gateway) ────────────────────
 
@@ -100,6 +106,10 @@ interface OrchestratorState {
   queue: WorkQueueState | null;
   originalSpecs: TaskSpec[];
   subagents: SubagentMap;
+  /** Maps a spawned sessionKey back to the task ID from the work queue */
+  sessionToTaskMap: Map<string, string>;
+  /** FIFO queue of dispatched task IDs waiting for the model to call sessions_spawn */
+  pendingSpawnTaskIds: string[];
   budgets: Map<string, TopicBudget>;
   cache: CacheStore;
   healthSnapshot: SystemHealthSnapshot;
@@ -137,6 +147,95 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   cacheTtlMs: 86_400_000, // 24h
 };
 
+// ── TelemetryCollector — real perf_hooks readings ──────────
+
+class TelemetryCollector {
+  private monitor: ReturnType<typeof monitorEventLoopDelay> | null = null;
+  private prevCpuUsage: NodeJS.CpuUsage | null = null;
+  private prevEventLoopUtil: EventLoopUtilization | null = null;
+  private enabled: boolean;
+
+  constructor(enabled = true) {
+    this.enabled = enabled;
+    if (enabled) {
+      try {
+        this.monitor = monitorEventLoopDelay({ resolution: 10 });
+        this.monitor.enable();
+        this.prevCpuUsage = process.cpuUsage();
+      } catch {
+        this.enabled = false;
+      }
+    }
+  }
+
+  /**
+   * Collect a telemetry snapshot for the given label.
+   * Reads real metrics from Node.js perf_hooks, v8, and process.
+   */
+  collect(_label: string): SystemHealthSnapshot {
+    if (!this.enabled) {
+      return {
+        status: "healthy",
+        eventLoopP99Ms: 0,
+        eventLoopUtilization: 0,
+        usedHeapSize: 0,
+        cpuRatio: 0,
+      };
+    }
+
+    // Event loop P99 delay (nanoseconds → milliseconds)
+    const p99Ns = this.monitor ? this.monitor.percentile(99) : 0;
+    const eventLoopP99Ms = p99Ns / 1_000_000;
+
+    // Event loop utilization (0-1)
+    const elu = performance.eventLoopUtilization(this.prevEventLoopUtil ?? undefined);
+    this.prevEventLoopUtil = elu;
+    const eventLoopUtilization = elu.utilization ?? 0;
+
+    // Heap (bytes)
+    const heapStats = getHeapStatistics();
+    const usedHeapSize = heapStats.used_heap_size;
+
+    // CPU usage delta (microseconds → 0-1 ratio over a ~1s window)
+    const currentCpu = process.cpuUsage();
+    let cpuRatio = 0;
+    if (this.prevCpuUsage) {
+      const userDelta = currentCpu.user - this.prevCpuUsage.user;
+      const sysDelta = currentCpu.system - this.prevCpuUsage.system;
+      const totalDelta = userDelta + sysDelta;
+      cpuRatio = Math.min(1, totalDelta / 1_000_000);
+    }
+    this.prevCpuUsage = currentCpu;
+
+    // Classify status
+    const usedHeapMb = usedHeapSize / (1024 * 1024);
+    const status = classifyHealth(eventLoopP99Ms, eventLoopUtilization, usedHeapMb);
+
+    return {
+      status,
+      eventLoopP99Ms,
+      eventLoopUtilization,
+      usedHeapSize,
+      cpuRatio,
+    };
+  }
+
+  /**
+   * Clean up the event loop delay monitor.
+   */
+  destroy(): void {
+    if (this.monitor) {
+      try {
+        this.monitor.disable();
+      } catch {
+        // ignore
+      }
+    }
+  }
+}
+
+// ── Plugin entry point ───────────────────────────────────────
+
 export default definePluginEntry({
   id: "oc-subagent-orchestrator",
   name: "OC Subagent Orchestrator",
@@ -151,6 +250,8 @@ export default definePluginEntry({
       queue: null,
       originalSpecs: [],
       subagents: new Map(),
+      sessionToTaskMap: new Map(),
+      pendingSpawnTaskIds: [],
       budgets: new Map(),
       cache: new Map(),
       healthSnapshot: {
@@ -165,6 +266,9 @@ export default definePluginEntry({
       config: cfg,
     };
 
+    // ── Telemetry collector (real perf_hooks) ───────────────
+    const collector = new TelemetryCollector();
+
     // ── Hook: gateway_start — initialize ─────────────────────
     api.registerHook("gateway_start", async () => {
       api.logger?.info?.("[orchestrator] Initialized — managing subagents");
@@ -174,17 +278,32 @@ export default definePluginEntry({
     api.registerHook("gateway_stop", async () => {
       state.queue = null;
       state.subagents.clear();
+      state.sessionToTaskMap.clear();
+      state.pendingSpawnTaskIds = [];
       state.budgets.clear();
       state.cache.clear();
+      collector.destroy();
       api.logger?.info?.("[orchestrator] Shut down");
     }, { name: "orchestrator-gateway-stop" });
 
-    // ── Hook: after_compaction — strip bloat ─────────────────
+    // ── Hook: after_compaction — read, clean, write ─────────
     api.registerHook("after_compaction", async () => {
       try {
-        // The session-guard's sessions-io handles the actual file I/O.
-        // Here we just log — the standalone plugin does the work.
-        api.logger?.info?.("[orchestrator] Post-compaction cleanup triggered");
+        const sessions = readSessions();
+        if (sessions) {
+          const { cleaned, report } = cleanupSessions(sessions, {
+            bloatFields: cfg.bloatFields,
+            maxAgeHours: cfg.maxAgeHours,
+            nowMs: Date.now(),
+          });
+          writeSessions(cleaned);
+          api.logger?.info?.(
+            `[orchestrator] Post-compaction cleanup: ` +
+            `${report.beforeCount}→${report.afterCount} entries, ` +
+            `${report.reductionPercent}% size reduction, ` +
+            `${report.strippedFieldCount} fields stripped`
+          );
+        }
       } catch (err) {
         api.logger?.error?.(`[orchestrator] after_compaction failed: ${String(err)}`);
       }
@@ -192,22 +311,51 @@ export default definePluginEntry({
 
     // ── Hook: session_end — purge stale ──────────────────────
     api.registerHook("session_end", async () => {
-      const { result } = detectStale(state.subagents, cfg.runTimeoutSeconds, Date.now());
-      if (result.staleKeys.length > 0) {
-        api.logger?.info?.(`[orchestrator] ${result.staleKeys.length} stale subagents detected`);
+      try {
+        // In-memory stale detection
+        const { result } = detectStale(state.subagents, cfg.runTimeoutSeconds, Date.now());
+        if (result.staleKeys.length > 0) {
+          api.logger?.info?.(`[orchestrator] ${result.staleKeys.length} stale subagents detected`);
+        }
+
+        // Also purge stale from sessions.json
+        const sessions = readSessions();
+        if (sessions) {
+          const { cleaned, purgedKeys } = purgeStaleSubagents(sessions, {
+            maxAgeHours: cfg.maxAgeHours,
+            nowMs: Date.now(),
+          });
+          if (purgedKeys.length > 0) {
+            writeSessions(cleaned);
+            api.logger?.info?.(
+              `[orchestrator] Purged ${purgedKeys.length} stale sessions from sessions.json`
+            );
+          }
+        }
+      } catch (err) {
+        api.logger?.error?.(`[orchestrator] session_end failed: ${String(err)}`);
       }
     }, { name: "orchestrator-session-end" });
 
-    // ── Hook: subagent_spawned — track ───────────────────────
+    // ── Hook: subagent_spawned — track + link to task ID ──────
     api.registerHook("subagent_spawned", async (event: { sessionKey?: string; resolvedModel?: string }) => {
       if (!event.sessionKey) return;
+
+      // Link this spawned session to the next pending task ID (FIFO order)
+      const taskId = state.pendingSpawnTaskIds.shift();
+      if (taskId) {
+        state.sessionToTaskMap.set(event.sessionKey, taskId);
+      }
+
       state.subagents = trackSpawn(state.subagents, {
         sessionKey: event.sessionKey,
         model: event.resolvedModel,
         startedAtMs: Date.now(),
       }, Date.now());
+
+      const linkInfo = taskId ? ` linked to task ${taskId}` : "";
       api.logger?.info?.(
-        `[orchestrator] Tracked spawn: ${event.sessionKey} ` +
+        `[orchestrator] Tracked spawn: ${event.sessionKey}${linkInfo} ` +
         `(active: ${getActiveCount(state.subagents)}/${cfg.maxConcurrent})`
       );
     }, { name: "orchestrator-subagent-spawned" });
@@ -217,31 +365,56 @@ export default definePluginEntry({
       if (!event.sessionKey) return;
       state.subagents = trackEnd(state.subagents, event.sessionKey, Date.now());
 
-      // If we have a queue, record the result and dispatch next
-      if (state.queue) {
-        state.queue = recordResult(state.queue, event.sessionKey, { completed: true }, Date.now());
+      // Look up the task ID from the session-to-task mapping
+      const taskId = state.sessionToTaskMap.get(event.sessionKey);
+      state.sessionToTaskMap.delete(event.sessionKey);
+
+      // If we have a queue and a mapped task ID, record the result and dispatch next
+      if (state.queue && taskId) {
+        state.queue = recordResult(state.queue, taskId, { completed: true }, Date.now());
         state.queue = failBlockedTasks(state.queue);
 
-        // Dispatch next queued tasks
+        // Dispatch next queued tasks — add newly dispatched to pending spawn queue
         const effectiveMax = computeEffectiveMaxConcurrent(
           cfg.maxConcurrent,
           state.healthSnapshot.status
         );
-        const { taskIds } = dispatchNext(state.queue, effectiveMax, Date.now());
+        const { taskIds, state: newState } = dispatchNext(state.queue, effectiveMax, Date.now());
+        state.queue = newState;
+
         if (taskIds.length > 0) {
-          api.logger?.info?.(`[orchestrator] Dispatched ${taskIds.length} next task(s)`);
+          // Add newly dispatched task IDs to the pending spawn queue
+          state.pendingSpawnTaskIds.push(...taskIds);
+          api.logger?.info?.(
+            `[orchestrator] Dispatched ${taskIds.length} next task(s) — ` +
+            `pending spawns: ${state.pendingSpawnTaskIds.length}`
+          );
         }
       }
     }, { name: "orchestrator-subagent-ended" });
 
     // ── Hook: model_call_started/ended — telemetry ───────────
     api.registerHook("model_call_started", async () => {
-      // In production, this would read from perf_hooks
-      // For now, we just mark activity
+      try {
+        state.healthSnapshot = collector.collect("main");
+        api.logger?.info?.(
+          `[orchestrator] Telemetry: P99=${Math.round(state.healthSnapshot.eventLoopP99Ms)}ms, ` +
+          `util=${Math.round(state.healthSnapshot.eventLoopUtilization * 100)}%, ` +
+          `heap=${Math.round(state.healthSnapshot.usedHeapSize / (1024 * 1024))}MB, ` +
+          `cpu=${Math.round(state.healthSnapshot.cpuRatio * 100)}%, ` +
+          `status=${state.healthSnapshot.status}`
+        );
+      } catch (err) {
+        api.logger?.error?.(`[orchestrator] model_call_started telemetry failed: ${String(err)}`);
+      }
     }, { name: "orchestrator-model-call-started" });
 
     api.registerHook("model_call_ended", async () => {
-      // Update health snapshot (would be fed by oc-telemetry plugin in production)
+      try {
+        state.healthSnapshot = collector.collect("main");
+      } catch (err) {
+        api.logger?.error?.(`[orchestrator] model_call_ended telemetry failed: ${String(err)}`);
+      }
     }, { name: "orchestrator-model-call-ended" });
 
     // ═══════════════════════════════════════════════════════════
@@ -322,6 +495,19 @@ export default definePluginEntry({
         const { taskIds, state: newState } = dispatchNext(queue, effectiveMax, now);
         state.queue = newState;
 
+        // Build dispatch plan: each dispatched task becomes a spawn instruction
+        const dispatchPlan = taskIds.map((taskId) => {
+          const task = state.queue!.tasks.get(taskId);
+          return {
+            taskId,
+            prompt: task?.spec.prompt ?? "",
+            priority: task?.spec.priority ?? "normal",
+          };
+        });
+
+        // Add dispatched task IDs to the pending spawn queue (FIFO)
+        state.pendingSpawnTaskIds.push(...taskIds);
+
         return {
           content: [{
             type: "text" as const,
@@ -333,6 +519,10 @@ export default definePluginEntry({
               dispatched: taskIds.length,
               effectiveMaxConcurrent: effectiveMax,
               healthStatus: state.healthSnapshot.status,
+              dispatchPlan,
+              instructions: "Call sessions_spawn for each task in dispatchPlan using the prompt field. " +
+                "Spawn them in the order listed to maintain the dispatch queue. " +
+                `(${taskIds.length} task(s) to spawn)`,
             }, null, 2),
           }],
         };
@@ -380,6 +570,8 @@ export default definePluginEntry({
               ok: true,
               queueActive: true,
               ...progress,
+              pendingSpawnCount: state.pendingSpawnTaskIds.length,
+              activeSubagents: getActiveCount(state.subagents),
               healthStatus: state.healthSnapshot.status,
               eventLoopP99Ms: Math.round(state.healthSnapshot.eventLoopP99Ms * 100) / 100,
               cacheHitRate: state.totalQueries > 0
@@ -493,12 +685,30 @@ export default definePluginEntry({
         "Run before and after compaction to monitor bloat.",
       parameters: Type.Object({}),
       async execute(_id: string, _params: Record<string, unknown>) {
-        // Delegate to the session-guard's I/O — here we just report orchestrator state
+        // Read actual sessions.json for file metrics
+        let fileMetrics = {
+          fileSizeBytes: 0,
+          entryCount: 0,
+          subagentEntryCount: 0,
+        };
+        try {
+          const sessions = readSessions();
+          if (sessions) {
+            const entries = Object.entries(sessions);
+            fileMetrics.entryCount = entries.length;
+            fileMetrics.subagentEntryCount = entries.filter(([k]) => SUBAGENT_KEY.test(k)).length;
+            fileMetrics.fileSizeBytes = Buffer.byteLength(JSON.stringify(sessions, null, 0), "utf8");
+          }
+        } catch {
+          // File not accessible — report zeroes
+        }
+
         return {
           content: [{
             type: "text" as const,
             text: JSON.stringify({
               ok: true,
+              ...fileMetrics,
               bloatFieldsTracked: cfg.bloatFields.length,
               maxAgeHours: cfg.maxAgeHours,
               staleSubagentCount: result_staleCount(state, cfg.runTimeoutSeconds),

@@ -1,0 +1,27 @@
+{
+  "id": "oc-context-cache",
+  "name": "OC Context Cache",
+  "description": "In-memory context cache for system prompt and other frequently accessed data.",
+  "contracts": {
+    "tools": ["context_cache_stats"]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ttlMs": {
+        "type": "number",
+        "default": 300000,
+        "description": "Time-to-live in milliseconds (default 5 minutes)"
+      },
+      "maxEntries": {
+        "type": "number",
+        "default": 100,
+        "description": "Maximum number of cache entries"
+      }
+    }
+  }
+}
