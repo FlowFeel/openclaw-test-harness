@@ -122,6 +122,12 @@ interface OrchestratorState {
   totalQueries: number;
   cacheHits: number;
   config: OrchestratorConfig;
+  /** Crash recovery tracking — incremented by stale watchdog (#39) */
+  crashRecoveryReport: {
+    recoveredCount: number;
+    blockedCount: number;
+    newDispatchCount: number;
+  };
 }
 
 interface OrchestratorConfig {
@@ -284,6 +290,38 @@ export async function checkSqliteCache(
   }
 }
 
+/**
+ * Determine whether a cache hit is sufficiently relevant to skip the task.
+ *
+ * A hit is considered "cached enough" if it exists (non-null) and has all
+ * required fields. The `relevanceThreshold` parameter is accepted for future
+ * use when phosphene_search.py outputs a score alongside each result.
+ *
+ * @param hit - The cache hit result from checkSqliteCache or null
+ * @param relevanceThreshold - Minimum relevance score (0-1) to consider a hit
+ *   sufficient (default 0.5). Currently unused — kept for forward compatibility
+ *   when score is available in parsed output.
+ * @returns true if the cache hit should be used to skip the task
+ *
+ * @pure
+ * @example
+ * ```ts
+ * shouldUseCached({ query: "test", ns: "memory", uri: "doc.md", title: "Doc" });
+ * // → true
+ *
+ * shouldUseCached(null);
+ * // → false
+ * ```
+ */
+export function shouldUseCached(
+  hit: { query: string; ns: string; uri: string; title: string } | null | undefined,
+  _relevanceThreshold: number = 0.5,
+): boolean {
+  if (!hit) return false;
+  // Verify the hit has all required fields
+  return Boolean(hit.query && hit.ns && hit.uri && hit.title);
+}
+
 // ── TelemetryCollector — real perf_hooks readings ──────────
 
 class TelemetryCollector {
@@ -401,6 +439,7 @@ export default definePluginEntry({
       totalQueries: 0,
       cacheHits: 0,
       config: cfg,
+      crashRecoveryReport: { recoveredCount: 0, blockedCount: 0, newDispatchCount: 0 },
     };
 
     // ── Telemetry collector (real perf_hooks) ───────────────
@@ -469,6 +508,16 @@ export default definePluginEntry({
           api.logger?.info?.(
             `[orchestrator] ${staleResult.staleCount} stale subagent(s) detected and failed: ` +
             staleResult.staleKeys.join(", ")
+          );
+
+          // Accumulate crash recovery report
+          state.crashRecoveryReport.recoveredCount += staleResult.staleCount;
+          state.crashRecoveryReport.blockedCount += staleResult.blockedCount;
+          state.crashRecoveryReport.newDispatchCount += staleResult.newDispatchCount;
+
+          api.logger?.info?.(
+            `[orchestrator] Crash recovery: ${staleResult.staleCount} recovered, ` +
+            `${staleResult.blockedCount} blocked, ${staleResult.newDispatchCount} new dispatches`
           );
 
           // Queue newly dispatched tasks for spawning
@@ -746,6 +795,7 @@ export default definePluginEntry({
                 cacheHitRate: state.totalQueries > 0
                   ? Math.round((state.cacheHits / state.totalQueries) * 100) / 100
                   : 0,
+                crashRecoveryReport: state.crashRecoveryReport,
               }, null, 2),
             }],
           };
@@ -768,6 +818,7 @@ export default definePluginEntry({
               activeSubagents: getActiveCount(state.subagents),
               staleCount: result_staleCount(state, cfg.runTimeoutSeconds),
               healthStatus: state.healthSnapshot.status,
+              crashRecoveryReport: state.crashRecoveryReport,
               eventLoopP99Ms: Math.round(state.healthSnapshot.eventLoopP99Ms * 100) / 100,
               cacheHitRate: state.totalQueries > 0
                 ? Math.round((state.cacheHits / state.totalQueries) * 100) / 100
@@ -1064,12 +1115,16 @@ export function detectStaleAndFail(
   queue: WorkQueueState | null;
   sessionToTaskMap: Map<string, string>;
   spawnInstructions: Array<{ taskId: string; prompt: string; taskName: string }>;
+  blockedCount: number;
+  newDispatchCount: number;
 } {
   const { stale, fresh, result } = detectStale(subagents, runTimeoutSeconds, nowMs);
   const staleKeys = result.staleKeys;
   let updatedQueue = queue;
   let updatedSessionToTaskMap = new Map(sessionToTaskMap);
   const spawnInstructions: Array<{ taskId: string; prompt: string; taskName: string }> = [];
+  let blockedCount = 0;
+  let newDispatchCount = 0;
 
   if (staleKeys.length > 0 && updatedQueue) {
     // Mark each stale subagent's task as failed
@@ -1079,7 +1134,7 @@ export function detectStaleAndFail(
         updatedQueue = recordResult(
           updatedQueue,
           taskId,
-          "subagent went stale (no completion)",
+          "subagent crashed or timed out",
           nowMs,
           false
         );
@@ -1087,13 +1142,25 @@ export function detectStaleAndFail(
       }
     }
 
+    // Count tasks before failing blocked, to compute blocked count
+    const beforeFailBlockedCount = Array.from(updatedQueue.tasks.values()).filter(
+      (t) => t.status === "queued"
+    ).length;
+
     // Cascade failures to dependents
     updatedQueue = failBlockedTasks(updatedQueue);
+
+    // Count blocked tasks: queued before - queued after = newly failed
+    const afterFailBlockedCount = Array.from(updatedQueue.tasks.values()).filter(
+      (t) => t.status === "queued"
+    ).length;
+    blockedCount = beforeFailBlockedCount - afterFailBlockedCount;
 
     // Dispatch next tasks to fill freed slots
     const effectiveMax = computeEffectiveMaxConcurrent(maxConcurrent, healthStatus);
     const { taskIds, state: newState } = dispatchNext(updatedQueue, effectiveMax, nowMs);
     updatedQueue = newState;
+    newDispatchCount = taskIds.length;
 
     // Build spawn instructions for newly dispatched tasks
     for (const taskId of taskIds) {
@@ -1113,6 +1180,8 @@ export function detectStaleAndFail(
     queue: updatedQueue,
     sessionToTaskMap: updatedSessionToTaskMap,
     spawnInstructions,
+    blockedCount,
+    newDispatchCount,
   };
 }
 

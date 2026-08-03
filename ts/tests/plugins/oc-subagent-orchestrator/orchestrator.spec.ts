@@ -937,7 +937,7 @@ describe("Feature: detectStaleAndFail (pure function)", () => {
     // Task should be marked as failed
     const task = result.queue!.tasks.get("t1");
     expect(task!.status).toBe("failed");
-    expect(task!.error).toContain("stale");
+    expect(task!.error).toContain("subagent crashed or timed out");
 
     // Stale subagent removed from map
     expect(result.subagents.has("sub-1")).toBe(false);
@@ -989,7 +989,7 @@ describe("Feature: detectStaleAndFail (pure function)", () => {
 
     // t2 (depends on t1) should be blocked (failed)
     expect(result.queue!.tasks.get("t2")!.status).toBe("failed");
-    expect(result.queue!.tasks.get("t2")!.error).toContain("dependency");
+    expect(result.queue!.tasks.get("t2")!.error).toContain("dependency failed: t1");
 
     // t3 (no dependency) should be dispatched to fill freed slot
     expect(result.queue!.tasks.get("t3")!.status).toBe("dispatched");
@@ -1046,6 +1046,138 @@ describe("Feature: detectStaleAndFail (pure function)", () => {
     expect(result.spawnInstructions[0].taskId).toBe("t3");
     expect(result.spawnInstructions[0].prompt).toBe("search C");
     expect(result.spawnInstructions[0].taskName).toBe("t3");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+
+describe("Feature: Crash Recovery (#39)", () => {
+  it("Scenario: crashed task marked failed with error message", async () => {
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    const { detectStaleAndFail } = mod;
+    const { createQueue, dispatchNext } = await import("../../../src/plugins/shared/work-queue-scheduler.ts");
+    const { trackSpawn } = await import("../../../src/plugins/shared/subagent-tracker.ts");
+
+    // Create queue with one task, dispatch it
+    const queue = createQueue([{ id: "t1", prompt: "search A" }]);
+    const { taskIds, state: dispatched } = dispatchNext(queue, 6, 1000);
+    expect(taskIds).toHaveLength(1);
+
+    // Track subagent
+    let subagents = new Map();
+    subagents = trackSpawn(subagents, {
+      sessionKey: "sub-1",
+      startedAtMs: 1000,
+    }, 1000);
+
+    const sessionToTaskMap = new Map([["sub-1", "t1"]]);
+
+    // Detect stale
+    const result = detectStaleAndFail(
+      subagents,
+      dispatched,
+      sessionToTaskMap,
+      1,   // runTimeoutSeconds
+      6,
+      "healthy",
+      3000
+    );
+
+    // Verify task is marked failed with specific error message
+    expect(result.staleCount).toBe(1);
+    const task = result.queue!.tasks.get("t1");
+    expect(task!.status).toBe("failed");
+    expect(task!.error).toBe("subagent crashed or timed out");
+  });
+
+  it("Scenario: dependent tasks blocked with dependency error", async () => {
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    const { detectStaleAndFail } = mod;
+    const { createQueue, dispatchNext } = await import("../../../src/plugins/shared/work-queue-scheduler.ts");
+    const { trackSpawn } = await import("../../../src/plugins/shared/subagent-tracker.ts");
+
+    // Three tasks: t2 depends on t1, t3 is independent
+    const queue = createQueue([
+      { id: "t1", prompt: "search A" },
+      { id: "t2", prompt: "search B", dependsOn: ["t1"] },
+      { id: "t3", prompt: "search C", dependsOn: ["t1"] },
+    ]);
+
+    const { taskIds, state: dispatched } = dispatchNext(queue, 1, 1000);
+    expect(taskIds).toHaveLength(1);
+    expect(taskIds).toContain("t1");
+
+    let subagents = new Map();
+    subagents = trackSpawn(subagents, {
+      sessionKey: "sub-1",
+      startedAtMs: 1000,
+    }, 1000);
+
+    const sessionToTaskMap = new Map([["sub-1", "t1"]]);
+
+    const result = detectStaleAndFail(
+      subagents,
+      dispatched,
+      sessionToTaskMap,
+      1,
+      6,
+      "healthy",
+      3000
+    );
+
+    // t1 should be failed
+    expect(result.queue!.tasks.get("t1")!.status).toBe("failed");
+
+    // t2 should be blocked with dependency error referencing t1
+    expect(result.queue!.tasks.get("t2")!.status).toBe("failed");
+    expect(result.queue!.tasks.get("t2")!.error).toBe("dependency failed: t1");
+
+    // t3 should also be blocked with dependency error referencing t1
+    expect(result.queue!.tasks.get("t3")!.status).toBe("failed");
+    expect(result.queue!.tasks.get("t3")!.error).toBe("dependency failed: t1");
+
+    // blockedCount should reflect the number of blocked dependents
+    expect(result.blockedCount).toBe(2);
+  });
+
+  it("Scenario: queue_status shows crashRecoveryReport", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, { runTimeoutSeconds: 0.001 });
+
+    // Queue work
+    const queueTool = api.tools.find((t) => t.name === "queue_work")!;
+    await queueTool.execute("test", {
+      tasks: [
+        { id: "t1", prompt: "search A" },
+        { id: "t2", prompt: "search B", dependsOn: ["t1"] },
+      ],
+    });
+
+    // Spawn subagent for t1
+    const spawnedHook = api.hooks.find((h) => h.event === "subagent_spawned")!;
+    await spawnedHook.handler({ sessionKey: "sub-1", resolvedModel: "test-model" });
+
+    // Wait to become stale
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Trigger session_end → stale detection pipeline
+    const sessionEndHook = api.hooks.find((h) => h.event === "session_end")!;
+    await sessionEndHook.handler({});
+
+    // Check queue_status shows crashRecoveryReport
+    const statusTool = api.tools.find((t) => t.name === "queue_status")!;
+    const result = await statusTool.execute("test", {});
+    const parsed = JSON.parse((result as any).content[0].text);
+
+    expect(parsed).toHaveProperty("crashRecoveryReport");
+    expect(parsed.crashRecoveryReport).toHaveProperty("recoveredCount");
+    expect(parsed.crashRecoveryReport).toHaveProperty("blockedCount");
+    expect(parsed.crashRecoveryReport).toHaveProperty("newDispatchCount");
+
+    // t1 went stale (recoveredCount >= 1), t2 blocked (blockedCount >= 1)
+    expect(parsed.crashRecoveryReport.recoveredCount).toBeGreaterThanOrEqual(1);
+    expect(parsed.crashRecoveryReport.blockedCount).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -1311,5 +1443,39 @@ describe("Feature: Cache Check Logic (#41)", () => {
     expect(result.cached).toHaveLength(0);
     expect(result.uncached).toHaveLength(1);
     expect(result.uncached[0].id).toBe("t1");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+
+describe("Feature: shouldUseCached (#41)", () => {
+  it("Scenario: Valid cache hit with all fields returns true", async () => {
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    const { shouldUseCached } = mod;
+
+    const hit = {
+      query: "search test",
+      ns: "memory",
+      uri: "doc.md",
+      title: "Test Document",
+    };
+
+    expect(shouldUseCached(hit)).toBe(true);
+    expect(shouldUseCached(hit, 0.0)).toBe(true);
+    expect(shouldUseCached(hit, 1.0)).toBe(true);
+  });
+
+  it("Scenario: Null or partial hit returns false", async () => {
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    const { shouldUseCached } = mod;
+
+    // Null hit → not cached
+    expect(shouldUseCached(null)).toBe(false);
+    expect(shouldUseCached(undefined)).toBe(false);
+
+    // Partial hit → not cached
+    expect(shouldUseCached({ query: "q", ns: "", uri: "", title: "" })).toBe(false);
+    expect(shouldUseCached({ query: "q", ns: "mem", uri: "", title: "" })).toBe(false);
+    expect(shouldUseCached({ query: "", ns: "mem", uri: "doc.md", title: "Title" })).toBe(false);
   });
 });

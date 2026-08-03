@@ -230,10 +230,14 @@ export function failBlockedTasks(state: WorkQueueState): WorkQueueState {
     });
 
     if (hasFailedDep) {
+      const failedDepId = deps.find((depId) => {
+        const dep = newTasks.get(depId);
+        return dep && dep.status === "failed";
+      });
       newTasks.set(id, {
         ...task,
         status: "failed",
-        error: "dependency failed",
+        error: `dependency failed: ${failedDepId}`,
       });
       changed = true;
     }
