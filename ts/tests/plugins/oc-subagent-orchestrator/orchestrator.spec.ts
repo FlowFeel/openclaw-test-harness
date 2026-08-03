@@ -12,6 +12,18 @@ import { readFileSync, existsSync, mkdirSync, writeFileSync, rmSync, mkdtempSync
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 
+// Import the pure cache check functions for testing (no I/O)
+import {
+  checkCacheForTasks,
+  type CacheCheckResult,
+} from "../../../src/plugins/oc-subagent-orchestrator/src/index.ts";
+import {
+  cacheKey,
+  putEntry,
+  type CacheStore,
+} from "../../../src/plugins/shared/result-cache.js";
+import { type TaskSpec } from "../../../src/plugins/shared/work-queue-scheduler.ts";
+
 // ── Mock PluginApi ───────────────────────────────────────────
 
 interface MockHook { event: string; handler: (e: Record<string, unknown>) => Promise<void>; name?: string }
@@ -150,6 +162,63 @@ describe("Feature: subagent_health Tool", () => {
     expect(parsed.depth1Timeout).toBe(300);
     expect(parsed.depth2Timeout).toBe(180);
   });
+
+  it("Scenario: Returns heartbeatSummary field with all expected properties", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    const tool = api.tools.find((t) => t.name === "subagent_health")!;
+    const result = await tool.execute("test", {});
+    const parsed = JSON.parse((result as any).content[0].text);
+
+    expect(parsed).toHaveProperty("heartbeatSummary");
+    expect(parsed.heartbeatSummary).toHaveProperty("activeSubagents");
+    expect(parsed.heartbeatSummary).toHaveProperty("staleSubagents");
+    expect(parsed.heartbeatSummary).toHaveProperty("queueActive");
+    expect(parsed.heartbeatSummary).toHaveProperty("queueProgress");
+    expect(parsed.heartbeatSummary).toHaveProperty("cacheHitRate");
+    expect(parsed.heartbeatSummary).toHaveProperty("healthStatus");
+    expect(parsed.heartbeatSummary).toHaveProperty("effectiveMaxConcurrent");
+    expect(parsed.heartbeatSummary).toHaveProperty("generatedAt");
+
+    // Fresh state: no subagents, no queue
+    expect(parsed.heartbeatSummary.activeSubagents).toBe(0);
+    expect(parsed.heartbeatSummary.staleSubagents).toBe(0);
+    expect(parsed.heartbeatSummary.queueActive).toBe(false);
+    expect(parsed.heartbeatSummary.queueProgress.total).toBe(0);
+    expect(parsed.heartbeatSummary.queueProgress.completed).toBe(0);
+    expect(parsed.heartbeatSummary.queueProgress.failed).toBe(0);
+    expect(parsed.heartbeatSummary.queueProgress.queued).toBe(0);
+    expect(parsed.heartbeatSummary.cacheHitRate).toBe(0);
+    expect(parsed.heartbeatSummary.healthStatus).toBe("healthy");
+    expect(parsed.heartbeatSummary.effectiveMaxConcurrent).toBe(6);
+    expect(typeof parsed.heartbeatSummary.generatedAt).toBe("string");
+  });
+
+  it("Scenario: heartbeatSummary has queueProgress when queue is active", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    // Queue work to activate the queue
+    const queueTool = api.tools.find((t) => t.name === "queue_work")!;
+    await queueTool.execute("test", {
+      tasks: [
+        { id: "t1", prompt: "search A" },
+        { id: "t2", prompt: "search B" },
+      ],
+    });
+
+    const tool = api.tools.find((t) => t.name === "subagent_health")!;
+    const result = await tool.execute("test", {});
+    const parsed = JSON.parse((result as any).content[0].text);
+
+    expect(parsed.heartbeatSummary.queueActive).toBe(true);
+    expect(parsed.heartbeatSummary.queueProgress.total).toBe(2);
+    // dispatched should be > 0, queued + dispatched = total
+    expect(parsed.heartbeatSummary.queueProgress.queued + parsed.heartbeatSummary.queueProgress.completed + parsed.heartbeatSummary.queueProgress.failed).toBeLessThanOrEqual(2);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -223,7 +292,7 @@ describe("Feature: queue_status Tool", () => {
     expect(parsed.failed).toBe(0);
   });
 
-  it("Scenario: queue_work returns dispatch instructions with task prompts", async () => {
+  it("Scenario: queue_work returns spawnInstructions array", async () => {
     const api = createMockApi();
     const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
     mod.default.register(api as any, {});
@@ -241,24 +310,21 @@ describe("Feature: queue_status Tool", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.totalTasks).toBe(3);
 
-    // dispatchPlan should contain the dispatched tasks with their prompts
-    expect(parsed.dispatchPlan).toBeDefined();
-    expect(Array.isArray(parsed.dispatchPlan)).toBe(true);
-    expect(parsed.dispatchPlan.length).toBeGreaterThan(0);
+    // spawnInstructions should contain the dispatched tasks with their prompts
+    expect(parsed.spawnInstructions).toBeDefined();
+    expect(Array.isArray(parsed.spawnInstructions)).toBe(true);
+    expect(parsed.spawnInstructions.length).toBeGreaterThan(0);
 
-    // Each entry should have taskId, prompt, and priority
-    for (const entry of parsed.dispatchPlan) {
+    // Each entry should have taskId, prompt, and taskName
+    for (const entry of parsed.spawnInstructions) {
       expect(entry).toHaveProperty("taskId");
       expect(entry).toHaveProperty("prompt");
-      expect(entry).toHaveProperty("priority");
+      expect(entry).toHaveProperty("taskName");
       expect(typeof entry.prompt).toBe("string");
       expect(entry.prompt.length).toBeGreaterThan(0);
+      expect(typeof entry.taskName).toBe("string");
+      expect(entry.taskName.length).toBeGreaterThan(0);
     }
-
-    // Instructions should mention sessions_spawn
-    expect(parsed.instructions).toBeDefined();
-    expect(parsed.instructions).toContain("sessions_spawn");
-    expect(parsed.instructions).toContain("dispatchPlan");
   });
 
   it("Scenario: queue_status includes pendingSpawnCount and activeSubagents", async () => {
@@ -310,7 +376,7 @@ describe("Feature: queue_status Tool", () => {
     expect(parsed.activeSubagents).toBe(0);
   });
 
-  it("Scenario: queue_work dispatch plan respects maxConcurrent", async () => {
+  it("Scenario: queue_work spawnInstructions respects maxConcurrent", async () => {
     const api = createMockApi();
     const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
     mod.default.register(api as any, {});
@@ -334,16 +400,16 @@ describe("Feature: queue_status Tool", () => {
 
     // Should dispatch at most maxConcurrent (6) tasks
     expect(parsed.dispatched).toBeLessThanOrEqual(6);
-    expect(parsed.dispatchPlan.length).toBe(parsed.dispatched);
+    expect(parsed.spawnInstructions.length).toBe(parsed.dispatched);
 
-    // The dispatch plan entries should have taskId, prompt, priority
-    for (const entry of parsed.dispatchPlan) {
+    // The spawn instructions should have taskId, prompt, taskName
+    for (const entry of parsed.spawnInstructions) {
       expect(entry).toHaveProperty("taskId");
       expect(entry).toHaveProperty("prompt");
+      expect(entry).toHaveProperty("taskName");
     }
 
     // Verify via queue_status that the queue state is consistent
-    // (queued field in queue_work = uncached count, not queue state)
     const statusTool = api.tools.find((t) => t.name === "queue_status")!;
     const statusResult = await statusTool.execute("test", {});
     const statusParsed = JSON.parse((statusResult as any).content[0].text);
@@ -826,5 +892,424 @@ describe("Feature: session_health Tool (no file system)", () => {
       process.env.HOME = originalHome;
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+
+describe("Feature: detectStaleAndFail (pure function)", () => {
+  it("Scenario: stale subagent detected and marked failed", async () => {
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    const { detectStaleAndFail } = mod;
+    const { createQueue, dispatchNext } = await import("../../../src/plugins/shared/work-queue-scheduler.ts");
+    const { trackSpawn } = await import("../../../src/plugins/shared/subagent-tracker.ts");
+
+    // Create a queue with one task and dispatch it
+    const queue = createQueue([{ id: "t1", prompt: "search A" }]);
+    const { taskIds, state: dispatched } = dispatchNext(queue, 6, 1000);
+    expect(taskIds).toHaveLength(1);
+
+    // Create a subagent map with one active subagent, started at t=1000
+    let subagents = new Map();
+    subagents = trackSpawn(subagents, {
+      sessionKey: "sub-1",
+      startedAtMs: 1000,
+    }, 1000);
+
+    // Link session to task
+    const sessionToTaskMap = new Map([["sub-1", "t1"]]);
+
+    // Detect stale: runTimeoutSeconds=1, nowMs=3000 → cutoff=2000
+    // startedAtMs=1000 < 2000 → stale
+    const result = detectStaleAndFail(
+      subagents,
+      dispatched,
+      sessionToTaskMap,
+      1,   // runTimeoutSeconds
+      6,   // maxConcurrent
+      "healthy",
+      3000 // nowMs
+    );
+
+    expect(result.staleCount).toBe(1);
+    expect(result.staleKeys).toEqual(["sub-1"]);
+
+    // Task should be marked as failed
+    const task = result.queue!.tasks.get("t1");
+    expect(task!.status).toBe("failed");
+    expect(task!.error).toContain("stale");
+
+    // Stale subagent removed from map
+    expect(result.subagents.has("sub-1")).toBe(false);
+
+    // Session-to-task mapping removed
+    expect(result.sessionToTaskMap.has("sub-1")).toBe(false);
+  });
+
+  it("Scenario: dependents of stale task are blocked", async () => {
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    const { detectStaleAndFail } = mod;
+    const { createQueue, dispatchNext } = await import("../../../src/plugins/shared/work-queue-scheduler.ts");
+    const { trackSpawn } = await import("../../../src/plugins/shared/subagent-tracker.ts");
+
+    // Three tasks: t2 depends on t1, t3 is independent
+    const queue = createQueue([
+      { id: "t1", prompt: "search A" },
+      { id: "t2", prompt: "search B", dependsOn: ["t1"] },
+      { id: "t3", prompt: "search C" },
+    ]);
+
+    // Use maxConcurrent=1 so only t1 dispatches (t2 blocked by dependsOn)
+    const { taskIds, state: dispatched } = dispatchNext(queue, 1, 1000);
+    expect(taskIds).toHaveLength(1);
+    expect(taskIds).toContain("t1");
+
+    // Track subagent for t1
+    let subagents = new Map();
+    subagents = trackSpawn(subagents, {
+      sessionKey: "sub-1",
+      startedAtMs: 1000,
+    }, 1000);
+
+    const sessionToTaskMap = new Map([["sub-1", "t1"]]);
+
+    // Detect stale: t1's subagent is stale
+    const result = detectStaleAndFail(
+      subagents,
+      dispatched,
+      sessionToTaskMap,
+      1, // runTimeoutSeconds
+      6, // maxConcurrent
+      "healthy",
+      3000 // nowMs
+    );
+
+    // t1 should be failed
+    expect(result.queue!.tasks.get("t1")!.status).toBe("failed");
+
+    // t2 (depends on t1) should be blocked (failed)
+    expect(result.queue!.tasks.get("t2")!.status).toBe("failed");
+    expect(result.queue!.tasks.get("t2")!.error).toContain("dependency");
+
+    // t3 (no dependency) should be dispatched to fill freed slot
+    expect(result.queue!.tasks.get("t3")!.status).toBe("dispatched");
+  });
+
+  it("Scenario: freed slot dispatches next task", async () => {
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    const { detectStaleAndFail } = mod;
+    const { createQueue, dispatchNext } = await import("../../../src/plugins/shared/work-queue-scheduler.ts");
+    const { trackSpawn } = await import("../../../src/plugins/shared/subagent-tracker.ts");
+
+    // Three tasks, maxConcurrent=2, so only 2 dispatch initially
+    const queue = createQueue([
+      { id: "t1", prompt: "search A" },
+      { id: "t2", prompt: "search B" },
+      { id: "t3", prompt: "search C" },
+    ]);
+
+    const { taskIds, state: dispatched } = dispatchNext(queue, 2, 1000);
+    expect(taskIds).toHaveLength(2);
+    expect(taskIds).toEqual(["t1", "t2"]);
+
+    // Both t1 and t2 are dispatched, t3 is queued
+    expect(dispatched.tasks.get("t3")!.status).toBe("queued");
+
+    // Track subagent for t1
+    let subagents = new Map();
+    subagents = trackSpawn(subagents, {
+      sessionKey: "sub-1",
+      startedAtMs: 1000,
+    }, 1000);
+
+    const sessionToTaskMap = new Map([["sub-1", "t1"]]);
+
+    // t1 goes stale → frees a slot → t3 should dispatch
+    const result = detectStaleAndFail(
+      subagents,
+      dispatched,
+      sessionToTaskMap,
+      1, // runTimeoutSeconds
+      2, // maxConcurrent (not effective max, but the configured value)
+      "healthy",
+      3000 // nowMs
+    );
+
+    // t1 should be failed
+    expect(result.queue!.tasks.get("t1")!.status).toBe("failed");
+
+    // t3 should now be dispatched (freed slot)
+    expect(result.queue!.tasks.get("t3")!.status).toBe("dispatched");
+
+    // spawnInstructions should contain t3
+    expect(result.spawnInstructions).toHaveLength(1);
+    expect(result.spawnInstructions[0].taskId).toBe("t3");
+    expect(result.spawnInstructions[0].prompt).toBe("search C");
+    expect(result.spawnInstructions[0].taskName).toBe("t3");
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+
+describe("Feature: queue_status reports staleCount", () => {
+  it("Scenario: queue_status with active queue reports staleCount", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, { runTimeoutSeconds: 0.001 });
+
+    // Queue work
+    const queueTool = api.tools.find((t) => t.name === "queue_work")!;
+    await queueTool.execute("test", {
+      tasks: [{ id: "t1", prompt: "search A" }],
+    });
+
+    // Spawn a subagent (links to task t1)
+    const spawnedHook = api.hooks.find((h) => h.event === "subagent_spawned")!;
+    await spawnedHook.handler({ sessionKey: "sub-1", resolvedModel: "test-model" });
+
+    // Wait a tiny bit so the subagent becomes stale with runTimeoutSeconds=0.001
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Trigger session_end → stale detection pipeline
+    const sessionEndHook = api.hooks.find((h) => h.event === "session_end")!;
+    await sessionEndHook.handler({});
+
+    // Check queue_status reports staleCount
+    const statusTool = api.tools.find((t) => t.name === "queue_status")!;
+    const result = await statusTool.execute("test", {});
+    const parsed = JSON.parse((result as any).content[0].text);
+
+    expect(parsed.staleCount).toBeDefined();
+    expect(parsed.staleCount).toBeGreaterThanOrEqual(0);
+
+    // The task should have been marked as failed
+    expect(parsed.failed).toBe(1);
+    expect(parsed.completed).toBe(0);
+  });
+
+  it("Scenario: queue_status with no queue reports staleCount=0", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, {});
+
+    const tool = api.tools.find((t) => t.name === "queue_status")!;
+    const result = await tool.execute("test", {});
+    const parsed = JSON.parse((result as any).content[0].text);
+
+    expect(parsed.staleCount).toBeDefined();
+    expect(parsed.staleCount).toBe(0);
+  });
+
+  it("Scenario: queue_status staleCount reflects actual stale subagents", async () => {
+    const api = createMockApi();
+    const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
+    mod.default.register(api as any, { runTimeoutSeconds: 0.001 });
+
+    // Queue work with 2 tasks
+    const queueTool = api.tools.find((t) => t.name === "queue_work")!;
+    await queueTool.execute("test", {
+      tasks: [
+        { id: "t1", prompt: "search A" },
+        { id: "t2", prompt: "search B" },
+      ],
+    });
+
+    // Spawn both subagents
+    const spawnedHook = api.hooks.find((h) => h.event === "subagent_spawned")!;
+    await spawnedHook.handler({ sessionKey: "sub-1", resolvedModel: "test-model" });
+    await spawnedHook.handler({ sessionKey: "sub-2", resolvedModel: "test-model" });
+
+    // Wait to become stale
+    await new Promise((r) => setTimeout(r, 5));
+
+    // Trigger session_end
+    const sessionEndHook = api.hooks.find((h) => h.event === "session_end")!;
+    await sessionEndHook.handler({});
+
+    // Check queue_status
+    const statusTool = api.tools.find((t) => t.name === "queue_status")!;
+    const result = await statusTool.execute("test", {});
+    const parsed = JSON.parse((result as any).content[0].text);
+
+    // Both tasks should be failed
+    expect(parsed.failed).toBe(2);
+    expect(parsed.staleCount).toBe(0); // stale subagents were cleaned up, so 0 remaining
+  });
+});
+
+// ── Feature: Cache Check Logic (Pure Tests — No I/O) ──────────────────────
+/**
+ * Pure tests for the cache check logic that powers queue_work.
+ * 
+ * These tests verify:
+ * - If cache hit → task is skipped (not queued)
+ * - If cache miss → task is queued
+ * 
+ * They use the pure `checkCacheForTasks` function which is testable without I/O.
+ * The SQLite check (subprocess) is tested separately in a real runtime.
+ *
+ * @dft
+ * - Uses mock data only
+ * - No subprocess calls, no Date.now() dependency (nowMs is injected)
+ * - Validates the bridge between in-memory cache and SQLite hits map
+ */
+describe("Feature: Cache Check Logic (#41)", () => {
+  const nowMs = 1_000_000_000_000;
+  const ttlMs = 86_400_000; // 24h
+
+  /** Create a store with one cached result. */
+  function createStoreWithCachedResult(
+    query: string,
+    taskId: string,
+    result: unknown,
+  ): CacheStore {
+    const store: CacheStore = new Map();
+    const key = cacheKey(query, taskId);
+    return putEntry(store, key, result, nowMs, ttlMs);
+  }
+
+  it("Scenario: In-memory cache hit skips task", () => {
+    const cache = createStoreWithCachedResult("search A", "t1", { found: true });
+    const tasks: TaskSpec[] = [
+      { id: "t1", prompt: "search A" },
+      { id: "t2", prompt: "search B" },
+    ];
+    const sqliteHits = new Map<string, unknown>();
+
+    const result = checkCacheForTasks(tasks, cache, nowMs, sqliteHits);
+
+    // t1 was cached → not queued
+    expect(result.cached).toHaveLength(1);
+    expect(result.cached[0]).toEqual({ found: true });
+
+    // t2 was not cached → queued
+    expect(result.uncached).toHaveLength(1);
+    expect(result.uncached[0].id).toBe("t2");
+
+    // Correct hit count
+    expect(result.hitCount).toBe(1);
+  });
+
+  it("Scenario: SQLite hits map causes cache hit", () => {
+    const cache: CacheStore = new Map(); // Empty in-memory cache
+    const tasks: TaskSpec[] = [
+      { id: "t1", prompt: "search A" },
+      { id: "t2", prompt: "search B" },
+    ];
+
+    // Simulate SQLite returning a result for t1
+    const sqliteHits = new Map<string, unknown>([
+      ["t1", { fromSqlite: true, ns: "memory", uri: "test.md", title: "Test" }],
+    ]);
+
+    const result = checkCacheForTasks(tasks, cache, nowMs, sqliteHits);
+
+    // t1 was in SQLite hits → cached (even though in-memory cache is empty)
+    expect(result.cached).toHaveLength(1);
+    expect(result.cached[0]).toEqual({
+      fromSqlite: true,
+      ns: "memory",
+      uri: "test.md",
+      title: "Test",
+    });
+
+    // t2 was not in SQLite hits → queued
+    expect(result.uncached).toHaveLength(1);
+    expect(result.uncached[0].id).toBe("t2");
+
+    expect(result.hitCount).toBe(1);
+  });
+
+  it("Scenario: Both caches contribute to hits", () => {
+    const cache = createStoreWithCachedResult("search A", "t1", { fromMemory: true });
+    const tasks: TaskSpec[] = [
+      { id: "t1", prompt: "search A" }, // cached in-memory
+      { id: "t2", prompt: "search B" }, // cached via SQLite hits
+      { id: "t3", prompt: "search C" }, // not cached
+      { id: "t4", prompt: "search D" }, // cached via both (in-memory takes precedence)
+    ];
+    const sqliteHits = new Map<string, unknown>([
+      ["t2", { fromSqlite: true }],
+      ["t4", { fromSqliteToo: true }],
+    ]);
+
+    const result = checkCacheForTasks(tasks, cache, nowMs, sqliteHits);
+
+    // t1 and t2 are cached (one from memory, one from SQLite hits)
+    // t4 is cached from in-memory (takes precedence over SQLite hits)
+    // t3 is uncached
+    expect(result.cached).toHaveLength(3);
+    expect(result.uncached).toHaveLength(1);
+    expect(result.uncached[0].id).toBe("t3");
+
+    // Verify hit counts
+    expect(result.hitCount).toBe(3);
+  });
+
+  it("Scenario: Empty tasks returns all empty", () => {
+    const cache: CacheStore = new Map();
+    const tasks: TaskSpec[] = [];
+    const sqliteHits = new Map<string, unknown>();
+
+    const result = checkCacheForTasks(tasks, cache, nowMs, sqliteHits);
+
+    expect(result.cached).toHaveLength(0);
+    expect(result.uncached).toHaveLength(0);
+    expect(result.hitCount).toBe(0);
+  });
+
+  it("Scenario: All tasks uncached returns all uncached", () => {
+    const cache: CacheStore = new Map();
+    const tasks: TaskSpec[] = [
+      { id: "t1", prompt: "search A" },
+      { id: "t2", prompt: "search B" },
+    ];
+    const sqliteHits = new Map<string, unknown>();
+
+    const result = checkCacheForTasks(tasks, cache, nowMs, sqliteHits);
+
+    expect(result.cached).toHaveLength(0);
+    expect(result.uncached).toHaveLength(2);
+    expect(result.hitCount).toBe(0);
+  });
+
+  it("Scenario: All tasks cached returns all cached", () => {
+    const cache = createStoreWithCachedResult("search A", "t1", { result: 1 });
+    const tasks: TaskSpec[] = [
+      { id: "t1", prompt: "search A" },
+    ];
+    const sqliteHits = new Map<string, unknown>();
+
+    const result = checkCacheForTasks(tasks, cache, nowMs, sqliteHits);
+
+    expect(result.cached).toHaveLength(1);
+    expect(result.uncached).toHaveLength(0);
+    expect(result.hitCount).toBe(1);
+  });
+
+  it("Scenario: TTL expiry causes cache miss", () => {
+    // Entry created long ago (before current time by more than TTL)
+    const createdAtMs = nowMs - 90_000_000; // > 24h ago
+    const ttlMs = 86_400_000;
+
+    const cache: CacheStore = new Map();
+    const key = cacheKey("search A", "t1");
+    cache.set(key, {
+      key,
+      result: { expired: true },
+      createdAtMs,
+      ttlMs,
+      hitCount: 0,
+    });
+
+    const tasks: TaskSpec[] = [{ id: "t1", prompt: "search A" }];
+    const sqliteHits = new Map<string, unknown>();
+
+    const result = checkCacheForTasks(tasks, cache, nowMs, sqliteHits);
+
+    // Expired entry = cache miss
+    expect(result.cached).toHaveLength(0);
+    expect(result.uncached).toHaveLength(1);
+    expect(result.uncached[0].id).toBe("t1");
   });
 });

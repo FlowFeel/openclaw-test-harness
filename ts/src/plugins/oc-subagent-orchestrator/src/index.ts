@@ -53,9 +53,15 @@ import {
   type AdmissionThresholds,
   DEFAULT_THRESHOLDS,
 } from "../../shared/adaptive-admission.ts";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { resolve } from "node:path";
+const execFileAsync = promisify(execFile);
+
 import { monitorEventLoopDelay, performance, type EventLoopUtilization } from "node:perf_hooks";
 import { getHeapStatistics } from "node:v8";
 import process from "node:process";
+import { writeFileSync, mkdirSync } from "node:fs";
 import {
   mergeResults,
   formatMergedDocument,
@@ -127,6 +133,7 @@ interface OrchestratorConfig {
   bloatFields: string[];
   maxAgeHours: number;
   cacheTtlMs: number;
+  staleCheckIntervalMs: number;
 }
 
 const DEFAULT_CONFIG: OrchestratorConfig = {
@@ -145,7 +152,137 @@ const DEFAULT_CONFIG: OrchestratorConfig = {
   ],
   maxAgeHours: 15,
   cacheTtlMs: 86_400_000, // 24h
+  staleCheckIntervalMs: 30_000,
 };
+
+// ── Workspace root for subprocess calls ────────────────────────
+
+/**
+ * Absolute path to the workspace root (lib/python lives here).
+ * Falls back to a reasonable default when HOME is not set.
+ */
+const WORKSPACE_ROOT = resolve(process.env.HOME || "/home/node", ".openclaw/workspace");
+const LIB_PYTHON_DIR = resolve(WORKSPACE_ROOT, "lib/python");
+
+// ── SQLite Registry Bridge (persistent cache) ─────────────────
+
+/**
+ * Result of a cache check across both in-memory and SQLite stores.
+ * @internal Exported for testing only.
+ */
+export interface CacheCheckResult {
+  /** Tasks that had a cache hit (either in-memory or SQLite) */
+  cached: unknown[];
+  /** Tasks that were not cached and need to be queued */
+  uncached: TaskSpec[];
+  /** Number of cache hits discovered */
+  hitCount: number;
+}
+
+/**
+ * Pure function: check which tasks are cached and which need queuing.
+ *
+ * This encapsulates the cache check logic from the queue_work tool,
+ * making it testable without I/O. The `sqliteHits` map is pre-computed
+ * by the caller (which may involve subprocess I/O).
+ *
+ * @param tasks - All tasks to check
+ * @param cache - The in-memory CacheStore
+ * @param nowMs - Current timestamp for TTL checks
+ * @param sqliteHits - Pre-computed map of taskId → SQLite cache result
+ * @returns Separated cached and uncached tasks with hit count
+ *
+ * @note This is part of the SQLite registry bridge (#41) — the bridge
+ *       between the ephemeral in-memory cache (#25) and the persistent
+ *       SQLite search registry (meta/search.db).
+ */
+export function checkCacheForTasks(
+  tasks: TaskSpec[],
+  cache: CacheStore,
+  nowMs: number,
+  sqliteHits: Map<string, unknown> = new Map(),
+): CacheCheckResult {
+  const cached: unknown[] = [];
+  const uncached: TaskSpec[] = [];
+  let hitCount = 0;
+
+  for (const task of tasks) {
+    // 1. Check in-memory cache first
+    const { hit, result } = getCachedResult(cache, task.prompt, task.id, nowMs);
+    if (hit && result !== undefined) {
+      cached.push(result);
+      hitCount++;
+      continue;
+    }
+
+    // 2. Check SQLite-backed persistent cache (pre-computed by caller)
+    const sqliteResult = sqliteHits.get(task.id);
+    if (sqliteResult !== undefined) {
+      cached.push(sqliteResult);
+      hitCount++;
+      continue;
+    }
+
+    // 3. Not cached — needs to be queued
+    uncached.push(task);
+  }
+
+  return { cached, uncached, hitCount };
+}
+
+/**
+ * Query the SQLite-backed persistent cache via phosphene_search.py.
+ *
+ * This is a bridge between the in-memory result cache (#25) and the
+ * persistent SQLite search registry (meta/search.db).
+ *
+ * The subprocess call is best-effort: if it fails or search.db is
+ * unavailable, null is returned and the caller continues without cache.
+ *
+ * @param query - The search query/prompt to look up
+ * @returns A result object if found, or null if not found or on error
+ */
+export async function checkSqliteCache(
+  query: string,
+): Promise<{ query: string; ns: string; uri: string; title: string } | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      "uv",
+      ["run", "python", "scripts/common/phosphene_search.py", query, "--limit", "1"],
+      {
+        cwd: LIB_PYTHON_DIR,
+        timeout: 10_000,
+        maxBuffer: 1024 * 64,
+      },
+    );
+
+    // Parse the output to determine if we got a hit
+    // Output format: PHOSPHENE SEARCH: "query"  (N results)
+    // If N > 0, the next lines contain the result with score
+    const match = stdout.match(/\((\d+) results\)/);
+    if (match && parseInt(match[1], 10) > 0) {
+      // Extract the first result line: [ns]  uri  —  title
+      const lines = stdout.split("\n").filter((l) => l.trim().startsWith("["));
+      if (lines.length > 0) {
+        const line = lines[0].trim();
+        const resultMatch = line.match(/^\[([^\]]+)\]\s+(\S+)\s+—\s+(.+)$/);
+        if (resultMatch) {
+          return {
+            query,
+            ns: resultMatch[1],
+            uri: resultMatch[2],
+            title: resultMatch[3].trim(),
+          };
+        }
+      }
+    }
+
+    return null;
+  } catch {
+    // Subprocess failure is non-fatal — continue without cache
+    return null;
+  }
+}
 
 // ── TelemetryCollector — real perf_hooks readings ──────────
 
@@ -309,13 +446,41 @@ export default definePluginEntry({
       }
     }, { name: "orchestrator-after-compaction" });
 
-    // ── Hook: session_end — purge stale ──────────────────────
+    // ── Hook: session_end — stale watchdog + purge ────────────
     api.registerHook("session_end", async () => {
       try {
-        // In-memory stale detection
-        const { result } = detectStale(state.subagents, cfg.runTimeoutSeconds, Date.now());
-        if (result.staleKeys.length > 0) {
-          api.logger?.info?.(`[orchestrator] ${result.staleKeys.length} stale subagents detected`);
+        // Detect stale subagents and fail their tasks
+        const staleResult = detectStaleAndFail(
+          state.subagents,
+          state.queue,
+          state.sessionToTaskMap,
+          cfg.runTimeoutSeconds,
+          cfg.maxConcurrent,
+          state.healthSnapshot.status,
+          Date.now()
+        );
+
+        // Apply state updates from stale detection
+        state.subagents = staleResult.subagents;
+        state.queue = staleResult.queue;
+        state.sessionToTaskMap = staleResult.sessionToTaskMap;
+
+        if (staleResult.staleCount > 0) {
+          api.logger?.info?.(
+            `[orchestrator] ${staleResult.staleCount} stale subagent(s) detected and failed: ` +
+            staleResult.staleKeys.join(", ")
+          );
+
+          // Queue newly dispatched tasks for spawning
+          if (staleResult.spawnInstructions.length > 0) {
+            state.pendingSpawnTaskIds.push(
+              ...staleResult.spawnInstructions.map((s) => s.taskId)
+            );
+            api.logger?.info?.(
+              `[orchestrator] Dispatched ${staleResult.spawnInstructions.length} ` +
+              `replacement task(s) — spawnInstructions: ${JSON.stringify(staleResult.spawnInstructions)}`
+            );
+          }
         }
 
         // Also purge stale from sessions.json
@@ -331,6 +496,29 @@ export default definePluginEntry({
               `[orchestrator] Purged ${purgedKeys.length} stale sessions from sessions.json`
             );
           }
+        }
+        // Write heartbeat summary (best-effort)
+        try {
+          const heartbeatSummary = generateHeartbeatSummary(
+            state.subagents,
+            state.queue,
+            state.totalQueries,
+            state.cacheHits,
+            state.healthSnapshot,
+            cfg.runTimeoutSeconds,
+            cfg.maxConcurrent,
+            Date.now()
+          );
+          const heartbeatDir = resolve(process.cwd(), "drafts/platform");
+          mkdirSync(heartbeatDir, { recursive: true });
+          writeFileSync(
+            resolve(heartbeatDir, "orchestrator-heartbeat-latest.json"),
+            heartbeatSummary,
+            "utf8"
+          );
+          api.logger?.info?.("[orchestrator] Heartbeat summary written");
+        } catch (hbErr) {
+          api.logger?.warn?.(`[orchestrator] Heartbeat write failed: ${String(hbErr)}`);
         }
       } catch (err) {
         api.logger?.error?.(`[orchestrator] session_end failed: ${String(err)}`);
@@ -439,21 +627,31 @@ export default definePluginEntry({
           return { content: [{ type: "text" as const, text: "tasks must be an array" }] };
         }
 
-        // Check cache for each task
-        const uncached: TaskSpec[] = [];
-        const cached: unknown[] = [];
+        // Check cache for each task — in-memory first, then SQLite registry
+        // This is the bridge between the in-memory cache (#25) and the
+        // persistent SQLite search registry (#41).
         const now = Date.now();
 
-        for (const task of tasks) {
-          const { hit, result } = getCachedResult(state.cache, task.prompt, task.id, now);
-          state.totalQueries++;
-          if (hit && result) {
-            state.cacheHits++;
-            cached.push(result);
-          } else {
-            uncached.push(task);
+        // Query SQLite-backed persistent cache for all tasks in parallel
+        const sqliteHits = new Map<string, unknown>();
+        const sqlitePromises = tasks.map(async (task) => {
+          const sqliteResult = await checkSqliteCache(task.prompt);
+          if (sqliteResult !== null) {
+            // Store in in-memory cache for subsequent lookups
+            const key = cacheKey(task.prompt, task.id);
+            state.cache = putEntry(state.cache, key, sqliteResult, now, state.config.cacheTtlMs);
+            sqliteHits.set(task.id, sqliteResult);
           }
-        }
+        });
+        await Promise.allSettled(sqlitePromises);
+
+        // Use the pure cache check function (testable without I/O)
+        const { cached, uncached, hitCount } = checkCacheForTasks(
+          tasks, state.cache, now, sqliteHits,
+        );
+
+        state.totalQueries += tasks.length;
+        state.cacheHits += hitCount;
 
         // Check depth limit
         const depthDecision = getDepthDecision(0, depthConfig);
@@ -495,13 +693,13 @@ export default definePluginEntry({
         const { taskIds, state: newState } = dispatchNext(queue, effectiveMax, now);
         state.queue = newState;
 
-        // Build dispatch plan: each dispatched task becomes a spawn instruction
-        const dispatchPlan = taskIds.map((taskId) => {
+        // Build spawn instructions: each dispatched task becomes a spawn instruction
+        const spawnInstructions = taskIds.map((taskId) => {
           const task = state.queue!.tasks.get(taskId);
           return {
             taskId,
             prompt: task?.spec.prompt ?? "",
-            priority: task?.spec.priority ?? "normal",
+            taskName: task?.spec.id ?? taskId,
           };
         });
 
@@ -514,15 +712,9 @@ export default definePluginEntry({
             text: JSON.stringify({
               ok: true,
               totalTasks: tasks.length,
-              cached: cached.length,
-              queued: uncached.length,
+              cachedCount: hitCount,
               dispatched: taskIds.length,
-              effectiveMaxConcurrent: effectiveMax,
-              healthStatus: state.healthSnapshot.status,
-              dispatchPlan,
-              instructions: "Call sessions_spawn for each task in dispatchPlan using the prompt field. " +
-                "Spawn them in the order listed to maintain the dispatch queue. " +
-                `(${taskIds.length} task(s) to spawn)`,
+              spawnInstructions,
             }, null, 2),
           }],
         };
@@ -535,7 +727,8 @@ export default definePluginEntry({
       description:
         "Check the status of the subagent work queue — " +
         "total/queued/dispatched/completed/failed counts, " +
-        "active slots, effective maxConcurrent, and health status.",
+        "active slots, effective maxConcurrent, staleCount, " +
+        "and health status.",
       parameters: Type.Object({}),
       async execute(_id: string, _params: Record<string, unknown>) {
         if (!state.queue) {
@@ -547,6 +740,7 @@ export default definePluginEntry({
                 queueActive: false,
                 message: "No active work queue",
                 activeSubagents: getActiveCount(state.subagents),
+                staleCount: result_staleCount(state, cfg.runTimeoutSeconds),
                 maxConcurrent: cfg.maxConcurrent,
                 healthStatus: state.healthSnapshot.status,
                 cacheHitRate: state.totalQueries > 0
@@ -572,6 +766,7 @@ export default definePluginEntry({
               ...progress,
               pendingSpawnCount: state.pendingSpawnTaskIds.length,
               activeSubagents: getActiveCount(state.subagents),
+              staleCount: result_staleCount(state, cfg.runTimeoutSeconds),
               healthStatus: state.healthSnapshot.status,
               eventLoopP99Ms: Math.round(state.healthSnapshot.eventLoopP99Ms * 100) / 100,
               cacheHitRate: state.totalQueries > 0
@@ -656,6 +851,17 @@ export default definePluginEntry({
         const canSpawnNow = activeCount < effectiveMax;
         const depthDecision = getDepthDecision(0, depthConfig);
 
+        const heartbeatSummary = generateHeartbeatSummary(
+          state.subagents,
+          state.queue,
+          state.totalQueries,
+          state.cacheHits,
+          state.healthSnapshot,
+          cfg.runTimeoutSeconds,
+          cfg.maxConcurrent,
+          Date.now()
+        );
+
         return {
           content: [{
             type: "text" as const,
@@ -671,6 +877,7 @@ export default definePluginEntry({
               maxSpawnDepth: cfg.maxSpawnDepth,
               depth1Timeout: getDepthDecision(0, depthConfig).timeoutSeconds,
               depth2Timeout: getDepthDecision(1, depthConfig).timeoutSeconds,
+              heartbeatSummary: JSON.parse(heartbeatSummary),
             }, null, 2),
           }],
         };
@@ -780,6 +987,134 @@ export default definePluginEntry({
     });
   },
 });
+
+// ── generateHeartbeatSummary — heartbeat JSON for business report ──
+
+/**
+ * Generate a heartbeat summary JSON string from the orchestrator state.
+ * Used by subagent_health tool and session_end heartbeat file write.
+ *
+ * Pure function — no side effects, no I/O.
+ */
+function generateHeartbeatSummary(
+  subagents: SubagentMap,
+  queue: WorkQueueState | null,
+  totalQueries: number,
+  cacheHits: number,
+  healthSnapshot: SystemHealthSnapshot,
+  runTimeoutSeconds: number,
+  maxConcurrent: number,
+  nowMs: number
+): string {
+  const { result } = detectStale(subagents, runTimeoutSeconds, nowMs);
+  const activeCount = getActiveCount(subagents);
+  const effectiveMax = computeEffectiveMaxConcurrent(maxConcurrent, healthSnapshot.status);
+
+  const queueProgress = queue
+    ? computeProgress(queue, effectiveMax)
+    : null;
+
+  const cacheHitRate = totalQueries > 0
+    ? Math.round((cacheHits / totalQueries) * 100) / 100
+    : 0;
+
+  return JSON.stringify({
+    activeSubagents: activeCount,
+    staleSubagents: result.staleKeys.length,
+    queueActive: queue !== null,
+    queueProgress: queueProgress
+      ? {
+          total: queueProgress.total,
+          completed: queueProgress.completed,
+          failed: queueProgress.failed,
+          queued: queueProgress.queued,
+        }
+      : { total: 0, completed: 0, failed: 0, queued: 0 },
+    cacheHitRate,
+    healthStatus: healthSnapshot.status,
+    effectiveMaxConcurrent: effectiveMax,
+    generatedAt: new Date(nowMs).toISOString(),
+  }, null, 2);
+}
+
+
+// ── Exported: detectStaleAndFail — pure function for testing ──
+
+/**
+ * Detect stale subagents, record their tasks as failed, cascade
+ * failures to dependents, and dispatch next queued tasks to fill
+ * freed slots.
+ *
+ * Pure function — no side effects, no I/O. All timestamps injected.
+ *
+ * @returns Updated state maps and any newly dispatched spawn instructions.
+ */
+export function detectStaleAndFail(
+  subagents: SubagentMap,
+  queue: WorkQueueState | null,
+  sessionToTaskMap: Map<string, string>,
+  runTimeoutSeconds: number,
+  maxConcurrent: number,
+  healthStatus: "healthy" | "degraded" | "critical",
+  nowMs: number
+): {
+  staleCount: number;
+  staleKeys: string[];
+  subagents: SubagentMap;
+  queue: WorkQueueState | null;
+  sessionToTaskMap: Map<string, string>;
+  spawnInstructions: Array<{ taskId: string; prompt: string; taskName: string }>;
+} {
+  const { stale, fresh, result } = detectStale(subagents, runTimeoutSeconds, nowMs);
+  const staleKeys = result.staleKeys;
+  let updatedQueue = queue;
+  let updatedSessionToTaskMap = new Map(sessionToTaskMap);
+  const spawnInstructions: Array<{ taskId: string; prompt: string; taskName: string }> = [];
+
+  if (staleKeys.length > 0 && updatedQueue) {
+    // Mark each stale subagent's task as failed
+    for (const staleKey of staleKeys) {
+      const taskId = updatedSessionToTaskMap.get(staleKey);
+      if (taskId) {
+        updatedQueue = recordResult(
+          updatedQueue,
+          taskId,
+          "subagent went stale (no completion)",
+          nowMs,
+          false
+        );
+        updatedSessionToTaskMap.delete(staleKey);
+      }
+    }
+
+    // Cascade failures to dependents
+    updatedQueue = failBlockedTasks(updatedQueue);
+
+    // Dispatch next tasks to fill freed slots
+    const effectiveMax = computeEffectiveMaxConcurrent(maxConcurrent, healthStatus);
+    const { taskIds, state: newState } = dispatchNext(updatedQueue, effectiveMax, nowMs);
+    updatedQueue = newState;
+
+    // Build spawn instructions for newly dispatched tasks
+    for (const taskId of taskIds) {
+      const task = updatedQueue.tasks.get(taskId);
+      spawnInstructions.push({
+        taskId,
+        prompt: task?.spec.prompt ?? "",
+        taskName: task?.spec.id ?? taskId,
+      });
+    }
+  }
+
+  return {
+    staleCount: staleKeys.length,
+    staleKeys,
+    subagents: fresh,
+    queue: updatedQueue,
+    sessionToTaskMap: updatedSessionToTaskMap,
+    spawnInstructions,
+  };
+}
 
 // Helper — avoid name collision with detectStale result
 function result_staleCount(state: OrchestratorState, timeoutSec: number): number {

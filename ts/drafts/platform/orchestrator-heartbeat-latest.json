@@ -1,0 +1,15 @@
+{
+  "activeSubagents": 0,
+  "staleSubagents": 0,
+  "queueActive": true,
+  "queueProgress": {
+    "total": 2,
+    "completed": 0,
+    "failed": 2,
+    "queued": 0
+  },
+  "cacheHitRate": 0,
+  "healthStatus": "healthy",
+  "effectiveMaxConcurrent": 6,
+  "generatedAt": "2026-08-03T13:56:29.021Z"
+}
