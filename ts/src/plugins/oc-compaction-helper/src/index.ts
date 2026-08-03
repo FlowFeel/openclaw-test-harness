@@ -80,6 +80,44 @@ export default definePluginEntry({
       }
     }, { name: "compaction-helper-before" });
 
+    // ── Hook: agent_end — strip bloat fields after each run ──
+    // after_compaction rarely fires (only when tokens hit 976K threshold).
+    // agent_end fires once per conversation turn — the right frequency for
+    // bloat that accumulates on every turn. Only writes if bloat is present.
+    api.registerHook("agent_end", async () => {
+      try {
+        const raw = reader(sessionsPath);
+        if (!raw) return;
+
+        // Quick in-memory check: are bloat fields present?
+        let hasBloat = false;
+        for (const entry of Object.values(raw)) {
+          if (typeof entry === "object" && entry !== null) {
+            for (const field of bloatFields) {
+              if (field in entry) { hasBloat = true; break; }
+            }
+          }
+          if (hasBloat) break;
+        }
+        if (!hasBloat) return; // No bloat — skip file write
+
+        // Bloat found — strip and write atomically
+        const { cleaned, report } = cleanupSessions(raw, {
+          bloatFields,
+          maxAgeHours: 24,
+          nowMs: Date.now(),
+        });
+        writer(cleaned, sessionsPath);
+        api.logger?.info?.(
+          `[oc-compaction-helper] agent_end cleanup: ` +
+          `${report.strippedFieldCount} fields stripped, ` +
+          `${report.reductionPercent}% size reduction`
+        );
+      } catch (err) {
+        api.logger?.error?.(`[oc-compaction-helper] agent_end cleanup failed: ${String(err)}`);
+      }
+    }, { name: "compaction-helper-agent-end" });
+
     // ── Hook: after_compaction — strip bloat fields ──────────
     api.registerHook("after_compaction", async () => {
       try {
