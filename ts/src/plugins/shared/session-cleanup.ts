@@ -18,7 +18,7 @@
  * - No fixtures: data is inline in tests.
  */
 
-import { SUBAGENT_KEY } from "./regex-library.js";
+import { SUBAGENT_KEY } from "./regex-library.ts";
 
 // ── Types ─────────────────────────────────────────────────────
 

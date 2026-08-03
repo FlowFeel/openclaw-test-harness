@@ -25,7 +25,7 @@
  * - No fixtures — data is inline in tests
  */
 
-import { TRAILING_COMMA, leadingTrailingWs } from "./regex-library.js";
+import { TRAILING_COMMA, leadingTrailingWs } from "./regex-library.ts";
 
 // ── Types ─────────────────────────────────────────────────────
 
