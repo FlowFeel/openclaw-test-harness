@@ -1,0 +1,23 @@
+{
+  "id": "oc-event-loop-monitor",
+  "name": "OC Event Loop Monitor",
+  "description": "Live telemetry — event loop delay, heap usage, CPU ratio. Hooks into model_call events to collect real runtime metrics.",
+  "contracts": {
+    "tools": ["event_loop_health"]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "collectIntervalMs": { "type": "number", "default": 30000 },
+      "p99HealthyMs": { "type": "number", "default": 50 },
+      "p99DegradedMs": { "type": "number", "default": 200 },
+      "utilHealthy": { "type": "number", "default": 0.3 },
+      "utilDegraded": { "type": "number", "default": 0.7 },
+      "heapCriticalMb": { "type": "number", "default": 500 }
+    }
+  }
+}
