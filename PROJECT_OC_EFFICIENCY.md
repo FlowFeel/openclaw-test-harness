@@ -218,6 +218,7 @@ process other I/O while parsing SSE chunks.
 | #30 | Build oc-compaction-helper plugin | G | P1 | 📋 Planned |
 | #31 | Build oc-context-cache plugin | H | P2 | 📋 Planned |
 | #32 | Build oc-stream-relay plugin | H | P2 | 📋 Planned |
+| #33 | Restore oc-sidecar (worker-pool only, no conflicts) | I | P0 | 📋 Planned |
 
 ## Build Order
 
@@ -227,7 +228,8 @@ process other I/O while parsing SSE chunks.
 #28 (sessions_spawn) ──→ depends on #27 for depth 2 chains
 #29 (perf_hooks) ──→ feeds #28's adaptive admission
 #31 (context cache) — independent
-#32 (stream relay) — independent, needs sidecar process
+#32 (stream relay) — independent, needs sidecar process (#33)
+#33 (oc-sidecar) — independent, restores worker pool
 ```
 
 ## DFT & CI Requirements
@@ -237,3 +239,60 @@ process other I/O while parsing SSE chunks.
 - CI: 4-layer pipeline gates all commits
 - Coverage target: 80%+ for new code
 - No OC core files modified — plugin hooks + tools only
+
+---
+
+## Phase I — Sidecar Restoration
+
+### #33: Restore oc-sidecar as a pure worker-pool plugin (no tool conflicts)
+
+**Problem:** We removed `oc-sidecar` because it had tool name conflicts with
+the orchestrator (both registered `session_health` and `event_loop_health`).
+But the sidecar process is the only way to offload CPU-heavy work (JSON
+serialization, transcript compaction, result merging) off the main event loop.
+Without it, all CPU work happens in-process on the V8 main thread.
+
+**Solution:** Restore `oc-sidecar` as a focused worker-pool-only plugin:
+- Remove ALL hooks except `gateway_start`/`gateway_stop` (boot/kill sidecar)
+- Remove ALL tools except `sidecar_health` and `sidecar_exec`
+- No `session_health`, no `event_loop_health`, no `after_compaction` —
+  the orchestrator owns those
+- The sidecar process runs `worker_threads` with handlers:
+  `json.stringify`, `json.parse`, `serialize.session`, `compact.context`
+- The orchestrator can call `sidecar_exec` to offload merge/dedup work
+- Clean separation: orchestrator = scheduling brain, sidecar = CPU muscle
+
+**Plugin structure:**
+```
+oc-sidecar/
+  openclaw.plugin.json  (contracts: sidecar_health, sidecar_exec only)
+  src/index.ts          (2 hooks: gateway_start, gateway_stop)
+  src/sidecar-manager.ts
+  src/sidecar-client.ts
+  src/sidecar-server.ts
+  src/worker-entry.ts
+```
+
+**Config:**
+```json
+{
+  "oc-sidecar": {
+    "enabled": true,
+    "config": {
+      "port": 18900,
+      "workerThreads": 3,
+      "startupTimeoutMs": 10000
+    }
+  }
+}
+```
+
+**Acceptance:**
+1. Sidecar process starts on gateway_start (PID visible)
+2. `sidecar_health` returns worker pool stats (active, completed, poolSize)
+3. `sidecar_exec` with `json.stringify` returns serialized result
+4. No tool name conflicts with orchestrator
+5. Sidecar crash → graceful fallback (sidecar_exec returns error, doesn't crash OC)
+6. Sidecar starts in < 2s
+
+**Status:** 📋 Planned
