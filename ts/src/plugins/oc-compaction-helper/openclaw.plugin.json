@@ -1,0 +1,35 @@
+{
+  "id": "oc-compaction-helper",
+  "name": "OC Compaction Helper",
+  "description": "Transcript compaction helper — warns on large transcripts before compaction, strips bloat fields after compaction, and reports transcript size estimates.",
+  "contracts": {
+    "tools": ["compact_check"]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "maxTranscriptMb": {
+        "type": "number",
+        "default": 5
+      },
+      "bloatFields": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [
+          "compactionCheckpoints",
+          "systemPromptReport",
+          "skillsSnapshot",
+          "contextBudgetStatus",
+          "usageFamilySessionIds",
+          "lastHeartbeatText"
+        ]
+      }
+    }
+  }
+}

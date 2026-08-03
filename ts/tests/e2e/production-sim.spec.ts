@@ -120,6 +120,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
   let ocStarted = false;
 
   beforeAll(async () => {
+    try {
     const pluginFiles = collectPluginFiles();
     const pluginSha = dirSha256(path.resolve(TS_DIR, "src/plugins"));
 
@@ -143,6 +144,10 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
       .withAutoRemove(true)
       .start();
 
+    } catch (e) {
+      console.log("[prod-sim] Container setup failed:", String(e));
+      throw e;
+    }
     // Install OC
     console.log("[prod-sim] Installing openclaw...");
     const installResult = await container.exec([

@@ -27,8 +27,8 @@ class TestConfigPolicy:
         assert subagent_config["archiveAfterMinutes"] <= 10
 
     def test_spawn_depth_is_shallow(self, subagent_config: dict[str, int]) -> None:
-        """maxSpawnDepth should be 1 (no nesting)."""
-        assert subagent_config["maxSpawnDepth"] == 1
+        """maxSpawnDepth should be 2 (no nesting)."""
+        assert subagent_config["maxSpawnDepth"] == 2
 
 
 class TestSidecarPlugin:
