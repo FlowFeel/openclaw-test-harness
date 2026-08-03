@@ -17,7 +17,7 @@ def subagent_config() -> dict[str, int]:
             "maxChildrenPerAgent": 4,
             "runTimeoutSeconds": 300,
             "archiveAfterMinutes": 10,
-            "maxSpawnDepth": 1,
+            "maxSpawnDepth": 2,
         }
     cfg = json.loads(cfg_path.read_text())
     return cfg["agents"]["defaults"]["subagents"]
