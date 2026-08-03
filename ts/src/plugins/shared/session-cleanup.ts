@@ -18,6 +18,8 @@
  * - No fixtures: data is inline in tests.
  */
 
+import { SUBAGENT_KEY } from "./regex-library.js";
+
 // ── Types ─────────────────────────────────────────────────────
 
 export interface SessionEntry {
@@ -84,7 +86,7 @@ export function purgeStaleSubagents(
 
   for (const [key, entry] of Object.entries(sessions)) {
     // Only purge subagent sessions
-    if (!key.includes("subagent")) {
+    if (!SUBAGENT_KEY.test(key)) {
       cleaned[key] = entry;
       continue;
     }

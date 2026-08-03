@@ -25,6 +25,8 @@
  * - No fixtures — data is inline in tests
  */
 
+import { TRAILING_COMMA, leadingTrailingWs } from "./regex-library.js";
+
 // ── Types ─────────────────────────────────────────────────────
 
 export interface Citation {
@@ -93,7 +95,7 @@ export function deduplicateCitations(
         doi: existing.doi ?? citation.doi,
         url: existing.url ?? citation.url,
         source: existing.source
-          ? `${existing.source},${citation.source ?? ""}`.replace(/,$/, "")
+          ? `${existing.source},${citation.source ?? ""}`.replace(TRAILING_COMMA as RegExp, "")
           : citation.source,
       });
       duplicatesRemoved++;
