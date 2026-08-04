@@ -45,7 +45,7 @@ export interface PluginApi {
   };
   registerHook: (
     events: string | string[],
-    handler: (event: HookEvent) => Promise<void> | void,
+    handler: (event: HookEvent) => Promise<unknown> | unknown,
     opts?: HookOptions
   ) => void;
   registerTool: (tool: ToolDefinition, opts?: Record<string, unknown>) => void;

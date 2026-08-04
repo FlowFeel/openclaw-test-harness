@@ -80,6 +80,7 @@ function createAsyncSemaphore(max: number): AsyncSemaphore {
 
   return {
     state,
+    waiters,
 
     async acquire(): Promise<SemaphoreReport> {
       const report = acquire(state);
@@ -88,7 +89,7 @@ function createAsyncSemaphore(max: number): AsyncSemaphore {
       }
       // Queued — create a Promise that resolves when a slot frees.
       return new Promise<SemaphoreReport>((resolve) => {
-        waiters.push({ resolve, waiterId: report.waiterId! });
+        waiters.push({ resolve: resolve as () => void, waiterId: report.waiterId! });
       });
     },
 
