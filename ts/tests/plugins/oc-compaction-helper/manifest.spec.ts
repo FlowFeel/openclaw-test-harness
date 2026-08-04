@@ -58,7 +58,7 @@ describe("oc-compaction-helper plugin", () => {
 });
 
 describe("oc-compaction-helper plugin structure", () => {
-  it("registers 3 hooks (before_compaction, before_agent_reply, after_compaction) with names", () => {
+  it("registers 2 hooks (before_compaction, after_compaction) with names", () => {
     // Simulate loading the plugin to verify hook registration
     const hooksRegistered: Array<{ event: string; name: string }> = [];
     const mockApi = {
@@ -127,18 +127,15 @@ describe("oc-compaction-helper plugin mock API", () => {
 
     // Simulate registering hooks
     mockApi.registerHook("before_compaction", async () => {}, { name: "compaction-helper-before" });
-    mockApi.registerHook("before_agent_reply", async () => {}, { name: "compaction-helper-before-reply" });
     mockApi.registerHook("after_compaction", async () => {}, { name: "compaction-helper-after" });
     mockApi.registerTool({ name: "compact_check", description: "", parameters: {}, execute: async () => ({ content: [] }) });
 
-    // Verify 3 hooks registered
-    expect(hooksRegistered).toHaveLength(3);
+    // Verify 2 hooks registered
+    expect(hooksRegistered).toHaveLength(2);
     expect(hooksRegistered[0].event).toBe("before_compaction");
     expect(hooksRegistered[0].name).toBe("compaction-helper-before");
-    expect(hooksRegistered[1].event).toBe("before_agent_reply");
-    expect(hooksRegistered[1].name).toBe("compaction-helper-before-reply");
-    expect(hooksRegistered[2].event).toBe("after_compaction");
-    expect(hooksRegistered[2].name).toBe("compaction-helper-after");
+    expect(hooksRegistered[1].event).toBe("after_compaction");
+    expect(hooksRegistered[1].name).toBe("compaction-helper-after");
 
     // Verify 1 tool registered
     expect(toolsRegistered).toHaveLength(1);

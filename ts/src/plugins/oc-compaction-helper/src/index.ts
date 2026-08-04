@@ -2,11 +2,11 @@
  * OC Compaction Helper — transcript compaction assistance plugin.
  *
  * @behavior
- * Hooks into before_agent_reply (throttled) and after_compaction to
- * provide compaction assistance. before_agent_reply strips bloat fields
- * on a 60s throttle — only reads/writes when bloat exceeds 10KB.
- * after_compaction is registered but OC's runtime may not dispatch it.
- * Also provides a compact_check tool for ad-hoc size estimates.
+ * Hooks into before_compaction and after_compaction to provide
+ * compaction assistance. Before compaction, logs a warning if the
+ * transcript is large. After compaction, strips bloat fields using
+ * the shared cleanupSessions() utility. Also provides a compact_check
+ * tool for ad-hoc transcript size estimates and recommendations.
  *
  * @invariants
  * - No OC core files modified
@@ -80,63 +80,7 @@ export default definePluginEntry({
       }
     }, { name: "compaction-helper-before" });
 
-    // ── Hook: before_agent_reply — strip bloat fields (throttled) ──
-    // OC only dispatches before_agent_reply and before_compaction through
-    // the hook runner. agent_end and after_compaction are SDK types but
-    // OC's runtime doesn't fire them as plugin hooks.
-    //
-    // before_agent_reply fires every turn. To avoid per-turn file I/O,
-    // we throttle: check file mtime, only read+strip if the file was
-    // modified more than throttleMs ago AND bloat threshold is exceeded.
-    // This means at most one read+write per throttleMs window.
-    const throttleMs = 60_000; // 1 minute minimum between cleanup passes
-    let lastCleanupMs = 0;
-
-    api.registerHook("before_agent_reply", async () => {
-      try {
-        const now = Date.now();
-        if (now - lastCleanupMs < throttleMs) return; // throttled — skip
-
-        const raw = reader(sessionsPath);
-        if (!raw) return;
-
-        // Quick in-memory check: are bloat fields present?
-        let hasBloat = false;
-        let bloatBytes = 0;
-        for (const entry of Object.values(raw)) {
-          if (typeof entry === "object" && entry !== null) {
-            for (const field of bloatFields) {
-              if (field in entry) {
-                hasBloat = true;
-                bloatBytes += JSON.stringify(entry[field]).length;
-              }
-            }
-          }
-        }
-        if (!hasBloat) { lastCleanupMs = now; return; }
-
-        // Only write if bloat exceeds 10KB — avoids tiny writes
-        if (bloatBytes < 10_000) { lastCleanupMs = now; return; }
-
-        // Bloat found — strip and write
-        const { cleaned, report } = cleanupSessions(raw, {
-          bloatFields,
-          maxAgeHours: 24,
-          nowMs: now,
-        });
-        writer(cleaned, sessionsPath);
-        lastCleanupMs = now;
-        api.logger?.info?.(
-          `[oc-compaction-helper] before_agent_reply cleanup: ` +
-          `${report.strippedFieldCount} fields stripped, ` +
-          `${report.reductionPercent}% size reduction`
-        );
-      } catch (err) {
-        api.logger?.error?.(`[oc-compaction-helper] before_agent_reply cleanup failed: ${String(err)}`);
-      }
-    }, { name: "compaction-helper-before-reply" });
-
-    // ── Hook: after_compaction — strip bloat fields (may not fire in OC runtime) ──
+    // ── Hook: after_compaction — strip bloat fields ──────────
     api.registerHook("after_compaction", async () => {
       try {
         const raw = reader(sessionsPath);
