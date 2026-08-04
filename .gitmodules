@@ -1,0 +1,3 @@
+[submodule "oc-source/upstream"]
+	path = oc-source/upstream
+	url = https://github.com/FlowFeel/openclaw.git

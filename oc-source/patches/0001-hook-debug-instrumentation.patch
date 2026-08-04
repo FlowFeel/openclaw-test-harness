@@ -1,0 +1,444 @@
+diff --git a/src/plugins/hooks.ts b/src/plugins/hooks.ts
+index 3781fc46..6e028f94 100644
+--- a/src/plugins/hooks.ts
++++ b/src/plugins/hooks.ts
+@@ -156,6 +156,30 @@ type HookRunnerOptions = {
+    * but the plugin's underlying work is not cancelled.
+    */
+   modifyingHookTimeoutMsByHook?: Partial<Record<PluginHookName, number>>;
++  /**
++   * If true, capture structured trace events for every hook dispatch, error,
++   * and no-handlers case. Inspect via runner.getTrace(). Defaults to
++   * process.env.OPENCLAW_HOOK_DEBUG === "1" — zero overhead when disabled.
++   */
++  enableTrace?: boolean;
++};
++
++/**
++ * Structured trace event captured when OPENCLAW_HOOK_DEBUG=1 or enableTrace
++ * is passed to createHookRunner. Surfaces swallowed errors and explains why
++ * a hook didn't fire.
++ */
++export type HookTraceEvent = {
++  ts: number;
++  type: "no-handlers" | "dispatch" | "error";
++  hookName: string;
++  pluginId?: string;
++  handlerCount?: number;
++  status?: "ok" | "error";
++  durationMs?: number;
++  error?: string;
++  swallowed?: boolean;
++  reason?: "not-registered" | "filtered-out";
+ };
+ 
+ const DEFAULT_VOID_HOOK_TIMEOUT_MS_BY_HOOK: Partial<Record<PluginHookName, number>> = {
+@@ -307,6 +331,13 @@ export function createHookRunner(
+ ) {
+   const logger = options.logger;
+   const catchErrors = options.catchErrors ?? true;
++  const enableTrace = options.enableTrace ?? process.env.OPENCLAW_HOOK_DEBUG === "1";
++  const traceEvents: HookTraceEvent[] = [];
++  const captureTrace = (event: Omit<HookTraceEvent, "ts">): void => {
++    if (enableTrace) {
++      traceEvents.push({ ts: Date.now(), ...event });
++    }
++  };
+   const failurePolicyByHook = {
+     before_agent_run: "fail-closed",
+     ...options.failurePolicyByHook,
+@@ -599,7 +630,15 @@ export function createHookRunner(
+     error: unknown;
+   }): never | void => {
+     const msg = `[hooks] ${params.hookName} handler from ${params.pluginId} failed: ${formatHookErrorForLog(params.error)}`;
+-    if (shouldCatchHookErrors(params.hookName)) {
++    const swallowed = shouldCatchHookErrors(params.hookName);
++    captureTrace({
++      type: "error",
++      hookName: params.hookName,
++      pluginId: params.pluginId,
++      error: sanitizeHookError(params.error),
++      swallowed,
++    });
++    if (swallowed) {
+       logger?.error(msg);
+       return;
+     }
+@@ -703,10 +742,17 @@ export function createHookRunner(
+   ): Promise<void> {
+     const hooks = getHooksForName(registry, hookName, undefined, matcherToolName);
+     if (hooks.length === 0) {
++      const registered = registry.typedHooks.filter((h) => h.hookName === hookName).length;
++      captureTrace({
++        type: "no-handlers",
++        hookName,
++        reason: registered > 0 ? "filtered-out" : "not-registered",
++      });
+       return;
+     }
+ 
+     logger?.debug?.(`[hooks] running ${hookName} (${hooks.length} handlers)`);
++    captureTrace({ type: "dispatch", hookName, handlerCount: hooks.length });
+ 
+     const promises = hooks.map(async (hook) => {
+       try {
+@@ -740,10 +786,17 @@ export function createHookRunner(
+   ): Promise<TResult | undefined> {
+     const hooks = getHooksForName(registry, hookName, undefined, matcherToolName);
+     if (hooks.length === 0) {
++      const registered = registry.typedHooks.filter((h) => h.hookName === hookName).length;
++      captureTrace({
++        type: "no-handlers",
++        hookName,
++        reason: registered > 0 ? "filtered-out" : "not-registered",
++      });
+       return undefined;
+     }
+ 
+     logger?.debug?.(`[hooks] running ${hookName} (${hooks.length} handlers, sequential)`);
++    captureTrace({ type: "dispatch", hookName, handlerCount: hooks.length });
+ 
+     let result: TResult | undefined;
+ 
+@@ -797,10 +850,17 @@ export function createHookRunner(
+   ): Promise<TResult | undefined> {
+     const hooks = getHooksForName(registry, hookName, ctx);
+     if (hooks.length === 0) {
++      const registered = registry.typedHooks.filter((h) => h.hookName === hookName).length;
++      captureTrace({
++        type: "no-handlers",
++        hookName,
++        reason: registered > 0 ? "filtered-out" : "not-registered",
++      });
+       return undefined;
+     }
+ 
+     logger?.debug?.(`[hooks] running ${hookName} (${hooks.length} handlers, first-claim wins)`);
++    captureTrace({ type: "dispatch", hookName, handlerCount: hooks.length });
+ 
+     return await runClaimingHooksList(hooks, hookName, event, ctx, runHandler);
+   }
+@@ -816,6 +876,7 @@ export function createHookRunner(
+   ): Promise<TResult | undefined> {
+     const hooks = getHooksForNameAndPlugin(registry, hookName, pluginId);
+     if (hooks.length === 0) {
++      captureTrace({ type: "no-handlers", hookName, reason: "not-registered" });
+       return undefined;
+     }
+ 
+@@ -882,6 +943,7 @@ export function createHookRunner(
+ 
+     const hooks = getHooksForNameAndPlugin(registry, hookName, pluginId);
+     if (hooks.length === 0) {
++      captureTrace({ type: "no-handlers", hookName, reason: "not-registered" });
+       return { status: "no_handler" };
+     }
+ 
+@@ -1216,6 +1278,7 @@ export function createHookRunner(
+   ): Promise<PluginHookReplyPayloadSendingResult | undefined> {
+     const hooks = getHooksForName(registry, "reply_payload_sending");
+     if (hooks.length === 0) {
++      captureTrace({ type: "no-handlers", hookName: "reply_payload_sending", reason: "not-registered" });
+       return undefined;
+     }
+ 
+@@ -1436,6 +1499,7 @@ export function createHookRunner(
+   ): PluginHookToolResultPersistResult | undefined {
+     const hooks = getHooksForName(registry, "tool_result_persist");
+     if (hooks.length === 0) {
++      captureTrace({ type: "no-handlers", hookName: "tool_result_persist", reason: "not-registered" });
+       return undefined;
+     }
+ 
+@@ -1483,6 +1547,7 @@ export function createHookRunner(
+   ): PluginHookBeforeMessageWriteResult | undefined {
+     const hooks = getHooksForName(registry, "before_message_write");
+     if (hooks.length === 0) {
++      captureTrace({ type: "no-handlers", hookName: "before_message_write", reason: "not-registered" });
+       return undefined;
+     }
+ 
+@@ -1682,6 +1747,7 @@ export function createHookRunner(
+     const hookName = "skill_proposal_evaluate";
+     const hooks = getHooksForName(registry, hookName);
+     if (hooks.length === 0) {
++      captureTrace({ type: "no-handlers", hookName, reason: "not-registered" });
+       return [];
+     }
+ 
+@@ -1862,6 +1928,11 @@ export function createHookRunner(
+     // Utility
+     hasHooks,
+     getHookCount,
++    // Debug trace (available when enableTrace or OPENCLAW_HOOK_DEBUG=1)
++    getTrace: () => traceEvents,
++    clearTrace: () => {
++      traceEvents.length = 0;
++    },
+   };
+ }
+ 
+diff --git a/src/plugins/hooks.trace.test.ts b/src/plugins/hooks.trace.test.ts
+new file mode 100644
+index 00000000..d45b8514
+--- /dev/null
++++ b/src/plugins/hooks.trace.test.ts
+@@ -0,0 +1,258 @@
++/**
++ * Test: hook debug instrumentation trace
++ *
++ * Verifies the structured trace surfaced by createHookRunner when enableTrace
++ * is set (or OPENCLAW_HOOK_DEBUG=1). The trace makes THREE invisible failure
++ * modes observable:
++ *
++ *   1. Swallowed errors — catchErrors=true (default) + no logger → the error
++ *      vanished completely before this instrumentation. Now it is captured.
++ *   2. "Didn't fire" with no explanation — hooks.length===0 was a silent
++ *      return. Now the trace records whether hooks were never registered
++ *      ("not-registered") or registered-but-filtered-out ("filtered-out").
++ *   3. No structured lifecycle — the trace records every dispatch with its
++ *      handler count, so registration→dispatch→error can be reconstructed.
++ *
++ * The trace is opt-in (enableTrace or OPENCLAW_HOOK_DEBUG=1) and produces
++ * zero entries when disabled, so production incurs no overhead.
++ */
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import { createHookRunner } from "./hooks.js";
++import {
++  createHookRunnerWithRegistry,
++  createMockPluginRegistry,
++  TEST_PLUGIN_AGENT_CTX,
++} from "./hooks.test-fixtures.js";
++import type {
++  PluginHookBeforeAgentReplyEvent,
++  PluginHookSessionEndEvent,
++} from "./types.js";
++
++const SESSION_END_EVENT: PluginHookSessionEndEvent = {
++  sessionId: "abc-123",
++  sessionKey: "agent:main:abc",
++  messageCount: 1,
++  reason: "daily",
++  sessionFile: "/tmp/abc-123.jsonl.reset.2026-01-01T00:00:00.000Z",
++  transcriptArchived: true,
++  nextSessionId: "def-456",
++};
++
++const SESSION_CTX = { sessionId: "abc-123", sessionKey: "agent:main:abc", agentId: "main" };
++
++const AGENT_REPLY_EVENT = {
++  message: { role: "user", content: "hello" },
++} as unknown as PluginHookBeforeAgentReplyEvent;
++
++describe("hook debug trace", () => {
++  const originalEnv = process.env.OPENCLAW_HOOK_DEBUG;
++
++  beforeEach(() => {
++    delete process.env.OPENCLAW_HOOK_DEBUG;
++  });
++
++  afterEach(() => {
++    if (originalEnv === undefined) {
++      delete process.env.OPENCLAW_HOOK_DEBUG;
++    } else {
++      process.env.OPENCLAW_HOOK_DEBUG = originalEnv;
++    }
++  });
++
++  describe("claim 1: swallowed errors are captured", () => {
++    it("captures a thrown error when catchErrors=true (default) and NO logger is passed", async () => {
++      // This is the core invisibility bug: catchErrors=true + no logger = silent
++      // swallow with zero visibility. The trace now surfaces it.
++      const { runner } = createHookRunnerWithRegistry(
++        [
++          {
++            hookName: "session_end",
++            pluginId: "test-plugin",
++            handler: async () => {
++              throw new Error("boom-from-handler");
++            },
++          },
++        ],
++        { enableTrace: true, catchErrors: true },
++      );
++
++      // The hook throws, but catchErrors=true swallows it (no rethrow).
++      await runner.runSessionEnd(SESSION_END_EVENT, SESSION_CTX);
++
++      const trace = runner.getTrace();
++      const errorEvent = trace.find(
++        (e) => e.type === "error" && e.pluginId === "test-plugin",
++      );
++
++      expect(errorEvent).toBeDefined();
++      expect(errorEvent?.error).toContain("boom-from-handler");
++      expect(errorEvent?.swallowed).toBe(true);
++      expect(errorEvent?.hookName).toBe("session_end");
++    });
++
++    it("captures a thrown error even when catchErrors=false (rethrown AND traced)", async () => {
++      const { runner } = createHookRunnerWithRegistry(
++        [
++          {
++            hookName: "session_end",
++            pluginId: "strict-plugin",
++            handler: async () => {
++              throw new Error("fail-closed-boom");
++            },
++          },
++        ],
++        { enableTrace: true, catchErrors: false },
++      );
++
++      // catchErrors=false → the error is RETHROWN (not swallowed)
++      await expect(
++        runner.runSessionEnd(SESSION_END_EVENT, SESSION_CTX),
++      ).rejects.toThrow("fail-closed-boom");
++
++      // But it's ALSO captured in the trace (with swallowed=false)
++      const trace = runner.getTrace();
++      const errorEvent = trace.find(
++        (e) => e.type === "error" && e.pluginId === "strict-plugin",
++      );
++      expect(errorEvent).toBeDefined();
++      expect(errorEvent?.swallowed).toBe(false);
++      expect(errorEvent?.error).toContain("fail-closed-boom");
++    });
++  });
++
++  describe("claim 2: 'didn't fire' is explained", () => {
++    it("records 'not-registered' when no hooks exist for the hook name", async () => {
++      // Empty registry — no hooks registered at all.
++      const { runner } = createHookRunnerWithRegistry([], { enableTrace: true });
++
++      await runner.runSessionEnd(SESSION_END_EVENT, SESSION_CTX);
++
++      const trace = runner.getTrace();
++      const noHandlers = trace.find(
++        (e) => e.type === "no-handlers" && e.hookName === "session_end",
++      );
++      expect(noHandlers).toBeDefined();
++      expect(noHandlers?.reason).toBe("not-registered");
++    });
++
++    it("records 'filtered-out' when hooks exist for the name but none match the trigger filter", async () => {
++      // A hook IS registered for before_agent_reply, but only for "heartbeat"/"cron"
++      // triggers. Dispatching with trigger "user" filters it out.
++      const { runner } = createHookRunnerWithRegistry(
++        [
++          {
++            hookName: "before_agent_reply",
++            pluginId: "trigger-plugin",
++            handler: vi.fn(),
++            eligibleTriggers: ["heartbeat", "cron"],
++          },
++        ],
++        { enableTrace: true },
++      );
++
++      // Dispatch with a trigger that doesn't match — the hook is filtered out.
++      await runner.runBeforeAgentReply(AGENT_REPLY_EVENT, {
++        ...TEST_PLUGIN_AGENT_CTX,
++        trigger: "user",
++      });
++
++      const trace = runner.getTrace();
++      const noHandlers = trace.find(
++        (e) => e.type === "no-handlers" && e.hookName === "before_agent_reply",
++      );
++      expect(noHandlers).toBeDefined();
++      expect(noHandlers?.reason).toBe("filtered-out");
++    });
++  });
++
++  describe("claim 3: successful dispatch is traced", () => {
++    it("records a dispatch event with the handler count", async () => {
++      const { runner } = createHookRunnerWithRegistry(
++        [
++          { hookName: "session_start", pluginId: "plugin-a", handler: async () => {} },
++          { hookName: "session_start", pluginId: "plugin-b", handler: async () => {} },
++        ],
++        { enableTrace: true },
++      );
++
++      await runner.runSessionStart(
++        { sessionId: "abc-123", sessionKey: "agent:main:abc", resumedFrom: null },
++        SESSION_CTX,
++      );
++
++      const trace = runner.getTrace();
++      const dispatch = trace.find(
++        (e) => e.type === "dispatch" && e.hookName === "session_start",
++      );
++      expect(dispatch).toBeDefined();
++      expect(dispatch?.handlerCount).toBe(2);
++    });
++  });
++
++  describe("trace is disabled by default (zero overhead)", () => {
++    it("produces an empty trace when enableTrace is not set and OPENCLAW_HOOK_DEBUG is unset", async () => {
++      const { runner } = createHookRunnerWithRegistry(
++        [{ hookName: "session_end", pluginId: "p", handler: async () => {} }],
++        { catchErrors: true },
++      );
++
++      await runner.runSessionEnd(SESSION_END_EVENT, SESSION_CTX);
++
++      // No trace entries — zero overhead in production.
++      expect(runner.getTrace()).toHaveLength(0);
++    });
++
++    it("enables the trace via OPENCLAW_HOOK_DEBUG=1", async () => {
++      process.env.OPENCLAW_HOOK_DEBUG = "1";
++      const { runner } = createHookRunnerWithRegistry(
++        [{ hookName: "session_end", pluginId: "p", handler: async () => {} }],
++      );
++
++      await runner.runSessionEnd(SESSION_END_EVENT, SESSION_CTX);
++
++      expect(runner.getTrace().length).toBeGreaterThan(0);
++    });
++  });
++
++  describe("clearTrace", () => {
++    it("empties the trace buffer", async () => {
++      const { runner } = createHookRunnerWithRegistry(
++        [{ hookName: "session_start", pluginId: "p", handler: async () => {} }],
++        { enableTrace: true },
++      );
++
++      await runner.runSessionStart(
++        { sessionId: "abc-123", sessionKey: "agent:main:abc", resumedFrom: null },
++        SESSION_CTX,
++      );
++      expect(runner.getTrace().length).toBeGreaterThan(0);
++
++      runner.clearTrace();
++      expect(runner.getTrace()).toHaveLength(0);
++    });
++  });
++
++  describe("getTrace is available on the runner", () => {
++    it("returns an array (empty when trace is disabled)", () => {
++      const { runner } = createHookRunnerWithRegistry([], { catchErrors: true });
++      expect(Array.isArray(runner.getTrace())).toBe(true);
++      expect(runner.getTrace()).toHaveLength(0);
++    });
++
++    it("is a function on every runner, even without enableTrace", () => {
++      const { runner } = createHookRunnerWithRegistry([]);
++      expect(typeof runner.getTrace).toBe("function");
++      expect(typeof runner.clearTrace).toBe("function");
++    });
++  });
++});
++
++// Verify the trace works with a bare createHookRunner (not just the test fixture).
++describe("hook debug trace with bare createHookRunner", () => {
++  it("getTrace/clearTrace exist on the runner return", () => {
++    const registry = createMockPluginRegistry([]);
++    const runner = createHookRunner(registry, { enableTrace: true });
++    expect(typeof runner.getTrace).toBe("function");
++    expect(typeof runner.clearTrace).toBe("function");
++  });
++});
