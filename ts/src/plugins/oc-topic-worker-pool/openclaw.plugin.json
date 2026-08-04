@@ -1,0 +1,23 @@
+{
+  "id": "oc-topic-worker-pool",
+  "name": "OcTopicWorkerPool",
+  "description": "Hook-based worker pool with semaphore admission control for concurrent Telegram topic sessions",
+  "contracts": {
+    "hooks": [
+      "before_dispatch",
+      "before_agent_run",
+      "agent_end",
+      "subagent_spawning",
+      "subagent_ended",
+      "before_agent_reply"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
