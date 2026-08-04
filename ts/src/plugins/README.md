@@ -10,14 +10,22 @@ Each subdirectory is a standalone OC plugin with its own manifest, entry point, 
 | `oc-session-guard` | Session bloat management | `after_compaction`, `session_end` | `session_health`, `session_cleanup` |
 | `oc-subagent-watchdog` | Subagent lifecycle tracking | `subagent_spawned`, `subagent_ended` | `subagent_health` |
 | `oc-event-loop-monitor` | Live telemetry | `model_call_started/ended`, `agent_end` | `event_loop_health` |
+| `oc-subagent-orchestrator` | Work queue dispatch, depth limits, adaptive admission | `before_agent_reply`, `agent_end`, `session_end`, `subagent_*` | 7 tools |
+| `oc-compaction-helper` | Pre/post compaction bloat stripping | `before_compaction`, `after_compaction` | `compaction_health` |
+| `oc-context-cache` | System prompt + tool definition caching | `before_prompt_build`, `before_agent_reply` | `context_cache_health` |
+| `oc-stream-relay` | Model stream relay design | `model_call_started`, `model_call_ended`, `agent_end` | `stream_relay_health` |
+| `oc-model-router` | Model fallback chain | `model_call_ended`, `before_model_resolve` | `model_router_health` |
+| `oc-topic-worker-pool` | Hook-based worker pool for Telegram topics | `before_dispatch`, `before_agent_run`, `agent_end`, `subagent_spawning`, `subagent_ended`, `before_agent_reply` | (none) |
+| `oc-e2e-trace-test` | E2E trace verification (test plugin) | `gateway_start` | (none) |
 
 ## Design Principles
 
-- **No OC core files modified** — plugin hooks + tool registration only
+- **No OC core files modified** — plugin hooks + tool registration only (the `oc-source/` test bed handles OC core mods separately)
 - **DFT: Design for Testability** — pure logic separated from I/O, deterministic clocks, injectable dependencies
 - **CI Constitution: all commits gated** — typecheck, lint, unit, integration, Docker
 - **Protocol-first** — each plugin declares its contract in the manifest
 - **Composable** — plugins can be installed independently or together
+- **Foundry-scaffolded** — new plugins are generated via `foundry new` and pass all six DFT axioms by construction
 
 ## Structure
 
