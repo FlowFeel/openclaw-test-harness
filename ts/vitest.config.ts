@@ -46,6 +46,7 @@ export default defineConfig({
       "tests/plugins/**/*.spec.ts",
       "tests/e2e/**/*.spec.ts",
       "tests/oc-source/**/*.spec.ts",
+      "tests/foundry/**/*.spec.ts",
     ],
     coverage: {
       provider: "v8",
