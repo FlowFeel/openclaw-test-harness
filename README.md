@@ -263,5 +263,35 @@ docker compose -f docker/docker-compose.test.yml up --build --abort-on-container
 - **Target OpenClaw Version**: `2026.6.8`
 - **License**: MIT
 - **Target Production Host**: EC2 (Amazon Linux 2023, Node.js v22.22.2, 4 cores, 30GB RAM)
-- **Documentation**: [`docs/`](./docs/) (architecture docs) · [`POST_MORTEM.md`](./POST_MORTEM.md) (full retrospective) · [`ISSUES.md`](./ISSUES.md) (tickets #1-#17) · [`PROJECT_SUBAGENT_EFFICIENCY.md`](./PROJECT_SUBAGENT_EFFICIENCY.md) (#18-#25) · [`PROJECT_OC_EFFICIENCY.md`](./PROJECT_OC_EFFICIENCY.md) (#26-#33) · [`PROJECT_NEXT_IMPROVEMENTS.md`](./PROJECT_NEXT_IMPROVEMENTS.md) (#34-#42)
-- **Architecture docs**: [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) (foundry + DFT axioms) · [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) (patch + E2E) · [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) (hook-based worker pool)
+- **Documentation**: see [Documentation Index](#documentation-index) below
+
+---
+
+## Documentation Index
+
+### Architecture docs (`docs/`)
+
+| Document | Description |
+|----------|-------------|
+| [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) | The foundry: scaffold, validate, test. The six DFT axioms, round-trip proof, pure seams vs thin I/O, validator internals |
+| [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) | OC source mod test bed: patch 0001 (hook debug instrumentation), Level 1 + Level 2 E2E verification, built-code patching, key discoveries (dual API split, async gateway_start) |
+| [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) | oc-topic-worker-pool: hook-based worker pool with semaphore admission control for concurrent Telegram topic sessions |
+| [`docs/SESSION-HANDOFF.md`](./docs/SESSION-HANDOFF.md) | Dense literate snapshot of working state — restores full context after compaction without re-deriving from transcript |
+| [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) | War story: patching OC's event loop from 834ms P99 to worker threads (July 31 – August 1, 2026) |
+
+### Project history & tickets
+
+| Document | Description |
+|----------|-------------|
+| [`POST_MORTEM.md`](./POST_MORTEM.md) | Full retrospective: the event loop saturation, bloat fields, and the plugin-only mitigation path |
+| [`ISSUES.md`](./ISSUES.md) | Tickets #1-#17: initial plugin suite, pure logic, session cleanup, subagent orchestrator |
+| [`PROJECT_SUBAGENT_EFFICIENCY.md`](./PROJECT_SUBAGENT_EFFICIENCY.md) | Tickets #18-#25: subagent dispatch, depth limits, adaptive admission, crash recovery |
+| [`PROJECT_OC_EFFICIENCY.md`](./PROJECT_OC_EFFICIENCY.md) | Tickets #26-#33: context cache, stream relay, compaction helper, model router |
+| [`PROJECT_NEXT_IMPROVEMENTS.md`](./PROJECT_NEXT_IMPROVEMENTS.md) | Tickets #34-#42: foundry, OC source mod test bed, E2E verification, worker pool |
+
+### Component docs
+
+| Document | Description |
+|----------|-------------|
+| [`oc-source/README.md`](./oc-source/README.md) | OC source mod test bed: submodule structure, patch listing, working with the submodule |
+| [`ts/src/plugins/README.md`](./ts/src/plugins/README.md) | Plugin directory: all 11 plugins with their hooks, tools, and design principles |
