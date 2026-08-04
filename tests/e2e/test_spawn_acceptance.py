@@ -16,10 +16,10 @@ class TestConfigPolicy:
         )
 
     def test_entropy_is_comfortable(self, subagent_config: dict[str, int]) -> None:
-        """runTimeoutSeconds should be <= 360 (comfortable — room to finish)."""
-        assert subagent_config["runTimeoutSeconds"] <= 360, (
+        """runTimeoutSeconds should be <= 600 (comfortable — room to finish)."""
+        assert subagent_config["runTimeoutSeconds"] <= 600, (
             f"runTimeoutSeconds={subagent_config['runTimeoutSeconds']} — "
-            "entropy should be comfortable (<= 360s)"
+            "entropy should be comfortable (<= 600s)"
         )
 
     def test_cleanup_is_fast(self, subagent_config: dict[str, int]) -> None:

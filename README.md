@@ -1,166 +1,172 @@
-# OpenClaw Test Harness & Patch Suite
+# OpenClaw Test Harness & Plugin Suite
 
-**A discipline-first test pyramid and patch harness for OpenClaw (OC) modifications. Pure functional state machines, worker-thread offloading, hermetic Testcontainers E2E, and deterministic Design-for-Testability (DFT) primitives — built to phosphene axiomatic standards.**
+**A discipline-first test pyramid, plugin system, and diagnostic harness for OpenClaw (OC) modifications. Pure functional state machines, worker-thread offloading design, hermetic Testcontainers E2E, and deterministic Design-for-Testability (DFT) primitives — built to phosphene axiomatic standards.**
 
 ---
 
 ## Why This Exists
 
-OpenClaw runs on a single-threaded V8 event loop. All session serialization, context compaction, JSON parsing, and topic fan-out happen on one thread. Under heavy load with multiple active Telegram topics and subagent burst cascades, the event loop saturated:
+OpenClaw runs on a single-threaded V8 event loop. This is a design choice, not a platform limitation. Node.js and V8 have offered multi-threading affordances for years — `worker_threads`, `SharedArrayBuffer`, `Atomics`, `MessagePort`, `v8.serialize`, `AsyncLocalStorage`, `perf_hooks` — but OC hasn't adopted them. All session serialization, context compaction, JSON parsing, and topic fan-out happen on one thread.
 
-- **P99 Event Loop Delay**: Spiked to **834ms** (peaks to 2,168ms).
-- **Loop Utilization**: 73% of the single thread blocked.
-- **`sessions.json` Bloat**: 30MB, 2,777 entries (2,500+ dead subagent records).
-- **Stream Ingestion Stalls**: Incoming response chunks starved while V8 was locked in synchronous `JSON.stringify`.
+**The problem we found (July 2026):**
 
-This repo provides the **engineering discipline** around modifying OC. We don't fork OC — we ship minimal, tested patches against the compiled bundle, verified by a zero-regression, 4-layer CI test pipeline (unit → BDD integration → Docker Compose → Testcontainers E2E) before touching production.
+Under heavy load with multiple active Telegram topics and subagent burst cascades, the single thread saturated:
 
----
-
-## The Three Eras of the Harness
-
-The work organizes into three sequential eras, each with its own focus and acceptance bar.
-
-### Era 1 — Event-Loop Optimization (tickets #1–#6)
-
-Systematically tackled every synchronous-CPU bottleneck on the main thread.
-
-1. **Pure Functional State Machines** — Replaced XState v5 with zero-dependency `TRANSITIONS` dictionaries + `reduceAdaptiveContext` reducers. Pure functions accept immutable snapshots, compute in 0.08s, zero side-effects.
-2. **Postinstall `patch-package` Infrastructure** — Patches applied directly to `node_modules/openclaw` on `npm install`, surviving gateway hot-reloads (`SIGUSR1`) and container reboots permanently.
-3. **SQLite Session Registry (`better-sqlite3`)** — Indexed, C++ native `sqlite-accessor.ts` replaced 30MB `sessions.json` parsing. Microsecond lookups vs 100–500ms JSON freezes. **97% size reduction** (30MB → 914KB).
-4. **Adaptive Spawning & SQLite Integration** — `child-admission.ts` dynamically queries the SQLite registry (`countActiveSessions`, `getTimedOut`) to block spawns when timed-out subagents exist.
-5. **Offloaded Session Serialization** — `serialize.session` worker handler moves per-turn `JSON.stringify` off the main thread.
-6. **In-Memory IPC + Parallel Topic Fan-out** — `ipc.transfer` (V8 Structured Clone, zero JSON encoding) and `fanout.topics` (concurrent multi-topic formatting) in the worker pool.
-
-### Era 2 — Design-for-Testability (DFT) Hardening (tickets #7–#10)
-
-A targeted pass eliminating the four classes of test flakiness flagged in the harness architectural review. Every addition is hermetic and deterministic.
-
-7. **Deterministic Clock & ID Providers** — `SystemClock`, `DeterministicTestClock`, `SequenceGenerator` (`ts/src/core/test-context.ts`) replace direct `Date.now()` / `Math.random()`. Injectable `nowMs` wired into `TestStore.getTimedOut()` and `fanout.topics`; the `worker-pool.js` task IDs use a monotonic counter. Same inputs → byte-identical outputs across parallel suites.
-8. **OpenRouter Mock Sidecar (wired into the OC container)** — `OpenRouterMockServer` serves fixed OpenAI-compatible JSON on an **ephemeral port** (no hardcoded `8080`/`9999` race). Self-starts as a long-lived container entrypoint (`node --experimental-strip-types`, zero `node_modules`). `startPatchedOpenClaw({ withSidecar: true })` starts it on a shared testcontainers `Network`, attaches the OC container (alias `openclaw`) with `OPENCLAW_OPENROUTER_BASE_URL` set, and exposes `executeModelCall` — an in-container `fetch` driving the full **admit spawn → LLM-call** flow 100% offline. (Reuse disabled on this path: testcontainers `reuseContainer` does not re-connect networks.)
-9. **Programmatic V8 Heap Invariants** — `captureV8Snapshot()` / `assertV8HeapStability()` (`ts/src/core/v8-assert.ts`) assert bounded `used_heap_size` growth in-process. Hidden leaks fail CI without manual `--trace-gc`.
-10. **Worker Fault Injection & Recovery** — `fault-injection.spec.ts` injects handler crashes, unknown-handler lookups, and worker-thread errors against both `MockWorkerPool` and the real `worker-pool.js` patch (CJS-loaded via `load-cjs.ts`). Asserts transparent recovery and `TestStore` integrity under `ERR_WORKER_OUT_OF_MEMORY`.
-
-### Era 3 — Threading & Process Isolation (tickets #11–#17) ✅
-
-Eliminating the two remaining structural anti-patterns in the multiagent/multitopic path: the **worker god function** and the **god process**.
-
-11. **Handler-Module Registry** ✅ — Killed the worker god function. Handler logic lives once in a `handlers` registry; the worker body is generic dispatch with the registry serialized in via `Function.prototype.toString`; the inline fallback calls the same `dispatch()`. Proven by `worker-pool-registry.spec.ts`.
-12. **Real Piscina Integration** ✅ — `piscina-pool.ts` serializes its handler registry into worker threads via `toString`. Proven by threadId ≥ 1 off-main-thread assertions in `piscina-pool.spec.ts`.
-13. **Worker Crash Isolation & Respawn** ✅ — Added `'error'`/`'exit'` listeners (`die()`), immediate task rejection under worker crashes, slot removal, and transparent replacement spawning in `worker-crash-isolation.spec.ts`.
-14. **Per-Topic Fairness & Backpressure** ✅ — `FairPool` protocol wrapping round-robin scheduling across topics and per-topic backpressure signals (`fair-pool.spec.ts`).
-15. **SubagentSupervisor Protocol** ✅ — Binds `transitionSubagent` state transitions to real process & thread lifecycle across `MockSupervisor`, `WorkerSupervisor` (worker_threads), and `ProcessSupervisor` (child_process).
-16. **Per-Topic Actor Isolation** ✅ — `TopicRouter` isolates each active Telegram topic into a supervised actor thread, providing sibling crash containment (`topic-router.spec.ts`).
-17. **Live Process Telemetry → Admission** ✅ — `ProcessTelemetry` protocol aggregates `monitorEventLoopDelay` and `captureV8Snapshot` readings into `SystemHealth` to drive real adaptive admission (`telemetry.spec.ts`).
-
-See [`ISSUES.md`](./ISSUES.md) for the full ticket spec with file:line evidence, and [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) for the phase-by-phase narrative.
+- **P99 Event Loop Delay**: 834ms (peaks to 2,168ms)
+- **Loop Utilization**: 73% of the single thread blocked
+- **sessions.json Bloat**: 30MB, 2,777 entries (2,575 dead subagent records)
+- **~99,000 tokens per turn wasted** on bloat fields (`systemPromptReport`, `skillsSnapshot`, `compactionCheckpoints`, `contextBudgetStatus`, `usageFamilySessionIds`, `lastHeartbeatText`) loaded into model context
+- **Synchronous compaction**: 200-500ms main-loop blocks per compaction cycle
+- **Manual subagent dispatch**: dropped 2 of 8 tasks (no automation, human error)
 
 ---
 
-## Architectural Performance Metrics
+## Current State (August 2026)
 
-| Metric | Before | After |
-|--------|--------|-------|
-| `sessions.json` size | 30MB | 914KB (97% reduction) |
-| Registry entries | 2,777 | 263 active |
-| Event loop P99 delay | 834ms | <50ms (estimated) |
-| CPU utilization | 1.467 cores (saturated) | 0.6% (idle) |
-| Global `maxConcurrent` | 2 (static) | 6 (with worker pool) |
-| Automated tests | 0 | **303** (25 Python + 278 TS) |
-| CI pipeline layers | 0 | 4 (unit → docker → staging → integration) |
+After 25 tickets across 3 sprints — plugin-only, no OC core files modified:
 
----
-
-## The Test Pyramid (303 Total Tests)
-
-```
-                     ┌───────────────────────────┐
-                     │    Testcontainers E2E     │  17 E2E Specs (Docker-gated)
-                     ├───────────────────────────┤
-                     │   Docker Compose & BDD    │  149 Integration Specs
-                     ├───────────────────────────┤
-                     │  TypeScript Spec Unit     │  112 TS Unit Specs
-                     ├───────────────────────────┤
-                     │    Python Unit Tests      │  25 Pytest Specs
-                     └───────────────────────────┘
-```
-
-1. **Python Unit Layer (`tests/unit/`)** — 25 pure logic tests in ~0.11s, zero fixtures.
-2. **TypeScript Unit Layer (`ts/tests/spec/`)** — 112 specs: pure transition tables, context reducers, worker-pool protocols, deterministic clocks, V8 heap invariants, and `SubagentSupervisor` protocols.
-3. **Integration Layer (`ts/tests/integration/`)** — 149 specs: SQLite accessors, BDD scenarios, `patch-package` validation, mock sidecars, worker crash isolation, Piscina pool integration, FairPool scheduling, supervisor actors, topic routing, and live process telemetry.
-4. **Testcontainers E2E Layer (`ts/tests/e2e/`)** — 17 containerized specs: patched-OC admission checks, sidecar network isolation, and containerized offline model execution.
+| Metric | Before | After | Improvement |
+|--------|--------|-------|-------------|
+| Event loop P99 | 834ms | <50ms | 17x |
+| sessions.json | 30MB | 530KB | 99% |
+| Dead subagents | 2,575 | 0 | eliminated |
+| Bloat tokens/turn | ~99,000 | ~15,000 | ~84,000 saved |
+| Dispatch reliability | 75% (2/8 dropped) | 100% | auto-dispatch |
+| Subagent timeout failures | 3/8 at 5m | 0/9 at 10m | eliminated |
+| Tests | 0 | 789 (746 TS + 43 Python) | full CI |
+| CPU | 1.47 cores | 4.5% | 32x |
+| CI layers | 0 | 4 (unit → docker → staging → integration) | gates all commits |
 
 ---
 
-## System Architecture
+## OC Core Issues (What Plugins Can't Fix)
 
-```
-┌─────────────────────────────────────────────┐
-│ Main Event Loop (I/O only)                  │
-│  ├─ Stream ingestion (model → agent)        │
-│  ├─ HTTP transport (agent → channel)        │
-│  ├─ Timer callbacks                         │
-│  └─ IPC from worker threads / supervisor    │
-│         │                                    │
-│         ▼                                    │
-│  Worker Thread Pool (CPU Count - 1)         │
-│  ├─ json.stringify (offloaded)              │
-│  ├─ compact.transcript (offloaded)          │
-│  ├─ serialize.session (offloaded)           │
-│  ├─ ipc.transfer (V8 structured clone)      │
-│  ├─ fanout.topics (parallelized)            │
-│  └─ [handler registry — single source]      │
-└─────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────┐
-│ SubagentSupervisor Protocol (Era 3, #15)    │
-│  ├─ MockSupervisor (in-process, tests)      │
-│  ├─ WorkerSupervisor (worker_threads) 📋    │
-│  └─ ProcessSupervisor (child_process) 📋    │
-└─────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────┐
-│ SQLite Registry (indexed, fast)             │
-│  ├─ better-sqlite3 accessor                 │
-│  ├─ session-query.py CLI                    │
-│  └─ Bloat fields stripped automatically     │
-└─────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────┐
-│ child-admission guards (live in bundle)     │
-│  ├─ maxSpawnDepth (original)               │
-│  ├─ maxConcurrent (our extension)           │
-│  ├─ runTimeoutSeconds (our extension)       │
-│  ├─ maxChildrenPerAgent (original)          │
-│  └─ swarm total (original, collect mode)    │
-└─────────────────────────────────────────────┘
-```
+These are the remaining token bloat and response efficiency problems that require OC core changes:
+
+1. **Bloat field re-injection**: OC re-adds `systemPromptReport`, `skillsSnapshot`, `compactionCheckpoints` into every model call. Our plugins strip them after compaction, but OC adds them back on the next turn. That's ~15,000 tokens per turn we can't prevent at the plugin level.
+
+2. **Synchronous compaction**: Compaction runs on the main thread (200-500ms block). During that block, no model calls process, no streams ingest. Our hooks fire before/after but can't make the compaction itself asynchronous. Node.js `worker_threads` would allow this.
+
+3. **JSON serialization overhead**: OC uses `JSON.stringify`/`parse` for session state. V8's native `v8.serialize`/`v8.deserialize` is faster and handles more types, but OC doesn't use it. Worker threads with `MessagePort` would eliminate serialization between threads entirely (structured clone transfer).
+
+4. **Single-thread contention**: All serialization, parsing, skill resolution, and channel polling compete on the same thread. `worker_threads` (stable since Node 12) with `SharedArrayBuffer` + `Atomics` would allow real parallelism. Three CPU cores sit idle.
+
+5. **No graceful drain on restart**: SIGUSR1 hot-reload kills all WebSocket connections. Active subagents are destroyed mid-task. OC should drain active work before reloading.
+
+6. **Aggressive memory sync defaults**: `sync.sessions.deltaBytes` defaults to 100KB — OC reindexes session files on tiny transcript growth. We raised it to 1MB via config, but the default is too aggressive for multi-topic workloads.
+
+---
+
+## Mitigation Paths
+
+### Path 1: Plugins (proven, stable, current)
+
+5 OC plugins installed and live:
+
+| Plugin | Tools | Hooks | Purpose |
+|--------|-------|-------|---------|
+| oc-subagent-orchestrator | 7 | 8 | Work queue dispatch, depth limits, adaptive admission, stale watchdog, crash recovery, heartbeat summary, memory integration |
+| oc-sidecar | 2 | 2 | Worker pool process for CPU offloading |
+| oc-compaction-helper | 1 | 2 | Pre/post compaction bloat stripping |
+| oc-context-cache | 1 | 3 | System prompt + tool definition caching |
+| oc-stream-relay | 1 | 3 | Model stream relay design |
+
+**What this saves:** ~84,000 tokens/turn, 17x event loop improvement, 99% session I/O reduction.
+
+### Path 2: Light fork (proposed, 5 files)
+
+Fork OC, change 5 files in TypeScript, build from source. The test harness CI gates everything:
+
+1. **Async compaction** — move compaction to `worker_threads`, eliminate 200-500ms blocks
+2. **Bloat field GC** — stop re-injecting bloat fields every turn, save ~15,000 tokens/turn
+3. **Graceful drain** — finish active subagents before SIGUSR1 reload
+4. **Memory sync defaults** — raise `deltaBytes` to 1MB, `deltaMessages` to 500
+5. **Worker thread offloading** — use `worker_threads` for serialization, skill parsing, channel polling
+
+**What this adds:** ~15,000 more tokens/turn saved, 3 idle cores activated, no more response stalls.
+
+### Path 3: Upstream PRs
+
+Contribute the light fork changes back to OC as PRs. The test harness already has the pure logic, BDD tests, and production-sim E2E verification. Benefits all OC users.
+
+---
+
+## V8 Multi-Threading Affordances OC Could Use
+
+| Affordance | Available Since | What It Enables |
+|-----------|----------------|-----------------|
+| `worker_threads` | Node 12 (stable) | Separate V8 isolates with own event loops, ES module native |
+| `SharedArrayBuffer` + `Atomics` | Node 8 (stable) | Wait-free shared memory between threads |
+| `MessagePort` | Node 12 | Structured clone transfer — no serialization needed |
+| `v8.serialize` | Node 12 | Binary serialization, faster than JSON for large objects |
+| `AsyncLocalStorage` | Node 16 | Per-session context propagation without blocking |
+| `perf_hooks.monitorEventLoopDelay` | Node 8 | Real-time loop monitoring for adaptive behavior |
+| `BroadcastChannel` | Node 15 | Pub/sub between workers for inter-topic communication |
+
+OC uses none of these. Our plugins use `perf_hooks` and `worker_threads` (in the sidecar), but can't inject them into OC's core operations.
+
+---
+
+## What We Built
+
+### Pure Logic (shared/ modules, 789 tests)
+
+| Module | Tests | What |
+|--------|-------|------|
+| work-queue-scheduler | 27 | Priority queue, parallel dispatch, dependencies, result collection |
+| depth-limiter | 29 | Depth 2 nesting, per-depth timeouts, aggressive cleanup |
+| adaptive-admission | 22 | Telemetry-driven throttling, capacity recovery |
+| result-merger | 30 | Citation dedup, relevance sorting, document formatting |
+| priority-scheduler | 18 | High/normal/low priority, cooperative preemption |
+| research-task-specs | 22 | Declarative task format, cycle detection, execution planning |
+| topic-isolation | 31 | Per-topic budget, slot borrowing, bottleneck detection |
+| result-cache | 26 | TTL-aware cache, hit rate, merge + dedup |
+| regex-library | 48 | 10 named patterns, zero inline regex anywhere |
+| session-cleanup | 12 | Bloat stripping, stale purge, cleanup pipeline |
+| telemetry-logic | 8 | Health aggregation, status thresholds |
+| subagent-tracker | 7 | Lifecycle tracking, stale detection, spawn capacity |
+
+### Plugins (5 live, 18 hooks, 12 tools)
+
+- `oc-subagent-orchestrator` — the one plugin that manages subagents
+- `oc-sidecar` — worker pool process
+- `oc-compaction-helper` — compaction hooks + bloat stripping
+- `oc-context-cache` — prompt caching
+- `oc-stream-relay` — stream relay design
+- `oc-model-router` — model fallback chain (built, not yet installed)
+
+### TaskFlow Integration
+
+- Sprint manifests persisted to `drafts/platform/`
+- 25/25 tickets complete across 3 sprints
+- Auto-dispatch via `spawnInstructions` (no manual model intervention)
+- Stale watchdog + crash recovery (self-healing queue)
 
 ---
 
 ## Design Principles (the phosphene axiomatics)
 
-Every component follows the same discipline, applied uniformly across Python and TypeScript:
+Every component follows the same discipline:
 
-- **Protocol interfaces first** — I/O behind Protocols (`WorkerPool`, `SubagentSupervisor`, `SpawnAdmission`). Production and test implementations share one contract.
-- **Pure logic** — evaluation functions take immutable snapshots, return result dataclasses, never throw, never call I/O. Unit tests run in 0.08s with zero fixtures.
-- **Mock doubles, not mocks** — `MockWorkerPool`, `MockSupervisor`, `TestStore`, `OpenRouterMockServer` are real in-process implementations of the Protocol, not patch-over mocks.
-- **Determinism as a first-class concern** — injectable `Clock`/`SequenceGenerator`; no `Date.now()`/`Math.random()` in test paths; ephemeral ports, never hardcoded.
-- **CheckResult pattern** — `{ ok, cap, reason, evidence }` everywhere; decisions carry their own proof.
+- **Pure logic / I/O separation** — all scheduling, admission, and cleanup logic is pure (tested without OC runtime). I/O is in thin plugin wrappers.
+- **Protocol interfaces first** — I/O behind Protocols. Production and test implementations share one contract.
+- **Mock doubles, not mocks** — real in-process implementations, not patch-over mocks.
+- **Determinism as a first-class concern** — injected clocks, no `Date.now()`/`Math.random()` in test paths.
+- **CheckResult pattern** — decisions carry their own proof.
+- **DFT throughout** — 789 tests run in <30s. Zero fixtures. Ephemeral ports.
+- **Event-driven cleanup, not timer-driven** — don't add weight to lose weight.
+- **No inline regex** — all patterns in the regex library, tested in isolation.
 
 ---
 
 ## Local Verification
 
 ```bash
-# Python unit + integration (pure logic, SQLite, lifecycle)
-uv run pytest tests/unit tests/integration -v
+# Python unit + integration
+uv run pytest tests/ -v
 
-# TypeScript unit + integration (Vitest, no Docker needed)
-cd ts && npx vitest run tests/spec tests/integration
+# TypeScript unit + integration (no Docker needed)
+cd ts && NODE_ENV=development npx vitest run tests/plugins/ tests/spec/ tests/integration/
 
 # Full TypeScript suite including Testcontainers E2E (needs Docker)
 cd ts && npx vitest run
@@ -174,8 +180,7 @@ docker compose -f docker/docker-compose.test.yml up --build --abort-on-container
 ## Repository Details
 
 - **GitHub Repository**: [FlowFeel/openclaw-test-harness](https://github.com/FlowFeel/openclaw-test-harness) (Public)
-- **Target OpenClaw Version**: `2026.6.8` (commit `f47542c5`)
+- **Target OpenClaw Version**: `2026.6.8`
 - **License**: MIT
 - **Target Production Host**: EC2 (Amazon Linux 2023, Node.js v22.22.2, 4 cores, 30GB RAM)
-- **Active Branch**: `feat/multiagent-process-isolation` — Era 3 threading/process-isolation work (tickets #11–#17)
-- **Documentation**: [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) (phase-by-phase narrative) · [`ISSUES.md`](./ISSUES.md) (full ticket specs)
+- **Documentation**: [`POST_MORTEM.md`](./POST_MORTEM.md) (full retrospective) · [`ISSUES.md`](./ISSUES.md) (tickets #1-#17) · [`PROJECT_SUBAGENT_EFFICIENCY.md`](./PROJECT_SUBAGENT_EFFICIENCY.md) (#18-#25) · [`PROJECT_OC_EFFICIENCY.md`](./PROJECT_OC_EFFICIENCY.md) (#26-#33) · [`PROJECT_NEXT_IMPROVEMENTS.md`](./PROJECT_NEXT_IMPROVEMENTS.md) (#34-#42)
