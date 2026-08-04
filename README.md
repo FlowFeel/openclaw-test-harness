@@ -1,6 +1,6 @@
 # OpenClaw Test Harness & Plugin Suite
 
-**A discipline-first test pyramid, plugin system, and diagnostic harness for OpenClaw (OC) modifications. Pure functional state machines, worker-thread offloading design, hermetic Testcontainers E2E, and deterministic Design-for-Testability (DFT) primitives — built to phosphene axiomatic standards.**
+**A discipline-first test pyramid, plugin foundry, OC source mod test bed, and diagnostic harness for OpenClaw (OC) modifications. Pure functional state machines, worker-thread offloading design, hermetic Testcontainers E2E, and deterministic Design-for-Testability (DFT) primitives — built to phosphene axiomatic standards.**
 
 ---
 
@@ -73,7 +73,25 @@ These are the remaining token bloat and response efficiency problems that requir
 
 **What this saves:** ~84,000 tokens/turn, 17x event loop improvement, 99% session I/O reduction.
 
-### Path 2: Light fork (proposed, 5 files)
+### Path 2: OC source mod test bed (proven, upstreamable)
+
+The `oc-source/` directory patches OC's internal code — specifically the hook runner — with upstreamable patch+test pairs. Each patch includes both the code change and an OC-native test, so patch+test = one PR for `openclaw/openclaw`.
+
+**Patch 0001 — hook debug instrumentation** (510 lines): Fixes the "hooks not working" debugging black hole by adding a structured trace to `createHookRunner`. Three root causes addressed:
+
+1. **Swallowed errors** — `catchErrors=true` (default) + no logger → errors vanished. Now captured with `{type:"error", swallowed:true}`.
+2. **"Didn't fire" invisible** — 9 silent `hooks.length === 0` returns. Now captured with `{type:"no-handlers", reason:"not-registered"|"filtered-out"}`.
+3. **No structured lifecycle** — now `{type:"dispatch", handlerCount}` at each dispatch entry.
+
+File trace output via `OPENCLAW_HOOK_TRACE_FILE` env var makes the trace E2E-observable. Zero overhead when disabled.
+
+**Verified at two levels:**
+- Level 1 (6 specs): applies patch, dynamic-imports patched `createHookRunner`, asserts three claims directly
+- Level 2 (9 specs): real running gateway from npm tarball, built-code patch, all five trace event types proven end-to-end (dispatch, error, no-handlers, zero-overhead, JSONL validity)
+
+See [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) for full architecture.
+
+### Path 3: Light fork (proposed, 5 files)
 
 Fork OC, change 5 files in TypeScript, build from source. The test harness CI gates everything:
 
@@ -85,7 +103,7 @@ Fork OC, change 5 files in TypeScript, build from source. The test harness CI ga
 
 **What this adds:** ~15,000 more tokens/turn saved, 3 idle cores activated, no more response stalls.
 
-### Path 3: Upstream PRs
+### Path 4: Upstream PRs
 
 Contribute the light fork changes back to OC as PRs. The test harness already has the pure logic, BDD tests, and production-sim E2E verification. Benefits all OC users.
 
@@ -109,7 +127,37 @@ OC uses none of these. Our plugins use `perf_hooks` and `worker_threads` (in the
 
 ## What We Built
 
-### Pure Logic (shared/ modules, 789 tests)
+### Plugin Foundry (scaffold + validate + test, DFT by construction)
+
+The foundry (`ts/src/foundry/`) produces and tests DFT-compliant plugins. It codifies the six phosphene DFT axioms into templates and a validator, so every generated plugin passes validation by construction.
+
+```bash
+cd ts
+npx tsx src/foundry/cli.ts new oc-my-plugin --hooks agent_end,session_end --tools my_health
+npx tsx src/foundry/cli.ts validate src/plugins/oc-my-plugin  # ✓ all six DFT axioms pass
+npx tsx src/foundry/cli.ts test src/plugins/oc-my-plugin
+```
+
+**Round-trip proof**: `scaffoldPlugin → validatePlugin → zero errors`. Templates cannot produce a non-compliant plugin.
+
+| Component | Specs | What |
+|-----------|-------|------|
+| validate-logic | 31 | Six axioms: pure-I/O, determinism, manifest-conformance, DFT-docs, mock-doubles, check-result |
+| scaffold | 15 | Template generation, round-trip proof, naming helpers |
+
+See [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) for full architecture.
+
+### OC Source Mod Test Bed (patch + test = upstreamable PR)
+
+The `oc-source/` directory patches OC's internal hook runner with upstreamable patch+test pairs.
+
+- **Patch 0001**: Hook debug instrumentation — fixes the "hooks not working" black hole with structured trace (dispatch, error, no-handlers events + JSONL file output)
+- **Level 1 verification** (6 specs): patch applied, `createHookRunner` imported, three claims asserted directly
+- **Level 2 E2E** (9 specs): real running gateway, built-code patch, all five trace event types proven (dispatch, swallowed error, gateway_stop, no-handlers, zero-overhead)
+
+See [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) for full architecture.
+
+### Pure Logic (shared/ modules)
 
 | Module | Tests | What |
 |--------|-------|------|
@@ -126,7 +174,7 @@ OC uses none of these. Our plugins use `perf_hooks` and `worker_threads` (in the
 | telemetry-logic | 8 | Health aggregation, status thresholds |
 | subagent-tracker | 7 | Lifecycle tracking, stale detection, spawn capacity |
 
-### Plugins (5 live, 18 hooks, 12 tools)
+### Plugins
 
 - `oc-subagent-orchestrator` — the one plugin that manages subagents
 - `oc-sidecar` — worker pool process
@@ -134,6 +182,25 @@ OC uses none of these. Our plugins use `perf_hooks` and `worker_threads` (in the
 - `oc-context-cache` — prompt caching
 - `oc-stream-relay` — stream relay design
 - `oc-model-router` — model fallback chain (built, not yet installed)
+- `oc-topic-worker-pool` — hook-based worker pool with semaphore admission control for concurrent Telegram topic sessions (see [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md))
+- `oc-e2e-trace-test` — foundry-generated test plugin for Level 2 E2E hook trace verification
+
+### oc-topic-worker-pool: Hook-based worker pool
+
+Implements concurrency control for Telegram forum topic sessions via six hooks:
+
+| Hook | Role |
+|------|------|
+| `before_dispatch` | Route by topic, short-circuit duplicates |
+| `before_agent_run` | `await semaphore.acquire()` — the await IS the queue |
+| `agent_end` | `semaphore.release()` — frees slot, resolves next waiter |
+| `subagent_spawning` | Acquire sub-pool slot (separate pool prevents starvation) |
+| `subagent_ended` | Release sub-pool slot |
+| `before_agent_reply` | Egress observation (pool stats) |
+
+Pure logic (31 specs): counting semaphore, topic session key parsing, pool routing (priority/chat/default), dedup, dispatch decisions. Wiring (2 specs): AsyncSemaphore + six hook registrations.
+
+See [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) for full architecture.
 
 ### TaskFlow Integration
 
@@ -168,6 +235,19 @@ uv run pytest tests/ -v
 # TypeScript unit + integration (no Docker needed)
 cd ts && NODE_ENV=development npx vitest run tests/plugins/ tests/spec/ tests/integration/
 
+# Foundry: scaffold + validate + test
+
+cd ts
+npx tsx src/foundry/cli.ts new oc-demo-plugin --hooks agent_end
+npx tsx src/foundry/cli.ts validate src/plugins/oc-demo-plugin
+npx tsx src/foundry/cli.ts test src/plugins/oc-demo-plugin
+
+# OC source mod Level 1 (applies patch, imports patched createHookRunner)
+cd ts && npx vitest run tests/oc-source/hook-trace.spec.ts
+
+# OC source mod Level 2 E2E (real running gateway, needs Docker)
+cd ts && npx vitest run tests/oc-source/e2e-gateway-trace.spec.ts
+
 # Full TypeScript suite including Testcontainers E2E (needs Docker)
 cd ts && npx vitest run
 
@@ -183,4 +263,35 @@ docker compose -f docker/docker-compose.test.yml up --build --abort-on-container
 - **Target OpenClaw Version**: `2026.6.8`
 - **License**: MIT
 - **Target Production Host**: EC2 (Amazon Linux 2023, Node.js v22.22.2, 4 cores, 30GB RAM)
-- **Documentation**: [`POST_MORTEM.md`](./POST_MORTEM.md) (full retrospective) · [`ISSUES.md`](./ISSUES.md) (tickets #1-#17) · [`PROJECT_SUBAGENT_EFFICIENCY.md`](./PROJECT_SUBAGENT_EFFICIENCY.md) (#18-#25) · [`PROJECT_OC_EFFICIENCY.md`](./PROJECT_OC_EFFICIENCY.md) (#26-#33) · [`PROJECT_NEXT_IMPROVEMENTS.md`](./PROJECT_NEXT_IMPROVEMENTS.md) (#34-#42)
+- **Documentation**: see [Documentation Index](#documentation-index) below
+
+---
+
+## Documentation Index
+
+### Architecture docs (`docs/`)
+
+| Document | Description |
+|----------|-------------|
+| [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) | The foundry: scaffold, validate, test. The six DFT axioms, round-trip proof, pure seams vs thin I/O, validator internals |
+| [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) | OC source mod test bed: patch 0001 (hook debug instrumentation), Level 1 + Level 2 E2E verification, built-code patching, key discoveries (dual API split, async gateway_start) |
+| [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) | oc-topic-worker-pool: hook-based worker pool with semaphore admission control for concurrent Telegram topic sessions |
+| [`docs/SESSION-HANDOFF.md`](./docs/SESSION-HANDOFF.md) | Dense literate snapshot of working state — restores full context after compaction without re-deriving from transcript |
+| [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) | War story: patching OC's event loop from 834ms P99 to worker threads (July 31 – August 1, 2026) |
+
+### Project history & tickets
+
+| Document | Description |
+|----------|-------------|
+| [`POST_MORTEM.md`](./POST_MORTEM.md) | Full retrospective: the event loop saturation, bloat fields, and the plugin-only mitigation path |
+| [`ISSUES.md`](./ISSUES.md) | Tickets #1-#17: initial plugin suite, pure logic, session cleanup, subagent orchestrator |
+| [`PROJECT_SUBAGENT_EFFICIENCY.md`](./PROJECT_SUBAGENT_EFFICIENCY.md) | Tickets #18-#25: subagent dispatch, depth limits, adaptive admission, crash recovery |
+| [`PROJECT_OC_EFFICIENCY.md`](./PROJECT_OC_EFFICIENCY.md) | Tickets #26-#33: context cache, stream relay, compaction helper, model router |
+| [`PROJECT_NEXT_IMPROVEMENTS.md`](./PROJECT_NEXT_IMPROVEMENTS.md) | Tickets #34-#42: foundry, OC source mod test bed, E2E verification, worker pool |
+
+### Component docs
+
+| Document | Description |
+|----------|-------------|
+| [`oc-source/README.md`](./oc-source/README.md) | OC source mod test bed: submodule structure, patch listing, working with the submodule |
+| [`ts/src/plugins/README.md`](./ts/src/plugins/README.md) | Plugin directory: all 11 plugins with their hooks, tools, and design principles |
