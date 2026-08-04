@@ -41,6 +41,7 @@ describe("oc-compaction-helper hook registration", () => {
     const source = readFileSync(resolve(dir, "src/index.ts"), "utf8");
 
     expect(source).toContain('"before_prompt_build"');
+    expect(source).toContain('"agent_end"');
     expect(source).toContain('"before_compaction"');
     expect(source).toContain('"after_compaction"');
   });
@@ -49,6 +50,7 @@ describe("oc-compaction-helper hook registration", () => {
     const source = readFileSync(resolve(dir, "src/index.ts"), "utf8");
 
     expect(source).toContain("compaction-helper-before-prompt-build");
+    expect(source).toContain("compaction-helper-agent-end");
     expect(source).toContain("compaction-helper-before-compaction");
     expect(source).toContain("compaction-helper-after-compaction");
   });
@@ -58,10 +60,7 @@ describe("oc-compaction-helper hook registration", () => {
     expect(source).not.toContain('"before_agent_reply"');
   });
 
-  it("does NOT register agent_end (wrong hook for this plugin)", () => {
-    const source = readFileSync(resolve(dir, "src/index.ts"), "utf8");
-    expect(source).not.toContain('"agent_end"');
-  });
+
 });
 
 describe("oc-compaction-helper throttling logic", () => {
@@ -128,8 +127,8 @@ describe("oc-compaction-helper source structure", () => {
     // Every hook should have a try/catch
     const hookBlocks = source.match(/registerHook\(/g) ?? [];
     const catchBlocks = source.match(/catch \(err\)/g) ?? [];
-    expect(hookBlocks.length).toBe(3); // 3 hooks
-    expect(catchBlocks.length).toBeGreaterThanOrEqual(3); // at least 3 catch blocks
+    expect(hookBlocks.length).toBe(4); // 4 hooks
+    expect(catchBlocks.length).toBeGreaterThanOrEqual(4); // at least 4 catch blocks
   });
 
   it("throttle state is in-memory (lastCleanupMs)", () => {

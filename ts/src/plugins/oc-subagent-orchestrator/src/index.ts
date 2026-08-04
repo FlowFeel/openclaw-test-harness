@@ -12,7 +12,7 @@
  *
  * Hooks:
  * - after_compaction → strip bloat fields from sessions.json
- * - session_end → purge stale subagents
+ * - agent_end → purge stale subagents (every turn, not just on session close)
  * - subagent_spawned → track in work queue + watchdog
  * - subagent_ended → record result, dispatch next queued task
  * - model_call_started/ended → collect telemetry for adaptive admission
@@ -309,8 +309,11 @@ export default definePluginEntry({
       }
     }, { name: "orchestrator-after-compaction" });
 
-    // ── Hook: session_end — purge stale ──────────────────────
-    api.registerHook("session_end", async () => {
+    // ── Hook: agent_end — purge stale subagents (every turn) ──
+    // Fires when the conversation turn completes. This is the right
+    // frequency for stale detection — session_end only fires when a
+    // session closes, which is too rare for active topics.
+    api.registerHook("agent_end", async () => {
       try {
         // In-memory stale detection
         const { result } = detectStale(state.subagents, cfg.runTimeoutSeconds, Date.now());
@@ -318,7 +321,9 @@ export default definePluginEntry({
           api.logger?.info?.(`[orchestrator] ${result.staleKeys.length} stale subagents detected`);
         }
 
-        // Also purge stale from sessions.json
+        // Also purge stale from sessions.json (only if stale detected)
+        if (result.staleKeys.length === 0) return;
+
         const sessions = readSessions();
         if (sessions) {
           const { cleaned, purgedKeys } = purgeStaleSubagents(sessions, {
@@ -333,9 +338,9 @@ export default definePluginEntry({
           }
         }
       } catch (err) {
-        api.logger?.error?.(`[orchestrator] session_end failed: ${String(err)}`);
+        api.logger?.error?.(`[orchestrator] agent_end cleanup failed: ${String(err)}`);
       }
-    }, { name: "orchestrator-session-end" });
+    }, { name: "orchestrator-agent-end" });
 
     // ── Hook: subagent_spawned — track + link to task ID ──────
     api.registerHook("subagent_spawned", async (event: { sessionKey?: string; resolvedModel?: string }) => {

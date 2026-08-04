@@ -172,6 +172,62 @@ export default definePluginEntry({
       { name: "compaction-helper-before-compaction" }
     );
 
+    // ── Hook: agent_end — strip bloat fields after turn completes ──
+    // Fires when the conversation turn completes. This is the post-turn
+    // cleanup: strip bloat that OC re-injected during the turn, so the
+    // file is clean for the next turn. Uses the same throttle as
+    // before_prompt_build to avoid redundant writes.
+    api.registerHook(
+      "agent_end",
+      async () => {
+        try {
+          const now = Date.now();
+          if (now - lastCleanupMs < throttleMs) return;
+
+          const raw = reader(sessionsPath);
+          if (!raw) return;
+
+          // Quick in-memory scan
+          let hasBloat = false;
+          let bloatBytes = 0;
+          for (const entry of Object.values(raw)) {
+            if (typeof entry === "object" && entry !== null) {
+              for (const field of bloatFields) {
+                if (field in entry) {
+                  hasBloat = true;
+                  const fieldValue = (entry as Record<string, unknown>)[field];
+                  bloatBytes += JSON.stringify(fieldValue).length;
+                }
+              }
+            }
+          }
+
+          if (!hasBloat || bloatBytes < bloatThresholdBytes) {
+            lastCleanupMs = now;
+            return;
+          }
+
+          const { cleaned, report } = cleanupSessions(raw, {
+            bloatFields,
+            maxAgeHours: 24,
+            nowMs: now,
+          });
+          writer(cleaned, sessionsPath);
+          lastCleanupMs = now;
+          api.logger?.info?.(
+            `[oc-compaction-helper] agent_end cleanup: ` +
+              `${report.strippedFieldCount} fields stripped, ` +
+              `${report.reductionPercent}% size reduction`
+          );
+        } catch (err) {
+          api.logger?.error?.(
+            `[oc-compaction-helper] agent_end cleanup failed: ${String(err)}`
+          );
+        }
+      },
+      { name: "compaction-helper-agent-end" }
+    );
+
     // ── Hook: after_compaction — strip bloat fields ──────────
     // Fires after compaction completes. This is a deep cleanup that
     // also purges stale subagent entries.
