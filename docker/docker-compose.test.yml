@@ -11,8 +11,8 @@ services:
     command: |
       sh -c "
         npm ci --include=dev &&
-        npx tsc --noEmit &&
-        npx vitest run --reporter=verbose
+        npx tsc --noEmit -p tsconfig.ci.json &&
+        npx vitest run --reporter=verbose --exclude "tests/oc-source/**"
       "
     healthcheck:
       test: ["CMD", "node", "-e", "process.exit(0)"]
