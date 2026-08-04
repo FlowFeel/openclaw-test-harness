@@ -127,6 +127,14 @@ const oldReturn = "hasHooks,\n\t\tgetHookCount\n\t};";
 const newReturn = "hasHooks,\n\t\tgetHookCount,\n\t\tgetTrace: () => traceEvents,\n\t\tclearTrace: () => { traceEvents.length = 0; }\n\t};";
 src = src.split(oldReturn).join(newReturn);
 
+// ── 6. Expose createHookRunner on globalThis for E2E testing ──────────────
+// The built dist minifies exports, so createHookRunner is not importable by
+// name. Expose it on globalThis so the no-handlers E2E test can call it
+// directly with an empty registry.
+if (!src.includes("globalThis.__createHookRunner")) {
+  src += '\nglobalThis.__createHookRunner = createHookRunner;\n';
+}
+
 // ── Write back ────────────────────────────────────────────────────────────
 // ── Report match statistics ─────────────────────────────────────────────
 const noHandlersCount = (original.split("if (hooks.length === 0) return;").length - 1) + (original.split('if (hooks.length === 0) return { status: "no_handler" };').length - 1);
