@@ -139,7 +139,7 @@ const merged = mergeResults([
   { taskId: 't1', taskType: 'search', findings: ['a'], citations: [{ id: '1', url: 'http://a', title: 'A' }] },
   { taskId: 't2', taskType: 'search', findings: ['b'], citations: [{ id: '1', url: 'http://a', title: 'A' }] },
 ]);
-console.log('merger:', JSON.stringify({ deduped: merged.report.dedupedCount, total: merged.report.totalCitations }));
+console.log('merger:', JSON.stringify({ deduped: merged.report.duplicatesRemoved, total: merged.report.outputCitations }));
 
 // Test depth-limiter
 const depthConfig = { maxSpawnDepth: 2, depth0Timeout: 300, depth1Timeout: 600, depth2Timeout: 900 };
@@ -296,6 +296,12 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
     ]);
     expect(installResult.exitCode).toBe(0);
     console.log("[prod-sim] openclaw installed");
+    // Install tsx for proper TypeScript ESM resolution (.js→.ts)
+    const tsxResult = await container.exec([
+      "npm", "install", "--prefix", "/app", "tsx",
+    ]);
+    expect(tsxResult.exitCode).toBe(0);
+    console.log("[prod-sim] tsx installed");
   }, 300000);
 
   afterAll(async () => {
@@ -449,7 +455,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
 
   it("session-cleanup pipeline runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-cleanup.ts",
+      "npx", "tsx", "/app/test-cleanup.ts",
     ]);
     expect(result.exitCode).toBe(0);
     const parsed = safeJsonParse(result.output)
@@ -460,7 +466,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
 
   it("subagent-tracker runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-tracker.ts",
+      "npx", "tsx", "/app/test-tracker.ts",
     ]);
     expect(result.exitCode).toBe(0);
     const parsed = safeJsonParse(result.output)
@@ -470,7 +476,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
 
   it("telemetry-logic runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-telemetry.ts",
+      "npx", "tsx", "/app/test-telemetry.ts",
     ]);
     expect(result.exitCode).toBe(0);
     const parsed = safeJsonParse(result.output)
@@ -480,19 +486,28 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
 
   it("oc-subagent-orchestrator pure logic (result-merger, depth-limiter) runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-orchestrator.ts",
+      "npx", "tsx", "/app/test-orchestrator.ts",
     ]);
     expect(result.exitCode).toBe(0);
-    const mergerLine = safeJsonParse(extractJson(result.output));
-    // The merger output is the last line; depth output is before it
-    // We check both via the merged output
-    expect(mergerLine.deduped).toBeGreaterThanOrEqual(0);
-    expect(mergerLine.total).toBeGreaterThanOrEqual(0);
+    const lines = result.output.trim().split("\n");
+    const mergerLine = lines.find((l) => l.startsWith("merger:"));
+    const depthLine = lines.find((l) => l.startsWith("{"));
+    // Verify result-merger output
+    expect(mergerLine).toBeDefined();
+    const mergerParsed = JSON.parse(mergerLine!.replace("merger: ", ""));
+    expect(mergerParsed.deduped).toBe(1); // 1 duplicate citation removed
+    expect(mergerParsed.total).toBe(1);   // 1 unique citation after dedup
+    // Verify depth-limiter output
+    expect(depthLine).toBeDefined();
+    const depthParsed = JSON.parse(depthLine!);
+    expect(depthParsed.depth.d0).toBe(true);
+    expect(depthParsed.depth.d1).toBe(true);
+    expect(depthParsed.depth.d2).toBe(false);
   });
 
   it("oc-sidecar pure logic (client creation, telemetry) runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-sidecar.ts",
+      "npx", "tsx", "/app/test-sidecar.ts",
     ]);
     expect(result.exitCode).toBe(0);
     const lines = result.output.trim().split("\n");
@@ -512,7 +527,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
 
   it("oc-compaction-helper pure logic (sessions-io, cleanup) runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-compaction.ts",
+      "npx", "tsx", "/app/test-compaction.ts",
     ]);
     expect(result.exitCode).toBe(0);
     const lines = result.output.trim().split("\n");
@@ -532,7 +547,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
 
   it("oc-context-cache pure logic (getCached, putCached, invalidateExpired, getCacheStats) runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-context-cache.ts",
+      "npx", "tsx", "/app/test-context-cache.ts",
     ]);
     expect(result.exitCode).toBe(0);
     const lines = result.output.trim().split("\n");
@@ -566,7 +581,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
 
   it("oc-stream-relay pure logic (shouldRelay, shouldFallback, createRelayState) runs in container", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "/app/test-stream-relay.ts",
+      "npx", "tsx", "/app/test-stream-relay.ts",
     ]);
     expect(result.exitCode).toBe(0);
     const lines = result.output.trim().split("\n");
@@ -621,14 +636,23 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
     ]);
     expect(result.exitCode).toBe(0);
     const parsed = safeJsonParse(result.output)
-    // The orchestrator intentionally aggregates tools from smaller plugins
-    // (subagent_health, session_health, event_loop_health). These are
-    // known duplicates, not conflicts.
-    const knownDuplicates = ["subagent_health", "session_health", "event_loop_health"];
-    const unexpectedDuplicates = (parsed.duplicates || []).filter(
-      (d: string) => !knownDuplicates.includes(d)
-    );
-    expect(unexpectedDuplicates).toEqual([]);
+    // The orchestrator intentionally aggregates tools from smaller plugins.
+    // Verify: no UNEXPECTED tool name conflicts. Known overlaps are:
+    // - subagent_health (also in oc-subagent-watchdog)
+    // - session_health (also in oc-session-guard)
+    // - event_loop_health (also in oc-event-loop-monitor)
+    // The orchestrator supersedes these plugins and re-exports their tools
+    // for single-plugin deployments.
+    const knownOverlaps = new Set(["subagent_health", "session_health", "event_loop_health"]);
+    const actualDuplicates = new Set(parsed.duplicates || []);
+    // Every duplicate must be a known overlap
+    for (const d of Array.from(actualDuplicates) as string[]) {
+      expect(knownOverlaps.has(d)).toBe(true);
+    }
+    // Every known overlap must actually appear in duplicates
+    for (const k of knownOverlaps) {
+      expect(actualDuplicates.has(k)).toBe(true);
+    }
   });
 
   // ── Total hooks = 20 (orchestrator 8 + sidecar 2 + compaction-helper 4 + context-cache 3 + stream-relay 3) ──
@@ -639,7 +663,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
         const plugins = [
           { name: 'oc-subagent-orchestrator', expected: 8 },
           { name: 'oc-sidecar', expected: 2 },
-          { name: 'oc-compaction-helper', expected: 2 },
+          { name: 'oc-compaction-helper', expected: 4 }, // 4 hooks: before_prompt_build, agent_end, before_compaction, after_compaction
           { name: 'oc-context-cache', expected: 3 },
           { name: 'oc-stream-relay', expected: 3 },
         ];
