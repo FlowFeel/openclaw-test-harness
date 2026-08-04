@@ -1,0 +1,18 @@
+{
+  "id": "oc-e2e-trace-test",
+  "name": "OcE2eTraceTest",
+  "description": "Throws in gateway_start to prove swallowed-error visibility",
+  "contracts": {
+    "hooks": [
+      "gateway_start"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

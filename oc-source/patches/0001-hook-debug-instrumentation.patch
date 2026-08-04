@@ -1,8 +1,16 @@
 diff --git a/src/plugins/hooks.ts b/src/plugins/hooks.ts
-index 3781fc46..6e028f94 100644
+index 3781fc46..b35c734d 100644
 --- a/src/plugins/hooks.ts
 +++ b/src/plugins/hooks.ts
-@@ -156,6 +156,30 @@ type HookRunnerOptions = {
+@@ -6,6 +6,7 @@
+  */
+ 
+ import { AsyncLocalStorage } from "node:async_hooks";
++import { appendFileSync } from "node:fs";
+ import { clampPositiveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
+ import { isToolAllowedByPolicyName } from "../agents/tool-policy-match.js";
+ import {
+@@ -156,6 +157,30 @@ type HookRunnerOptions = {
     * but the plugin's underlying work is not cancelled.
     */
    modifyingHookTimeoutMsByHook?: Partial<Record<PluginHookName, number>>;
@@ -33,21 +41,34 @@ index 3781fc46..6e028f94 100644
  };
  
  const DEFAULT_VOID_HOOK_TIMEOUT_MS_BY_HOOK: Partial<Record<PluginHookName, number>> = {
-@@ -307,6 +331,13 @@ export function createHookRunner(
+@@ -307,6 +332,26 @@ export function createHookRunner(
  ) {
    const logger = options.logger;
    const catchErrors = options.catchErrors ?? true;
 +  const enableTrace = options.enableTrace ?? process.env.OPENCLAW_HOOK_DEBUG === "1";
++  const traceFile = process.env.OPENCLAW_HOOK_TRACE_FILE;
 +  const traceEvents: HookTraceEvent[] = [];
 +  const captureTrace = (event: Omit<HookTraceEvent, "ts">): void => {
 +    if (enableTrace) {
-+      traceEvents.push({ ts: Date.now(), ...event });
++      const fullEvent: HookTraceEvent = { ts: Date.now(), ...event };
++      traceEvents.push(fullEvent);
++      // When OPENCLAW_HOOK_TRACE_FILE is set, append each event as JSONL.
++      // This makes the trace observable from outside the process (E2E tests
++      // read the file to assert the hook lifecycle without needing in-process
++      // access to runner.getTrace()).
++      if (traceFile) {
++        try {
++          appendFileSync(traceFile, JSON.stringify(fullEvent) + "\n");
++        } catch {
++          // Swallow file-write errors — the trace must never break hooks.
++        }
++      }
 +    }
 +  };
    const failurePolicyByHook = {
      before_agent_run: "fail-closed",
      ...options.failurePolicyByHook,
-@@ -599,7 +630,15 @@ export function createHookRunner(
+@@ -599,7 +644,15 @@ export function createHookRunner(
      error: unknown;
    }): never | void => {
      const msg = `[hooks] ${params.hookName} handler from ${params.pluginId} failed: ${formatHookErrorForLog(params.error)}`;
@@ -64,7 +85,7 @@ index 3781fc46..6e028f94 100644
        logger?.error(msg);
        return;
      }
-@@ -703,10 +742,17 @@ export function createHookRunner(
+@@ -703,10 +756,17 @@ export function createHookRunner(
    ): Promise<void> {
      const hooks = getHooksForName(registry, hookName, undefined, matcherToolName);
      if (hooks.length === 0) {
@@ -82,7 +103,7 @@ index 3781fc46..6e028f94 100644
  
      const promises = hooks.map(async (hook) => {
        try {
-@@ -740,10 +786,17 @@ export function createHookRunner(
+@@ -740,10 +800,17 @@ export function createHookRunner(
    ): Promise<TResult | undefined> {
      const hooks = getHooksForName(registry, hookName, undefined, matcherToolName);
      if (hooks.length === 0) {
@@ -100,7 +121,7 @@ index 3781fc46..6e028f94 100644
  
      let result: TResult | undefined;
  
-@@ -797,10 +850,17 @@ export function createHookRunner(
+@@ -797,10 +864,17 @@ export function createHookRunner(
    ): Promise<TResult | undefined> {
      const hooks = getHooksForName(registry, hookName, ctx);
      if (hooks.length === 0) {
@@ -118,7 +139,7 @@ index 3781fc46..6e028f94 100644
  
      return await runClaimingHooksList(hooks, hookName, event, ctx, runHandler);
    }
-@@ -816,6 +876,7 @@ export function createHookRunner(
+@@ -816,6 +890,7 @@ export function createHookRunner(
    ): Promise<TResult | undefined> {
      const hooks = getHooksForNameAndPlugin(registry, hookName, pluginId);
      if (hooks.length === 0) {
@@ -126,7 +147,7 @@ index 3781fc46..6e028f94 100644
        return undefined;
      }
  
-@@ -882,6 +943,7 @@ export function createHookRunner(
+@@ -882,6 +957,7 @@ export function createHookRunner(
  
      const hooks = getHooksForNameAndPlugin(registry, hookName, pluginId);
      if (hooks.length === 0) {
@@ -134,7 +155,7 @@ index 3781fc46..6e028f94 100644
        return { status: "no_handler" };
      }
  
-@@ -1216,6 +1278,7 @@ export function createHookRunner(
+@@ -1216,6 +1292,7 @@ export function createHookRunner(
    ): Promise<PluginHookReplyPayloadSendingResult | undefined> {
      const hooks = getHooksForName(registry, "reply_payload_sending");
      if (hooks.length === 0) {
@@ -142,7 +163,7 @@ index 3781fc46..6e028f94 100644
        return undefined;
      }
  
-@@ -1436,6 +1499,7 @@ export function createHookRunner(
+@@ -1436,6 +1513,7 @@ export function createHookRunner(
    ): PluginHookToolResultPersistResult | undefined {
      const hooks = getHooksForName(registry, "tool_result_persist");
      if (hooks.length === 0) {
@@ -150,7 +171,7 @@ index 3781fc46..6e028f94 100644
        return undefined;
      }
  
-@@ -1483,6 +1547,7 @@ export function createHookRunner(
+@@ -1483,6 +1561,7 @@ export function createHookRunner(
    ): PluginHookBeforeMessageWriteResult | undefined {
      const hooks = getHooksForName(registry, "before_message_write");
      if (hooks.length === 0) {
@@ -158,7 +179,7 @@ index 3781fc46..6e028f94 100644
        return undefined;
      }
  
-@@ -1682,6 +1747,7 @@ export function createHookRunner(
+@@ -1682,6 +1761,7 @@ export function createHookRunner(
      const hookName = "skill_proposal_evaluate";
      const hooks = getHooksForName(registry, hookName);
      if (hooks.length === 0) {
@@ -166,7 +187,7 @@ index 3781fc46..6e028f94 100644
        return [];
      }
  
-@@ -1862,6 +1928,11 @@ export function createHookRunner(
+@@ -1862,6 +1942,11 @@ export function createHookRunner(
      // Utility
      hasHooks,
      getHookCount,
@@ -180,10 +201,10 @@ index 3781fc46..6e028f94 100644
  
 diff --git a/src/plugins/hooks.trace.test.ts b/src/plugins/hooks.trace.test.ts
 new file mode 100644
-index 00000000..d45b8514
+index 00000000..9a358ad6
 --- /dev/null
 +++ b/src/plugins/hooks.trace.test.ts
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,303 @@
 +/**
 + * Test: hook debug instrumentation trace
 + *
@@ -440,5 +461,50 @@ index 00000000..d45b8514
 +    const runner = createHookRunner(registry, { enableTrace: true });
 +    expect(typeof runner.getTrace).toBe("function");
 +    expect(typeof runner.clearTrace).toBe("function");
++  });
++});
++
++describe("hook trace file output (OPENCLAW_HOOK_TRACE_FILE)", () => {
++  it("writes trace events as JSONL to the file when OPENCLAW_HOOK_TRACE_FILE is set", async () => {
++    const { resolve } = await import("node:path");
++    const { mkdtempSync, readFileSync, rmSync } = await import("node:fs");
++    const { tmpdir } = await import("node:os");
++
++    const tmpDir = mkdtempSync(resolve(tmpdir(), "hook-trace-test-"));
++    const tracePath = resolve(tmpDir, "trace.jsonl");
++    process.env.OPENCLAW_HOOK_TRACE_FILE = tracePath;
++
++    try {
++      const { runner } = createHookRunnerWithRegistry(
++        [{ hookName: "session_end", pluginId: "p", handler: async () => {} }],
++        { enableTrace: true },
++      );
++
++      await runner.runSessionEnd(SESSION_END_EVENT, SESSION_CTX);
++
++      const traceContent = readFileSync(tracePath, "utf8");
++      const lines = traceContent.trim().split("\n");
++      expect(lines.length).toBeGreaterThan(0);
++
++      const firstEvent = JSON.parse(lines[0]);
++      expect(firstEvent.type).toBeDefined();
++      expect(firstEvent.ts).toBeDefined();
++      expect(firstEvent.hookName).toBe("session_end");
++    } finally {
++      delete process.env.OPENCLAW_HOOK_TRACE_FILE;
++      rmSync(tmpDir, { recursive: true, force: true });
++    }
++  });
++
++  it("does NOT write a file when OPENCLAW_HOOK_TRACE_FILE is not set", async () => {
++    const { runner } = createHookRunnerWithRegistry(
++      [{ hookName: "session_end", pluginId: "p", handler: async () => {} }],
++      { enableTrace: true },
++    );
++
++    await runner.runSessionEnd(SESSION_END_EVENT, SESSION_CTX);
++
++    // No file written — trace is in-memory only.
++    expect(runner.getTrace().length).toBeGreaterThan(0);
 +  });
 +});

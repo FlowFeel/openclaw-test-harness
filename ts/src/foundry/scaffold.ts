@@ -344,7 +344,7 @@ describe("${logicName} pure logic", () => {
  */
 
 import { describe, it, expect } from "vitest";
-import { process${pascal}, type ${pascal}Input } from "../../src/plugins/${params.name}/src/${logicName}.js";
+import { process${pascal}, type ${pascal}Input } from "../src/${logicName}.js";
 
 const NOW = 2_000_000_000;
 
@@ -383,7 +383,7 @@ function integrationSpecTemplate(params: ScaffoldParams): string {
  */
 
 import { describe, it, expect, vi } from "vitest";
-import plugin from "../../src/plugins/${params.name}/src/index.js";
+import plugin from "../src/index.js";
 
 describe("${params.name} plugin wiring", () => {
   it("registers the expected hooks and tools", () => {
