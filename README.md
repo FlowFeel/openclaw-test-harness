@@ -256,6 +256,31 @@ docker compose -f docker/docker-compose.test.yml up --build --abort-on-container
 ```
 
 ---
+## Docker
+
+One image. Volume mounts for code. No multi-stage.
+
+**Image:** `docker/Dockerfile` — node:22-bookworm-slim with OC + tsx baked in.
+
+**Three consumers, same image:**
+
+| Consumer | How | What it runs |
+|----------|-----|-------------|
+| CI Docker Integration | `docker compose -f docker/docker-compose.test.yml up` | tsc + vitest in container |
+| CI E2E Integration | testcontainers `fromDockerfile().build()` | e2e + oc-source tests |
+| Local dev | `docker compose up` | same as CI |
+
+**CI pipeline (4 layers):**
+
+1. Python Unit — pytest, no Docker
+2. TypeScript Unit — 767 vitest tests, no Docker
+3. Docker Integration — builds image, runs tsc + vitest inside container
+4. E2E Integration — testcontainers, runs e2e + oc-source tests
+5. Staging — main branch only
+
+See `docker/README.md` for build/run/debug instructions.
+
+---
 
 ## Repository Details
 
