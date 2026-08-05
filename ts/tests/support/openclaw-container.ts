@@ -1,3 +1,10 @@
+/**
+ * Container helpers — shared setup for all e2e tests.
+ *
+ * One image (docker/Dockerfile), volume mounts for code, content-hash
+ * reuse. All e2e tests go through this — no ad-hoc container creation.
+ */
+
 import {
   GenericContainer,
   Network,
@@ -18,6 +25,15 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ── Paths ────────────────────────────────────────────────────────
+
+const TS_DIR = path.resolve(__dirname, "../..");
+const REPO_ROOT = path.resolve(TS_DIR, "..");
+const DOCKERFILE = path.resolve(REPO_ROOT, "docker/Dockerfile");
+const OC_SOURCE = path.resolve(REPO_ROOT, "oc-source");
+
+// ── Types ────────────────────────────────────────────────────────
+
 export interface ModelCallResult {
   status: number;
   id: string;
@@ -34,8 +50,7 @@ export interface StartedOpenClawContainer {
   network?: StartedNetwork;
   /**
    * Drive an OpenRouter chat-completion call from inside the OC container
-   * against the mock sidecar over the shared Docker network. Present only when
-   * started with `{ withSidecar: true }`.
+   * against the mock sidecar over the shared Docker network.
    */
   executeModelCall?: (input: {
     model: string;
@@ -43,96 +58,83 @@ export interface StartedOpenClawContainer {
   }) => Promise<ModelCallResult>;
 }
 
-export interface StartPatchedOpenClawOptions {
-  /**
-   * When true, start an OpenRouter mock sidecar container on a shared
-   * testcontainers Network, attach the OC container to it (alias `openclaw`),
-   * set `OPENCLAW_OPENROUTER_BASE_URL` to point at the sidecar, and expose
-   * `executeModelCall`. Reuse is disabled in this mode: the fresh per-run
-   * Network would otherwise leave a reused container with stale attachments
-   * from the previous run's (now-removed) network.
-   */
+export interface StartOpenClawOptions {
+  /** Start an OpenRouter mock sidecar on a shared network. */
   withSidecar?: boolean;
 }
 
-/** Short content hash of a file, for cache invalidation labels. */
-function fileSha256(filePath: string): string {
-  const buf = fs.readFileSync(filePath);
-  return crypto.createHash("sha256").update(buf).digest("hex").slice(0, 12);
+// ── Helpers ──────────────────────────────────────────────────────
+
+/** Content hash of a directory — for container reuse labels. */
+function dirSha256(dir: string): string {
+  if (!fs.existsSync(dir)) return "none";
+  const hash = crypto.createHash("sha256");
+  const walk = (d: string) => {
+    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else hash.update(fs.readFileSync(full));
+    }
+  };
+  walk(dir);
+  return hash.digest("hex").slice(0, 12);
 }
 
-/**
- * True if a (reusable) container with this patch sha already exists — i.e. the
- * upcoming start will *reuse* it rather than create fresh. Best-effort: any error
- * (e.g. docker CLI unavailable) falls back to "unknown" so it never breaks tests.
- */
-function existingContainerExists(sha: string): boolean | undefined {
+/** Check if a reusable container exists (best-effort). */
+function existingContainerExists(label: string): boolean {
   try {
     const out = execFileSync(
       "docker",
-      ["ps", "-aq", "--filter", `label=openclaw.patch.sha=${sha}`],
+      ["ps", "-aq", "--filter", `label=${label}`],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
     return out.trim().length > 0;
   } catch {
-    return undefined;
+    return false;
   }
 }
 
-export async function startPatchedOpenClaw(
-  opts: StartPatchedOpenClawOptions = {},
+// ── Main entry point ──────────────────────────────────────────────
+
+/**
+ * Start an OC test container from docker/Dockerfile.
+ *
+ * - OC + tsx are baked into the image (no runtime npm install).
+ * - Plugin source and oc-source submodule are volume-mounted.
+ * - Content-hash label enables reuse across test runs.
+ * - Patches are applied at image build time (not runtime).
+ */
+export async function startOpenClaw(
+  opts: StartOpenClawOptions = {},
 ): Promise<StartedOpenClawContainer> {
-  // __dirname = ts/tests/support → up two levels lands on ts/ (where patches/ lives).
-  const tsDir = path.resolve(__dirname, "../..");
-  const patchPath = path.join(tsDir, "patches/child-admission.ts");
-
-  // Fail fast with a clear error if the patch is missing. Otherwise testcontainers
-  // silently copies nothing and the failure shows up as an opaque ERR_MODULE_NOT_FOUND
-  // deep inside the container, which is very hard to debug.
-  if (!fs.existsSync(patchPath)) {
-    throw new Error(
-      `Patch file not found at ${patchPath}. Resolved from __dirname=${__dirname}.`,
-    );
-  }
-
-  // Content hash of the patch. testcontainers' reuse hash is built from `createOpts`,
-  // which INCLUDES labels but NOT the contents of copied files. So we put the patch
-  // sha in a label: editing the patch → new sha → new hash → fresh container is built
-  // (no stale patch). Same patch → same hash → the stopped container is restarted in
-  // ~1.5s instead of a ~4s cold create. Disable reuse in CI with
-  // TESTCONTAINERS_REUSE_ENABLE=false to force fresh containers + Ryuk cleanup.
-  const patchSha = fileSha256(patchPath);
-  // Reuse is only enabled in the default (no-sidecar) path. The sidecar path
-  // attaches a fresh per-run Network; testcontainers' reuseContainer only
-  // *restarts* a matching stopped container — it does NOT re-connect networks —
-  // so a reused OC container would keep stale attachments from the previous
-  // run's (now-removed) network and could not reach the new sidecar. We force a
-  // fresh create there and autoRemove on stop to avoid stopped-container pile-up.
-  const reuseEnabled =
-    !opts.withSidecar && process.env.TESTCONTAINERS_REUSE_ENABLE !== "false";
+  const pluginSha = dirSha256(path.resolve(TS_DIR, "src/plugins"));
 
   let network: StartedNetwork | undefined;
   let sidecar: StartedTestContainer | undefined;
 
-  const builder = new GenericContainer("node:22-bookworm-slim")
+  // Build the image from our Dockerfile — OC + tsx baked in.
+  // build() returns a GenericContainer we can configure directly.
+  const containerBuilder = await GenericContainer.fromDockerfile(REPO_ROOT, "docker/Dockerfile")
+    .withBuildkit()
+    .withCache(true)
+    .build();
+
+  containerBuilder
     .withWorkingDir("/app")
-    .withCopyFilesToContainer([
-      {
-        source: patchPath,
-        target: "/app/child-admission.ts",
-      },
+    .withLabels({
+      "openclaw.plugins.sha": pluginSha,
+      "oc.version": "2026.6.8",
+    })
+    .withBindMounts([
+      { source: TS_DIR, target: "/app/ts" },
+      { source: OC_SOURCE, target: "/app/oc-source" },
     ])
-    .withLabels({ "openclaw.patch.sha": patchSha })
     .withCommand(["tail", "-f", "/dev/null"]);
 
   if (opts.withSidecar) {
-    // Sidecar path: hermetic, offline upstream. Start the mock OpenRouter on a
-    // shared Docker network, then attach the OC container so an in-container
-    // process can reach http://openrouter-mock:9876/v1 — exactly the baseUrl a
-    // real OC subagent would call. Fresh per run (see reuseEnabled note above).
     network = await new Network().start();
     sidecar = await startOpenRouterSidecar(network);
-    builder
+    containerBuilder
       .withNetwork(network)
       .withNetworkAliases("openclaw")
       .withEnvironment({
@@ -140,67 +142,42 @@ export async function startPatchedOpenClaw(
       })
       .withAutoRemove(true);
   } else {
-    // Reuse path: keep stopped containers so the next run can restart them.
-    // autoRemove defaults to true, which makes stop() *remove* the container —
-    // defeating reuse across runs. Set false so stop() only stops; the stopped
-    // container is then restarted by the next run's withReuse() lookup.
-    builder.withAutoRemove(false);
-    if (reuseEnabled) {
-      // Marks the container reusable: testcontainers looks up an existing (stopped)
-      // container by hash, restarts it, and skips Ryuk tracking so it survives across
-      // test runs. See testcontainers-node generic-container reuseOrStartContainer.
-      builder.withReuse();
+    containerBuilder.withAutoRemove(false);
+    const reuseEnabled = process.env.TESTCONTAINERS_REUSE_ENABLE !== "false";
+    if (reuseEnabled && existingContainerExists(`openclaw.plugins.sha=${pluginSha}`)) {
+      containerBuilder.withReuse();
     }
   }
 
   const t0 = Date.now();
-  const willReuse = reuseEnabled ? existingContainerExists(patchSha) : false;
-  const container = await builder.start();
+  const container = await containerBuilder.start();
   const startedMs = Date.now() - t0;
-  const how = willReuse === undefined ? "started" : willReuse ? "reused" : "created";
   console.log(
-    `[openclaw-container] ${how} container in ${startedMs}ms` +
-      ` (patch sha ${patchSha}, reuse=${reuseEnabled}, sidecar=${!!opts.withSidecar})`,
+    `[container] started in ${startedMs}ms (plugins sha ${pluginSha}, sidecar=${!!opts.withSidecar})`,
   );
 
-  // Helper function to execute checks in the container environment
+  // Execute admission check helper
   const executeAdmissionCheck = async (params: any) => {
     const paramsStr = JSON.stringify(params).replace(/"/g, '\\"');
-    
-    // We execute Node with native --experimental-strip-types to load child-admission.ts
-    // with zero dependencies or node_modules needed!
     const result = await container.exec([
-      "node",
-      "--experimental-strip-types",
-      "-e",
-      `
-      import { resolveChildAdmission } from './child-admission.ts';
-      console.log(JSON.stringify(resolveChildAdmission(JSON.parse("${paramsStr}"))));
-      `
+      "npx", "tsx", "-e",
+      `import { resolveChildAdmission } from './patches/child-admission.ts';
+       console.log(JSON.stringify(resolveChildAdmission(JSON.parse("${paramsStr}"))));`,
     ]);
-
     if (result.exitCode !== 0) {
-      throw new Error(`Failed to execute admission check in container: ${result.stderr}`);
+      throw new Error(`Admission check failed: ${result.stderr}`);
     }
     return JSON.parse(result.stdout.trim());
   };
 
-  // Pre-warm: the first `node --experimental-strip-types` exec in a cold/restarted
-  // container is ~2s (cold page cache + module compile); warm execs are ~1.2s. Running
-  // one throwaway check here moves that penalty out of the first test (which previously
-  // flaked against the 5s default test timeout) and into beforeAll where it's expected.
+  // Pre-warm
   await executeAdmissionCheck({
     callerDepth: 0, maxSpawnDepth: 2, activeChildren: 0, maxActiveChildren: 2,
     globalActive: 0, maxConcurrent: 2, timedOutSubagents: [],
     runTimeoutSeconds: 300, collect: false,
   });
 
-  // Drive an OpenRouter chat-completion call from inside the OC container against
-  // the mock sidecar over the shared Docker network. The request body is base64-
-  // encoded and passed as argv (not string-interpolated) to avoid the quote-
-  // escaping fragility of executeAdmissionCheck's JSON.parse("...") embed — this
-  // is robust to any model string or message content, including the worker-crash
-  // payloads the fault-injection suite exercises.
+  // Model call helper (sidecar mode only)
   const executeModelCall = opts.withSidecar
     ? async (input: {
         model: string;
@@ -225,7 +202,7 @@ export async function startPatchedOpenClaw(
         `;
         const result = await container.exec(["node", "-e", script, b64]);
         if (result.exitCode !== 0) {
-          throw new Error(`Model call failed in container: ${result.stderr}`);
+          throw new Error(`Model call failed: ${result.stderr}`);
         }
         return JSON.parse(result.stdout.trim());
       }
@@ -239,3 +216,8 @@ export async function startPatchedOpenClaw(
     executeModelCall,
   };
 }
+
+// ── Backward compat: re-export old name ──────────────────────────
+
+export { startOpenClaw as startPatchedOpenClaw };
+export type { StartOpenClawOptions as StartPatchedOpenClawOptions };

@@ -1,0 +1,10 @@
+# Docker ignore — keep build context small
+node_modules
+.venv
+__pycache__
+*.pyc
+.git
+ts/node_modules
+ts/dist
+oc-source/upstream/.git
+oc-source/upstream/node_modules

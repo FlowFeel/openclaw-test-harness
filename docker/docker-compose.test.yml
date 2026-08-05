@@ -1,13 +1,21 @@
+# CI Docker Integration — build from Dockerfile, mount code, run tests.
+#
+# One service. One image. No melange.
+
 services:
   oc-test:
-    image: node:22-bookworm-slim
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: oc-admission-test
     working_dir: /app/ts
     volumes:
       - ../ts:/app/ts
-      - /var/run/docker.sock:/var/run/docker.sock
+      - ../oc-source:/app/oc-source
+      - npm-cache:/root/.npm
     environment:
       - NODE_ENV=test
+      - OPENCLAW_HOOK_DEBUG=1
     command: |
       sh -c "
         npm ci --include=dev &&
@@ -20,3 +28,5 @@ services:
       timeout: 3s
       retries: 3
 
+volumes:
+  npm-cache:
