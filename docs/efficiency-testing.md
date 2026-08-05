@@ -123,9 +123,9 @@ These are not aspirations. They are checked by `foundry validate` on every commi
 | H4 | Sub-pool doesn't starve main pool | A1+A2 | Runtime-deterministic | ✅ |
 | H1 | Sync I/O blocks event loop, async doesn't | A1 | Statistical | ✅ (generous bounds) |
 | H2 | JSON.stringify scan costs more than statSync | A1 | Statistical | ✅ |
-| H7 | Dispatch with 0 handlers is < 0.1ms | A5 | Statistical | ✅ (generous bounds) |
+| H7 | Dispatch with 0 handlers is < 0.1ms | A5 | Statistical | ⏳ Not yet implemented |
 
-The deterministic hypotheses (H5, H6) are the strongest — they follow from three axioms (A1, A2, A6) and are perfectly reproducible. The runtime-deterministic hypotheses (H3, H4) follow from two axioms (A1, A2) and are structurally guaranteed. The statistical hypotheses (H1, H2, H7) follow from one axiom (A1 or A5) and need generous bounds.
+The deterministic hypotheses (H5, H6) are the strongest — they follow from three axioms (A1, A2, A6) and are perfectly reproducible. The runtime-deterministic hypotheses (H3, H4) follow from two axioms (A1, A2) and are structurally guaranteed. The statistical hypotheses (H1, H2) follow from one axiom (A1) and need generous bounds. H7 is derived but not yet implemented — it requires the real `createHookRunner` from the E2E infrastructure (OC source patch applied).
 
 ---
 
@@ -150,9 +150,10 @@ tests/efficiency/
 ├── bloat-reduction.spec.ts         ← H5, H6 (A1+A2+A6: deterministic, report-is-proof)
 ├── semaphore-concurrency.spec.ts   ← H3, H4 (A1+A2: runtime-deterministic, structural)
 ├── event-loop-blocking.spec.ts     ← H1     (A1: I/O isolable, sync vs async)
-├── json-stringify-cost.spec.ts     ← H2     (A1: scan is pure, measurable)
-└── dispatch-overhead.spec.ts       ← H7     (A5: real implementation, generous bounds)
+└── json-stringify-cost.spec.ts     ← H2     (A1: scan is pure, measurable)
 ```
+
+H7 (`dispatch-overhead.spec.ts`) is not yet implemented — it needs the real `createHookRunner` from the E2E infrastructure.
 
 ### Test T5+T6: `bloat-reduction.spec.ts` (H5, H6)
 
@@ -180,12 +181,12 @@ tests/efficiency/
 **Derived from:** A1 (I/O is in `*-io.ts`, isolable).
 
 **Structure:**
-- Event loop probe: `setInterval` every 1ms, measure gap.
-- Write 1MB file to temp dir.
-- Read with `readFileSync` — measure max probe gap during read.
-- Read with `readFile` (async) — measure max probe gap.
-- Assert: sync gap > 10ms (blocks), async gap < 5ms (yields).
-- Generous bounds — the claim is directional (A1 lets us isolate; A2 does not apply because this is I/O, not logic).
+- Event loop probe: `setTimeout(0)` sentinel scheduled before the blocking work. During a sync block, the event loop is frozen so the timer can't fire. After the block, the timer fires — the elapsed time reveals the block duration. (`setInterval` can't fire during a sync block — that's the point of a sync block — so the sentinel must be scheduled *before* the work, not polled during it.)
+- Write a ~5MB JSON file to a temp dir.
+- Read with `readFileSync` × 5 — measure sentinel delay (sync blocks).
+- Read with `readFile` (async) × 5 — measure sentinel delay (async yields).
+- Assert: sync delay > 3ms (blocks), async delay < 50ms (yields), sync > async (directional).
+- Generous bounds — the claim is directional (A1 lets us isolate; A2 does not apply because this is I/O, not logic). 5MB × 5 reads accumulates enough blocking for the sentinel to detect; a single 1MB read is too fast on SSDs.
 
 ### Test T2: `json-stringify-cost.spec.ts` (H2)
 
@@ -198,15 +199,17 @@ tests/efficiency/
 - Assert: scan loop > statSync by a measurable margin.
 - This is the regression guard for the fix (replace serialization with statSync).
 
-### Test T7: `dispatch-overhead.spec.ts` (H7)
+### Test T7: `dispatch-overhead.spec.ts` (H7) — not yet implemented
 
 **Derived from:** A5 (real implementation, not mocks), A3 (all 36 hooks are declared and registered — no phantoms).
 
-**Structure:**
+**Structure (planned):**
 - Use real `createHookRunner` from E2E infrastructure (A5).
 - Measure dispatch with 0, 1, 10 handlers.
 - Assert: 0 handlers < 0.1ms, 10 handlers < 10ms.
 - Generous bounds — regression guard, not a performance target.
+
+**Why deferred:** The built dist minifies exports. The E2E patch script adds `globalThis.__createHookRunner = createHookRunner` so tests can call it directly, but this requires the OC source patch to be applied. Lower priority — H7 is a regression guard, not a mechanism proof.
 
 ---
 
