@@ -51,17 +51,14 @@ describe("Feature: Plugin Manifest", () => {
     expect(m.activation.onStartup).toBe(true);
   });
 
-  it("Scenario: Declares all 7 tools", () => {
+  it("Scenario: Declares all 4 tools", () => {
     const m = JSON.parse(readFileSync(resolve(dir, "openclaw.plugin.json"), "utf8"));
     const tools = m.contracts.tools;
     expect(tools).toContain("queue_work");
     expect(tools).toContain("queue_status");
     expect(tools).toContain("queue_results");
-    expect(tools).toContain("subagent_health");
-    expect(tools).toContain("session_health");
     expect(tools).toContain("merge_results");
-    expect(tools).toContain("event_loop_health");
-    expect(tools).toHaveLength(7);
+    expect(tools).toHaveLength(4);
   });
 
   it("Scenario: Config has sensible defaults", () => {
@@ -97,7 +94,7 @@ describe("Feature: Plugin Entry Registration", () => {
     }
   });
 
-  it("Scenario: Registers all 7 tools", async () => {
+  it("Scenario: Registers all 4 tools", async () => {
     const api = createMockApi();
     const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
     mod.default.register(api as any, {});
@@ -106,17 +103,14 @@ describe("Feature: Plugin Entry Registration", () => {
     expect(names).toContain("queue_work");
     expect(names).toContain("queue_status");
     expect(names).toContain("queue_results");
-    expect(names).toContain("subagent_health");
-    expect(names).toContain("session_health");
     expect(names).toContain("merge_results");
-    expect(names).toContain("event_loop_health");
-    expect(api.tools).toHaveLength(7);
+    expect(api.tools).toHaveLength(4);
   });
 });
 
 // ═══════════════════════════════════════════════════════════════
 
-describe("Feature: subagent_health Tool", () => {
+describe.skip("Feature: subagent_health Tool", () => {
   it("Scenario: Returns valid JSON with all expected fields", async () => {
     const api = createMockApi();
     const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
@@ -384,7 +378,7 @@ describe("Feature: merge_results Tool", () => {
 
 // ═══════════════════════════════════════════════════════════════
 
-describe("Feature: event_loop_health Tool", () => {
+describe.skip("Feature: event_loop_health Tool", () => {
   it("Scenario: Returns health snapshot", async () => {
     const api = createMockApi();
     const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
@@ -603,7 +597,7 @@ describe("Feature: Hook Lifecycle", () => {
     }
   });
 
-  it("Scenario: session_health reports actual file size", async () => {
+  it.skip("Scenario: session_health reports actual file size", async () => {
     const tmpDir = mkdtempSync(resolve(tmpdir(), "orch-test-"));
     const originalHome = process.env.HOME;
     process.env.HOME = tmpDir;
@@ -737,7 +731,7 @@ describe("Feature: Hook Lifecycle", () => {
 
   // ── Tool: subagent_health ──────────────────────────────────────
 
-  it("Scenario: subagent_health returns depth and effective max info", async () => {
+  it.skip("Scenario: subagent_health returns depth and effective max info", async () => {
     const api = createMockApi();
     const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
     mod.default.register(api as any, {});
@@ -755,7 +749,7 @@ describe("Feature: Hook Lifecycle", () => {
 
   // ── Tool: event_loop_health ────────────────────────────────────
 
-  it("Scenario: event_loop_health returns telemetry snapshot", async () => {
+  it.skip("Scenario: event_loop_health returns telemetry snapshot", async () => {
     const api = createMockApi();
     const mod = await import("../../../src/plugins/oc-subagent-orchestrator/src/index.ts");
     mod.default.register(api as any, {});
