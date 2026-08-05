@@ -24,10 +24,12 @@ RUN npm install -g openclaw@${OC_VERSION}
 
 # Apply patches if any exist (no-op when none)
 COPY ts/patches/ /patches/
-RUN cd /usr/lib/nodejs22/lib/node_modules/openclaw 2>/dev/null && \
-    for p in /patches/*.patch; do \
-      [ -f "$p" ] && patch -p1 < "$p" || true; \
-    done
+RUN OC_ROOT="$(npm root -g)/openclaw" && \
+    if [ -d "$OC_ROOT" ]; then \
+      for p in /patches/*.patch; do \
+        [ -f "$p" ] && (cd "$OC_ROOT" && patch -p1 < "$p") || true; \
+      done; \
+    fi
 
 WORKDIR /app
 CMD ["sleep", "infinity"]
