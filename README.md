@@ -241,6 +241,69 @@ See [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) for the six axioms and 
 
 ---
 
+## The Hypothetico-Axiomatic Method (at this vertex)
+
+We arrived at this vertex having proven *correctness* — 92.8% coverage, hooks fire via `api.on()`, 11/11 DFT-valid. The question shifts from "does it work?" to "does it work efficiently?" The same axioms that proved correctness generate the efficiency hypotheses. We do not guess what might be slow; we derive testable claims as logical consequences of the axioms we already accept.
+
+### The axioms are preconditions for measurement
+
+The six DFT axioms are not just code-quality rules — they are the *preconditions* that make efficiency measurable. Each axiom enables a specific measurement capability:
+
+| Axiom | Measurement capability it enables |
+|-------|-----------------------------------|
+| **A1** pure-io-separation | The I/O cost is isolable from the logic cost — we can measure one without the other |
+| **A2** determinism | Runtime guarantees are structural (guaranteed by construction), not statistical ("usually fast") |
+| **A3** manifest-conformance | Every declared hook is in the dispatch path — no phantoms to miss |
+| **A4** dft-docs | The testability contract is explicit in the source, not just in tests |
+| **A5** mock-doubles | Efficiency tests measure real behavior, not mock overhead |
+| **A6** check-result | The report returned by the function *is* the proof — we assert the field, not an external observation |
+
+### The derivation chain
+
+```
+Axiom (accepted, CI-checked on every commit)
+  → Proposition (what the axiom enables)
+    → Hypothesis (the testable claim)
+      → Test (the proof)
+        → Fix (restoration, derived from the violated axiom)
+```
+
+### Seven hypotheses derived, by axiomatic strength
+
+| Hypothesis | Derived from | Tier | CI-safe? |
+|-----------|--------------|------|----------|
+| **H5**: Bloat stripping reduces bytes >90% | A1+A2+A6 | Deterministic | ✅ Perfectly reproducible |
+| **H6**: Stale purge removes exactly past-timeout entries | A2+A6 | Deterministic | ✅ |
+| **H3**: Semaphore never exceeds `maxConcurrent` | A1+A2 | Runtime-deterministic | ✅ Structural guarantee |
+| **H4**: Sub-pool doesn't starve main pool | A1+A2 | Runtime-deterministic | ✅ |
+| **H1**: Sync I/O blocks event loop, async doesn't | A1 | Statistical | ✅ (generous bounds) |
+| **H2**: `JSON.stringify` scan costs more than `statSync` | A1 | Statistical | ✅ |
+| **H7**: Dispatch with 0 handlers is <0.1ms | A5 | Statistical | ✅ (generous bounds) |
+
+The deterministic hypotheses (H5, H6) are the strongest — they follow from three axioms. The runtime-deterministic (H3, H4) follow from two. The statistical (H1, H2, H7) follow from one and need generous bounds.
+
+### What the axioms forbid (and therefore what CI cannot claim)
+
+The axioms also define the boundary between CI and production:
+
+- **A2 forbids** `Date.now()` in logic → wall-clock claims (834ms P99) belong in production, not CI. CI proves the *mechanism* (sync blocks, async yields); production proves the *outcome* (834ms → 50ms).
+- **A1 forbids** I/O in logic → we test byte reduction (the mechanism), not disk speed (the environment).
+- **A5 forbids** `vi.fn()` mocks → we measure real behavior, not mock overhead.
+
+The production metrics (834ms P99, 30MB file, 2,575 dead subagents) are *observations* of a specific system under specific load. They are not derivable from the axioms. The axioms give us the mechanisms; production gives us the outcomes. Both are needed, and the axioms tell us which is which.
+
+### Two anti-patterns the axioms expose
+
+The axioms don't just generate hypotheses — they expose violations. Two anti-patterns survive in the codebase despite passing the validator (they don't violate the letter of A1, but they violate its spirit):
+
+1. **Sync I/O on the main event loop** — `sessions-io.ts` uses `readFileSync`/`writeFileSync` in hooks that fire on the main loop. A1 isolates the I/O, which makes the cost measurable (H1). The fix follows from A1: migrate to `fs/promises`, keep the Protocol interface.
+
+2. **`JSON.stringify` in the bloat scan hot path** — `oc-compaction-helper` serializes every bloat field just to count bytes for a threshold check. A1 separates the scan from the I/O, which makes the CPU cost measurable (H2). The fix follows from A1: replace N serializations with one `statSync`.
+
+See [`docs/efficiency-testing.md`](./docs/efficiency-testing.md) for the full derivation, including the propositions, the test structures, and the fix cycles.
+
+---
+
 ## Local Verification
 
 ```bash
@@ -320,6 +383,7 @@ See `docker/README.md` for build/run/debug instructions.
 |----------|-------------|
 | [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) | The foundry: scaffold, validate, test. Six DFT axioms, round-trip proof, pure seams vs thin I/O |
 | [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) | OC source mod test bed: patch 0001, Level 1 + Level 2 E2E, the dual API split (`on()` vs `registerHook()`) |
+| [`docs/efficiency-testing.md`](./docs/efficiency-testing.md) | Efficiency testing: an axiomatic derivation — 7 hypotheses derived from the 6 DFT axioms, 3 testability tiers, the 2 anti-patterns the axioms expose |
 | [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) | oc-topic-worker-pool: semaphore admission control for concurrent Telegram topic sessions |
 | [`docs/SESSION-HANDOFF.md`](./docs/SESSION-HANDOFF.md) | Dense literate snapshot of working state — restores context after compaction |
 | [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) | War story: patching OC's event loop from 834ms P99 to worker threads |
