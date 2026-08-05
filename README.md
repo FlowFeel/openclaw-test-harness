@@ -88,7 +88,9 @@ openclaw-test-harness/
 │   │   │   └── ... (7 more)
 │   │   ├── foundry/              ← Plugin factory: scaffold + validate
 │   │   └── features/             ← Pure state machines + supervisors
-│   ├── tests/                    ← 1,133 tests (spec, integration, e2e, efficiency)
+│   ├── scripts/
+│   │   └── build-plugins.mjs     ← esbuild bundler: 11 plugins → self-contained dist/
+│   ├── tests/                    ← 1,133 tests (spec, integration, e2e, efficiency, bundle)
 │   └── patches/                  ← OC source patches (child-admission)
 ├── oc-source/
 │   ├── upstream/                 ← git submodule: FlowFeel/openclaw
@@ -278,6 +280,58 @@ npx tsx src/foundry/cli.ts test src/plugins/oc-my-plugin
 
 See [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) for the six axioms and validator internals.
 
+---
+
+## Plugin Build & Distribution
+
+Each plugin builds to a **self-contained `dist/index.js`** — a single ES module with all `shared/` logic bundled in, node builtins external. This is the artifact OC installs. No jiti source-transform overhead, no cross-plugin dependencies, no network calls during install.
+
+### Why bundling (and not npm packages or suite install)
+
+10 of 11 plugins import pure logic from `../../shared/*.js`. When OC installs a plugin individually via `openclaw plugins install`, it copies **only the plugin directory** — `shared/` is not included. Three options were evaluated (full analysis in [`docs/ship-review.md`](./docs/ship-review.md)):
+
+| Option | Works for directory install? | Lasts? |
+|--------|-----------------------------|--------|
+| **A: Bundle with esbuild** ✅ | ✅ Self-contained `dist/index.js` | ✅ Standard OC pattern |
+| B: Publish `shared/` as npm package | ❌ OC doesn't run `npm install` for directory installs (`install-package.ts:280`) | ❌ Dead for local install |
+| C: Suite install via `plugins.load.paths` | ⚠️ Dev stopgap only | ❌ Not a distribution model |
+
+**Option A was chosen** because it works for all install methods (directory, archive, `plugins.load.paths`), requires no network dependency or npm publishing, and follows the standard OC plugin pattern (the install error message itself suggests `["./dist/index.js"]`).
+
+### The build
+
+`scripts/build-plugins.mjs` uses esbuild to bundle each plugin's `src/index.ts` + all `shared/` imports into `dist/index.js`. Node builtins (`node:fs`, `node:perf_hooks`, etc.) are external; everything else is inlined and tree-shaken.
+
+```bash
+# Build all 11 plugins (~70ms)
+cd ts && npm run build:plugins
+
+# Each plugin gets a self-contained bundle:
+#   src/plugins/oc-session-guard/dist/index.js   (8KB, shared/ inlined)
+#   src/plugins/oc-subagent-orchestrator/dist/index.js  (40KB, 12 shared/ modules inlined)
+```
+
+### The smoke test
+
+`tests/spec/plugin-bundle.spec.ts` (34 tests) loads each `dist/index.js` and verifies it exports a valid `PluginDefinition` with `id` + `register` matching the manifest. This catches the entire class of packaging bugs (missing `shared/`, broken exports, mismatched ids) that source-only testing misses.
+
+### Installing plugins
+
+```bash
+# Build first (produces dist/index.js in each plugin dir)
+cd ts && npm run build:plugins
+
+# Install any plugin individually — it's self-contained
+openclaw plugins install ./ts/src/plugins/oc-session-guard
+openclaw plugins install ./ts/src/plugins/oc-subagent-watchdog
+openclaw plugins install ./ts/src/plugins/oc-event-loop-monitor
+
+# Or load from source via config (development)
+# In OC config: plugins.load.paths: ["./ts/src/plugins"]
+```
+
+Each plugin's `package.json` declares `openclaw.extensions: ["./dist/index.js"]` and `main: "./dist/index.js"` — both point to the bundled entry point.
+
 ### Design principles (the phosphene axiomatics)
 
 - **Pure logic / I/O separation** — all scheduling, admission, and cleanup logic is pure. I/O is in thin plugin wrappers.
@@ -293,6 +347,9 @@ See [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) for the six axioms and 
 ## Local Verification
 
 ```bash
+# Build all plugins (esbuild bundle, ~70ms)
+cd ts && npm run build:plugins
+
 # TypeScript unit + integration (CI config, no Docker)
 cd ts && npx vitest run --config vitest.config.ci.ts
 
@@ -304,6 +361,9 @@ cd ts && npx vitest run
 
 # Typecheck (what CI runs)
 cd ts && npm run typecheck
+
+# Plugin bundle smoke test (verify each dist/index.js loads + exports)
+cd ts && npx vitest run tests/spec/plugin-bundle.spec.ts
 
 # Foundry: scaffold + validate + test
 cd ts
@@ -372,7 +432,7 @@ See `docker/README.md` for build/run/debug instructions.
 | [`docs/efficiency-testing.md`](./docs/efficiency-testing.md) | Efficiency testing: an axiomatic derivation — 7 hypotheses from the 6 DFT axioms, 3 testability tiers, 2 anti-patterns |
 | [`docs/postmortem-sunday-senddocument-timeout.md`](./docs/postmortem-sunday-senddocument-timeout.md) | Postmortem: Sunday gateway websocket timeout on sendDocument — diagnosis, the document send policy, wiring instructions |
 | [`docs/plugin-gaps.md`](./docs/plugin-gaps.md) | The three gaps: outbound sendMediaGroup batching (Gap 1), configurable timeoutMs policy (Gap 2), subagent progress heartbeats (Gap 3) |
-| [`docs/ship-review.md`](./docs/ship-review.md) | Ship readiness review: crash blockers (B1/B2), high risks (H1), medium risks (M1/M2), ship sequence, verification commands |
+| [`docs/ship-review.md`](./docs/ship-review.md) | Ship readiness review: all five packaging risks (B1/B2/H1/M1/M2) fixed, the Option A/B/C bundling decision, build + smoke test, install instructions |
 | [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) | oc-topic-worker-pool: semaphore admission control for concurrent Telegram topic sessions |
 | [`docs/SESSION-HANDOFF.md`](./docs/SESSION-HANDOFF.md) | Dense literate snapshot of working state — restores context after compaction |
 | [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) | War story: patching OC's event loop from 834ms P99 to worker threads |
