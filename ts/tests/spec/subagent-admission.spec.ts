@@ -10,8 +10,9 @@ import {
   transitionSubagent,
   TRANSITIONS,
 } from "../../src/features/subagent-admission/subagent-admission.machine.js"
-import { resolveAdmission } from "../../src/features/subagent-admission/subagent-admission.logic.js"
+import { resolveAdmission, checkAdmission } from "../../src/features/subagent-admission/subagent-admission.logic.js"
 import type { AdmissionPolicy } from "../../src/features/subagent-admission/subagent-admission.schema.js"
+import { Effect } from "effect"
 
 const testPolicy: AdmissionPolicy = {
   maxSpawnDepth: 1,
@@ -121,6 +122,65 @@ describe("resolveAdmission", () => {
     expect(result.evidence).toHaveProperty("maxSpawnDepth")
     expect(result.evidence).toHaveProperty("maxChildrenPerAgent")
     expect(result.evidence).toHaveProperty("maxConcurrent")
+  })
+})
+
+// ── checkAdmission (Effect-wrapped) tests ──────────────────────
+
+describe("checkAdmission (Effect-wrapped)", () => {
+  function makeStore(overrides: {
+    activeCount?: number
+    childrenCount?: number
+    timedOut?: string[]
+  } = {}) {
+    return {
+      getActiveCount: () => Effect.succeed(overrides.activeCount ?? 0),
+      getChildrenCount: (_parentKey: string) => Effect.succeed(overrides.childrenCount ?? 0),
+      getTimedOutSubagents: (_timeoutSeconds: number) => Effect.succeed(overrides.timedOut ?? []),
+    }
+  }
+
+  it("admits when all limits are within bounds", async () => {
+    const store = makeStore({ activeCount: 0, childrenCount: 0, timedOut: [] })
+    const result = await Effect.runPromise(checkAdmission("parent:1", 0, testPolicy, store))
+    expect(result.ok).toBe(true)
+  })
+
+  it("rejects when global concurrent exceeds max", async () => {
+    const store = makeStore({ activeCount: 2, childrenCount: 0, timedOut: [] })
+    const result = await Effect.runPromise(checkAdmission("parent:1", 0, testPolicy, store))
+    expect(result.ok).toBe(false)
+    expect(result.cap).toBe("subagents.maxConcurrent")
+  })
+
+  it("rejects when children count exceeds max", async () => {
+    const store = makeStore({ activeCount: 0, childrenCount: 2, timedOut: [] })
+    const result = await Effect.runPromise(checkAdmission("parent:1", 0, testPolicy, store))
+    expect(result.ok).toBe(false)
+    expect(result.cap).toBe("subagents.maxChildrenPerAgent")
+  })
+
+  it("rejects when timed-out subagents exist", async () => {
+    const store = makeStore({ activeCount: 0, childrenCount: 0, timedOut: ["sub:stale"] })
+    const result = await Effect.runPromise(checkAdmission("parent:1", 0, testPolicy, store))
+    expect(result.ok).toBe(false)
+    expect(result.reason.toLowerCase()).toContain("timeout")
+  })
+
+  it("rejects when caller depth exceeds max", async () => {
+    const store = makeStore({ activeCount: 0, childrenCount: 0, timedOut: [] })
+    const result = await Effect.runPromise(checkAdmission("parent:1", 1, testPolicy, store))
+    expect(result.ok).toBe(false)
+    expect(result.cap).toBe("subagents.maxSpawnDepth")
+  })
+
+  it("includes evidence with all metrics", async () => {
+    const store = makeStore({ activeCount: 1, childrenCount: 1, timedOut: [] })
+    const result = await Effect.runPromise(checkAdmission("parent:1", 0, testPolicy, store))
+    expect(result.evidence).toHaveProperty("callerDepth")
+    expect(result.evidence).toHaveProperty("activeChildren")
+    expect(result.evidence).toHaveProperty("globalActive")
+    expect(result.evidence).toHaveProperty("maxSpawnDepth")
   })
 })
 
