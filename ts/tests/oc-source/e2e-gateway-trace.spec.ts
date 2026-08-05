@@ -47,10 +47,14 @@ let lifecycleTrace: string;
 // ── Container setup (shared across all test groups) ─────────────────────
 
 async function setupContainer() {
+  // build() returns a GenericContainer we can configure directly
+  // (must await the build, THEN chain withWorkingDir/withCommand).
   const builder = await GenericContainer.fromDockerfile(
       path.resolve(REPO_ROOT),
       "docker/Dockerfile"
-    ).withBuildkit().withCache(true).build()
+    ).withBuildkit().withCache(true).build();
+
+  builder
     .withWorkingDir("/app")
     .withCommand(["tail", "-f", "/dev/null"]);
 

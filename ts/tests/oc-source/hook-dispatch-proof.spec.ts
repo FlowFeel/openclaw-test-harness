@@ -31,7 +31,14 @@ const ADDED_FILES = ["src/plugins/hooks.trace.test.ts"];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createHookRunner: any;
 
-function ensureClean() {
+function isPatched(): boolean {
+  const hooksFile = path.join(OC_ROOT, MODIFIED_FILES[0]);
+  if (!fs.existsSync(hooksFile)) return false;
+  return fs.readFileSync(hooksFile, "utf8").includes("captureTrace");
+}
+
+// Force-clean the OC source tree (only used if applyPatch fails).
+function forceClean() {
   for (const f of MODIFIED_FILES) {
     execSync(`git checkout -- ${f}`, { cwd: OC_ROOT, stdio: "ignore" });
   }
@@ -39,20 +46,27 @@ function ensureClean() {
     const full = path.join(OC_ROOT, f);
     if (fs.existsSync(full)) fs.unlinkSync(full);
   }
+}
+
+function ensureClean() {
+  // No-op if already patched — concurrent test files share the OC source tree.
+  // Only force-clean if we need to apply from a pristine state.
 }
 
 function applyPatch() {
-  execSync(`git apply "${PATCH}"`, { cwd: OC_ROOT });
+  if (isPatched()) return; // already applied by us or a concurrent test file
+  try {
+    execSync(`git apply "${PATCH}"`, { cwd: OC_ROOT });
+  } catch {
+    // Patch failed — might be a corrupt/partial state. Force clean and retry.
+    forceClean();
+    execSync(`git apply "${PATCH}"`, { cwd: OC_ROOT });
+  }
 }
 
 function resetPatch() {
-  for (const f of MODIFIED_FILES) {
-    execSync(`git checkout -- ${f}`, { cwd: OC_ROOT, stdio: "ignore" });
-  }
-  for (const f of ADDED_FILES) {
-    const full = path.join(OC_ROOT, f);
-    if (fs.existsSync(full)) fs.unlinkSync(full);
-  }
+  // No-op — patch is left applied to avoid races. forceClean() is used
+  // only when applyPatch needs to recover from a corrupt state.
 }
 
 // ── Registry helpers ────────────────────────────────────────────────────
@@ -106,7 +120,11 @@ describe("Hook dispatch proof — plugin hooks", () => {
   });
 
   afterAll(() => {
-    resetPatch();
+    // Don't revert the patch here — leaving it applied avoids races between
+    // concurrent test files that share the OC source tree (hook-trace applies
+    // the same patch). The next run's ensureClean() in beforeAll will revert
+    // + reapply if needed. To clean up manually:
+    //   cd oc-source/upstream && git checkout -- .
   });
 
   // ── TURN-LEVEL hooks (fire every conversation turn) ──────────────────
