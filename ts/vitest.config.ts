@@ -59,6 +59,7 @@ export default defineConfig({
         "src/plugins/oc-session-guard/src/**/*",
         "src/plugins/oc-subagent-watchdog/src/**/*",
         "src/plugins/oc-event-loop-monitor/src/**/*",
+        "src/plugins/oc-model-router/src/**/*",
       ],
       reporter: ["text", "json", "html"],
     },
