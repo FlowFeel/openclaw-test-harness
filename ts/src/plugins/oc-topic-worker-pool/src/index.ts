@@ -74,7 +74,7 @@ interface AsyncSemaphore {
   isFull(): boolean;
 }
 
-function createAsyncSemaphore(max: number): AsyncSemaphore {
+export function createAsyncSemaphore(max: number): AsyncSemaphore {
   const state = createSemaphore(max);
   const waiters: AsyncSemaphore["waiters"] = [];
 
