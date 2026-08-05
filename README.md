@@ -372,6 +372,7 @@ See `docker/README.md` for build/run/debug instructions.
 | [`docs/efficiency-testing.md`](./docs/efficiency-testing.md) | Efficiency testing: an axiomatic derivation — 7 hypotheses from the 6 DFT axioms, 3 testability tiers, 2 anti-patterns |
 | [`docs/postmortem-sunday-senddocument-timeout.md`](./docs/postmortem-sunday-senddocument-timeout.md) | Postmortem: Sunday gateway websocket timeout on sendDocument — diagnosis, the document send policy, wiring instructions |
 | [`docs/plugin-gaps.md`](./docs/plugin-gaps.md) | The three gaps: outbound sendMediaGroup batching (Gap 1), configurable timeoutMs policy (Gap 2), subagent progress heartbeats (Gap 3) |
+| [`docs/ship-review.md`](./docs/ship-review.md) | Ship readiness review: crash blockers (B1/B2), high risks (H1), medium risks (M1/M2), ship sequence, verification commands |
 | [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) | oc-topic-worker-pool: semaphore admission control for concurrent Telegram topic sessions |
 | [`docs/SESSION-HANDOFF.md`](./docs/SESSION-HANDOFF.md) | Dense literate snapshot of working state — restores context after compaction |
 | [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) | War story: patching OC's event loop from 834ms P99 to worker threads |

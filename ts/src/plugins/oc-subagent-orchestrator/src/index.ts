@@ -26,7 +26,7 @@
  * - Hook handlers catch errors and log (never block agent runs)
  */
 
-import { definePluginEntry, Type, type PluginApi } from "../../shared/types.ts";
+import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
 import {
   createQueue,
   dispatchNext,
@@ -38,21 +38,21 @@ import {
   computeEffectiveMaxConcurrent,
   type WorkQueueState,
   type TaskSpec,
-} from "../../shared/work-queue-scheduler.ts";
+} from "../../shared/work-queue-scheduler.js";
 import {
   canSpawnAtDepth,
   getDepthDecision,
   getCleanupPolicyForDepth,
   DEFAULT_DEPTH_CONFIG,
   type DepthConfig,
-} from "../../shared/depth-limiter.ts";
+} from "../../shared/depth-limiter.js";
 import {
   getAdmissionDecision,
   classifyHealth,
   type SystemHealthSnapshot,
   type AdmissionThresholds,
   DEFAULT_THRESHOLDS,
-} from "../../shared/adaptive-admission.ts";
+} from "../../shared/adaptive-admission.js";
 import { monitorEventLoopDelay, performance, type EventLoopUtilization } from "node:perf_hooks";
 import { getHeapStatistics } from "node:v8";
 import process from "node:process";
@@ -60,7 +60,7 @@ import {
   mergeResults,
   formatMergedDocument,
   type SubagentResult,
-} from "../../shared/result-merger.ts";
+} from "../../shared/result-merger.js";
 import {
   trackSpawn,
   trackEnd,
@@ -68,7 +68,7 @@ import {
   getActiveCount,
   canSpawn,
   type SubagentMap,
-} from "../../shared/subagent-tracker.ts";
+} from "../../shared/subagent-tracker.js";
 import {
   allocateBudget,
   canSpawnForTopic,
@@ -76,12 +76,12 @@ import {
   computeTopicStats,
   getBottleneckTopic,
   type TopicBudget,
-} from "../../shared/topic-isolation.ts";
+} from "../../shared/topic-isolation.js";
 import {
   insertByPriority,
   shouldPreempt,
   requeuePreempted,
-} from "../../shared/priority-scheduler.ts";
+} from "../../shared/priority-scheduler.js";
 import {
   cacheKey,
   getEntry,
@@ -90,15 +90,15 @@ import {
   getCachedResult,
   mergeAndDedup,
   type CacheStore,
-} from "../../shared/result-cache.ts";
+} from "../../shared/result-cache.js";
 import {
   stripBloatFields,
   purgeStaleSubagents,
   cleanupSessions,
   type SessionsMap,
-} from "../../shared/session-cleanup.ts";
-import { readSessions, writeSessions } from "../../shared/sessions-io.ts";
-import { SUBAGENT_KEY } from "../../shared/regex-library.ts";
+} from "../../shared/session-cleanup.js";
+import { readSessions, writeSessions } from "../../shared/sessions-io.js";
+import { SUBAGENT_KEY } from "../../shared/regex-library.js";
 
 // ── Plugin state (in-memory, per-gateway) ────────────────────
 
