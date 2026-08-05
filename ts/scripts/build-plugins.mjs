@@ -71,10 +71,29 @@ async function buildPlugin(pluginDir) {
   }
 
   console.log(`  bundling ${pluginName}...`);
+
+  // Main entry point: src/index.ts → dist/index.js
+  const entryPoints = [entryPoint];
+  const entryOuts = [join(outDir, "index.js")];
+
+  // Additional entry points for plugins that spawn separate processes/workers.
+  // These get bundled to their own dist/*.js files.
+  const extraEntries = ["sidecar-server.ts", "worker-entry.ts"];
+  for (const extra of extraEntries) {
+    const extraPath = join(pluginDir, "src", extra);
+    if (existsSync(extraPath)) {
+      entryPoints.push(extraPath);
+      const extraOut = extra.replace(/\.ts$/, ".js");
+      entryOuts.push(join(outDir, extraOut));
+      console.log(`    + ${extra} → dist/${extraOut}`);
+    }
+  }
+
   await build({
-    entryPoints: [entryPoint],
+    entryPoints,
     bundle: true,
-    outfile: join(outDir, "index.js"),
+    outdir: outDir,
+    outExtension: { ".js": ".js" },
     platform: "node",
     format: "esm",
     target: "node22",

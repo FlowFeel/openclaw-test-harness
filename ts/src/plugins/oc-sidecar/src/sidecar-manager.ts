@@ -49,10 +49,9 @@ export interface StartSidecarOptions {
 export async function startSidecar(
   opts: StartSidecarOptions
 ): Promise<SidecarHandle> {
-  const sidecarScript = resolve(__dirname, "sidecar-server.ts");
+  const sidecarScript = resolve(__dirname, "sidecar-server.js");
 
   const child = spawn(process.execPath, [
-    "--experimental-strip-types",
     sidecarScript,
     "--port", String(opts.port),
     "--workers", String(opts.workerThreads),

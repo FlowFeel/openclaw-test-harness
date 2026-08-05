@@ -153,7 +153,7 @@ class WorkerPool {
     const count = Math.max(1, Math.min(size, cpus().length - 1));
     for (let i = 0; i < count; i++) {
       try {
-        const w = new Worker(resolve(__dirname, "worker-entry.ts"), {
+        const w = new Worker(resolve(__dirname, "worker-entry.js"), {
           workerData: { id: i },
         });
         w.on("error", () => {
