@@ -1,13 +1,13 @@
 {
   "name": "openclaw-test-harness-ts",
   "version": "0.1.0",
-  "description": "TypeScript test harness for OpenClaw modifications — Effect Schema, XState v5, Vitest, Playwright",
+  "description": "TypeScript test harness for OpenClaw modifications \u2014 Effect Schema, XState v5, Vitest, Playwright",
   "type": "module",
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit -p tsconfig.ci.json",
     "lint": "eslint src/ tests/",
     "gate": "npm run typecheck && npm run lint && npm run test"
   },

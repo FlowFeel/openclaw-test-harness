@@ -81,7 +81,7 @@ describe("Feature: Plugin Entry Registration", () => {
     expect(events).toContain("gateway_start");
     expect(events).toContain("gateway_stop");
     expect(events).toContain("after_compaction");
-    expect(events).toContain("session_end");
+    expect(events).toContain("agent_end");
     expect(events).toContain("subagent_spawned");
     expect(events).toContain("subagent_ended");
     expect(events).toContain("model_call_started");
