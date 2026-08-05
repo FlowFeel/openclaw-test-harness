@@ -384,6 +384,7 @@ See `docker/README.md` for build/run/debug instructions.
 | [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) | The foundry: scaffold, validate, test. Six DFT axioms, round-trip proof, pure seams vs thin I/O |
 | [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) | OC source mod test bed: patch 0001, Level 1 + Level 2 E2E, the dual API split (`on()` vs `registerHook()`) |
 | [`docs/efficiency-testing.md`](./docs/efficiency-testing.md) | Efficiency testing: an axiomatic derivation — 7 hypotheses derived from the 6 DFT axioms, 3 testability tiers, the 2 anti-patterns the axioms expose |
+| [`docs/postmortem-sunday-senddocument-timeout.md`](./docs/postmortem-sunday-senddocument-timeout.md) | Postmortem: Sunday gateway websocket timeout on sendDocument — diagnosis (concurrent load, not file size), the document send policy (`document-send-policy.ts`), wiring instructions for the plugin team |
 | [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) | oc-topic-worker-pool: semaphore admission control for concurrent Telegram topic sessions |
 | [`docs/SESSION-HANDOFF.md`](./docs/SESSION-HANDOFF.md) | Dense literate snapshot of working state — restores context after compaction |
 | [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) | War story: patching OC's event loop from 834ms P99 to worker threads |
