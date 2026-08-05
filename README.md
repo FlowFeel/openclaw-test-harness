@@ -32,7 +32,7 @@ See [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) for the f
 | Metric | Value |
 |--------|-------|
 | Plugins | **11** (all DFT-valid, all use `api.on()`) |
-| CI tests | **1,091** (70 files, `vitest.config.ci.ts`) |
+| CI tests | **1,125** (71 files, `vitest.config.ci.ts`) |
 | Full suite | **1,133** (82 files, includes e2e + oc-source) |
 | Statement coverage | **88.5%** (CI config) |
 | Branch coverage | **79.6%** |
@@ -343,7 +343,7 @@ One image. Volume mounts for code. No multi-stage.
 **CI pipeline (4 layers):**
 
 1. Python Unit — pytest, no Docker
-2. TypeScript Unit — 1,091 vitest tests (CI config), no Docker
+2. TypeScript Unit — 1,125 vitest tests (CI config), no Docker
 3. Docker Integration — builds image, runs tsc + vitest inside container
 4. E2E Integration — testcontainers, runs e2e + oc-source tests
 5. Staging — main branch only
