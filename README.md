@@ -385,6 +385,7 @@ See `docker/README.md` for build/run/debug instructions.
 | [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) | OC source mod test bed: patch 0001, Level 1 + Level 2 E2E, the dual API split (`on()` vs `registerHook()`) |
 | [`docs/efficiency-testing.md`](./docs/efficiency-testing.md) | Efficiency testing: an axiomatic derivation — 7 hypotheses derived from the 6 DFT axioms, 3 testability tiers, the 2 anti-patterns the axioms expose |
 | [`docs/postmortem-sunday-senddocument-timeout.md`](./docs/postmortem-sunday-senddocument-timeout.md) | Postmortem: Sunday gateway websocket timeout on sendDocument — diagnosis (concurrent load, not file size), the document send policy (`document-send-policy.ts`), wiring instructions for the plugin team |
+| [`docs/plugin-gaps.md`](./docs/plugin-gaps.md) | Plugin gaps: the application layer on top of the concurrency foundation — outbound sendMediaGroup batching (Gap 1), configurable timeoutMs policy (Gap 2), subagent progress heartbeats (Gap 3). Pure logic + tests for all three |
 | [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) | oc-topic-worker-pool: semaphore admission control for concurrent Telegram topic sessions |
 | [`docs/SESSION-HANDOFF.md`](./docs/SESSION-HANDOFF.md) | Dense literate snapshot of working state — restores context after compaction |
 | [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) | War story: patching OC's event loop from 834ms P99 to worker threads |
