@@ -27,7 +27,7 @@ The gateway gates dispatch on `hasHooks()`. If the hook isn't visible, it's neve
 | `oc-event-loop-monitor` | 3 | 1 | 13 | Live telemetry (perf_hooks + v8 heap) |
 | `oc-e2e-trace-test` | 1 | 0 | 5 | Test plugin for Level 2 E2E hook trace |
 
-**Totals:** 36 hooks, 19 tools, 1,091 plugin tests.
+**Totals:** 36 hooks, 19 tools. Plugin tests run as part of the 1,091-test CI suite (`vitest.config.ci.ts`).
 
 ## Hook inventory by plugin
 
@@ -125,14 +125,17 @@ Test plugin for Level 2 E2E hook trace verification. Foundry-scaffolded.
 
 ```
 plugins/
-├── shared/                         # Shared pure logic (12 modules, 97% coverage)
+├── shared/                         # Shared pure logic (15 modules, 97%+ coverage)
 │   ├── types.ts                    # PluginApi interface (includes on())
 │   ├── session-cleanup.ts          # stripBloatFields, purgeStaleSubagents
 │   ├── subagent-tracker.ts         # trackSpawn, trackEnd, detectStale
+│   ├── subagent-progress-tracker.ts # recordProgress, detectStuck (Gap 3)
 │   ├── work-queue-scheduler.ts     # createQueue, dispatchNext, recordResult
+│   ├── media-batcher.ts            # batchMediaSends, shouldBatch (Gap 1)
+│   ├── document-send-policy.ts     # planDocumentSend, resolveRetrySchedule (Gap 2)
 │   ├── telemetry-logic.ts          # aggregateSystemHealth
 │   ├── sessions-io.ts              # readSessions, writeSessions (injectable path)
-│   └── ... (6 more)
+│   └── ... (7 more)
 ├── oc-subagent-orchestrator/       # 8 hooks, 7 tools
 ├── oc-topic-worker-pool/           # 6 hooks (semaphore admission)
 ├── oc-sidecar/                     # 2 hooks, 3 tools (worker pool process)
@@ -145,6 +148,18 @@ plugins/
 ├── oc-event-loop-monitor/          # 3 hooks, 1 tool (live telemetry)
 └── oc-e2e-trace-test/              # 1 hook (test plugin)
 ```
+
+## The three gap modules (`shared/`)
+
+Three pure-logic modules address gaps not covered by the concurrency infrastructure. Each is the contract the plugin team wires against — pure logic (DFT A1/A2/A6) with tests, no OC core modifications.
+
+| Module | Tests | Gap | What |
+|--------|-------|-----|------|
+| `media-batcher.ts` | 22 | 1: Outbound sendMediaGroup | Groups N sendDocument calls into sendMediaGroup albums (2–10 per chat). 10 docs → 1 round-trip (90% reduction) |
+| `document-send-policy.ts` | 26 | 2: Configurable timeoutMs | Load-aware timeout (165s for 232KB under 5-subagent load, not 30s) + exponential retry + chunk fallback |
+| `subagent-progress-tracker.ts` | 28 | 3: Subagent progress | Heartbeat tracking: onTrack vs staleHeartbeat vs noHeartbeat-past-grace. `computeProgressRate` detects stalled tasks |
+
+See [`docs/plugin-gaps.md`](../../docs/plugin-gaps.md) for the full gap analysis and wiring instructions.
 
 ## Installation
 

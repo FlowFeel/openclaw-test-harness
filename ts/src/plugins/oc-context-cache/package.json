@@ -4,7 +4,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {
-    "extensions": ["./src/index.ts"],
+    "extensions": ["./dist/index.js"],
     "compat": {
       "pluginApi": ">=2026.6.8",
       "minGatewayVersion": "2026.6.8"

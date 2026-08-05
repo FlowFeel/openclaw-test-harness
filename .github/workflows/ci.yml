@@ -73,6 +73,8 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Build plugin bundles
+        run: npm run build:plugins
       - name: Unit + BDD tests
         run: npx vitest run --config vitest.config.ci.ts --reporter=verbose
       - name: Upload coverage

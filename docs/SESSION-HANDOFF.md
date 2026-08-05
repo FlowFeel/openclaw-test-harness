@@ -37,11 +37,12 @@ All green. Two configs matter: the **CI config** (`vitest.config.ci.ts`, exclude
 
 | Config | Test files | Tests | Duration | Notes |
 |--------|-----------|-------|----------|-------|
-| CI (`vitest.config.ci.ts`) | 67 passed | **1,015 passed** | ~3.5s | What GitHub Actions runs |
+| CI (`vitest.config.ci.ts`) | 70 passed | **1,091 passed** | ~3.5s | What GitHub Actions runs |
 | Full suite (default) | 82 passed | **1,133 passed** | ~90s | Includes e2e + oc-source (Docker) |
-| Efficiency only | 4 passed | **26 passed** | ~0.6s | New this session |
+| Efficiency only | 4 passed | **26 passed** | ~0.6s | 6 hypotheses, 3 tiers |
+| Gap modules only | 3 passed | **76 passed** | ~0.3s | media-batcher + document-send-policy + subagent-progress-tracker |
 
-**Why it changed:** The previous handoff recorded 885 tests. This session added 248 tests across 5 commits: 96 for blind-spot pure logic, 120 for plugin wiring + state machine actors, 7 for orchestrator tools, 26 for efficiency. The CI count is 1,015 (e2e/oc-source excluded); the full count is 1,133.
+**Why it changed:** The previous handoff recorded 885 tests. This session added 316 tests across 7 commits: 96 for blind-spot pure logic, 120 for plugin wiring + state machine actors, 7 for orchestrator tools, 26 for efficiency, 76 for the three gap modules (media-batcher, document-send-policy, subagent-progress-tracker). The CI count is 1,091 (e2e/oc-source excluded); the full count is 1,133.
 
 **Typecheck:** clean (`npm run typecheck` → 0 errors).
 
@@ -55,8 +56,10 @@ Coverage is measured on the CI config with `--coverage`. The `include` glob cove
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| Statements | **88.16%** | Down from 92.8% because the efficiency tests added new files to the denominator but the coverage `include` didn't grow proportionally. The *tested* files are at 97%+; the dip is a config artifact. |
-| Branches | 78.79% | |
+| Statements | **88.74%** | The efficiency + gap tests added files to the denominator. The *tested* files are at 97%+; the shared modules are at 97%+. |
+| Branches | 79.88% | |
+| Functions | 92.38% | |
+| Lines | 89.42% | |
 | Functions | 92.07% | |
 | Lines | 88.8% | |
 

@@ -2,6 +2,9 @@
   "name": "oc-e2e-trace-test",
   "version": "0.1.0",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "./dist/index.js",
+  "openclaw": {
+    "extensions": ["./dist/index.js"]
+  },
   "dependencies": {}
 }
