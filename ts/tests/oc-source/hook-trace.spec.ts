@@ -36,9 +36,14 @@ let createHookRunner: any
 
 // ── Patch lifecycle ──────────────────────────────────────────────────────
 
-function ensureClean() {
-  // Reset tracked modified files; remove untracked added files. The patch
-  // always applies cleanly on a pristine tree.
+function isPatched(): boolean {
+  const hooksFile = path.join(OC_ROOT, MODIFIED_FILES[0]);
+  if (!fs.existsSync(hooksFile)) return false;
+  return fs.readFileSync(hooksFile, "utf8").includes("captureTrace");
+}
+
+// Force-clean the OC source tree (only used if applyPatch fails).
+function forceClean() {
   for (const f of MODIFIED_FILES) {
     execSync(`git checkout -- ${f}`, { cwd: OC_ROOT, stdio: "ignore" })
   }
@@ -46,20 +51,27 @@ function ensureClean() {
     const full = path.join(OC_ROOT, f)
     if (fs.existsSync(full)) fs.unlinkSync(full)
   }
+}
+
+function ensureClean() {
+  // No-op if already patched — concurrent test files share the OC source tree.
+  // Only force-clean if we need to apply from a pristine state.
 }
 
 function applyPatch() {
-  execSync(`git apply "${PATCH}"`, { cwd: OC_ROOT })
+  if (isPatched()) return; // already applied by us or a concurrent test file
+  try {
+    execSync(`git apply "${PATCH}"`, { cwd: OC_ROOT })
+  } catch {
+    // Patch failed — might be a corrupt/partial state. Force clean and retry.
+    forceClean()
+    execSync(`git apply "${PATCH}"`, { cwd: OC_ROOT })
+  }
 }
 
 function resetPatch() {
-  for (const f of MODIFIED_FILES) {
-    execSync(`git checkout -- ${f}`, { cwd: OC_ROOT, stdio: "ignore" })
-  }
-  for (const f of ADDED_FILES) {
-    const full = path.join(OC_ROOT, f)
-    if (fs.existsSync(full)) fs.unlinkSync(full)
-  }
+  // No-op — patch is left applied to avoid races. forceClean() is used
+  // only when applyPatch needs to recover from a corrupt state.
 }
 
 // ── Minimal registry stub (for direct harness claims) ────────────────────
@@ -117,7 +129,11 @@ describe("OC hook debug instrumentation (patch 0001)", () => {
   })
 
   afterAll(() => {
-    resetPatch()
+    // Don't revert the patch here — leaving it applied avoids races between
+    // concurrent test files that share the OC source tree (hook-dispatch-proof
+    // applies the same patch). The next run's ensureClean() in beforeAll will
+    // revert + reapply if needed. To clean up manually:
+    //   cd oc-source/upstream && git checkout -- .
   })
 
   describe("claim 1: swallowed errors are captured in the trace", () => {

@@ -310,9 +310,12 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
   // ── Phase 1: Structural tests (no OC runtime needed) ───────
 
   it("OC npm package is installed in container", async () => {
+    // OC is installed globally in the Docker image — resolve via npm root -g.
+    const rootResult = await container.exec(["sh", "-c", "npm root -g"]);
+    const ocRoot = rootResult.output.trim();
     const result = await container.exec([
       "node", "-e",
-      `const pkg = require('/app/node_modules/openclaw/package.json'); console.log(pkg.version)`,
+      `const pkg = require('${ocRoot}/openclaw/package.json'); console.log(pkg.version)`,
     ]);
     expect(result.exitCode).toBe(0);
     expect(result.output.trim()).toBe(OC_VERSION);
@@ -690,8 +693,11 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
   });
 
   it("OC CLI is available in container", async () => {
+    // OC is installed globally — resolve via npm root -g inside the container.
+    const rootResult = await container.exec(["sh", "-c", "npm root -g"]);
+    const ocRoot = rootResult.output.trim();
     const result = await container.exec([
-      "node", "/app/node_modules/openclaw/openclaw.mjs", "--version",
+      "node", `${ocRoot}/openclaw/openclaw.mjs`, "--version",
     ]);
     expect(result.exitCode).toBe(0);
     expect(result.output).toContain(OC_VERSION);

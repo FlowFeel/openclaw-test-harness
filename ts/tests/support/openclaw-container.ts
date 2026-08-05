@@ -161,7 +161,7 @@ export async function startOpenClaw(
     const paramsStr = JSON.stringify(params).replace(/"/g, '\\"');
     const result = await container.exec([
       "npx", "tsx", "-e",
-      `import { resolveChildAdmission } from './patches/child-admission.ts';
+      `import { resolveChildAdmission } from './ts/patches/child-admission.ts';
        console.log(JSON.stringify(resolveChildAdmission(JSON.parse("${paramsStr}"))));`,
     ]);
     if (result.exitCode !== 0) {
