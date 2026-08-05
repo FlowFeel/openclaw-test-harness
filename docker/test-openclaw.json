@@ -31,5 +31,8 @@
         }
       }
     }
+  },
+  "plugins": {
+    "allow": ["oc-compaction-helper", "oc-subagent-orchestrator", "oc-context-cache", "oc-stream-relay", "oc-sidecar", "oc-session-guard", "oc-subagent-watchdog", "oc-event-loop-monitor"]
   }
 }

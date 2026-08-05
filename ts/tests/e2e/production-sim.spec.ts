@@ -275,7 +275,12 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
 
     network = await new Network().start();
 
-    container = await new GenericContainer("node:22-bookworm-slim")
+    const ocImage = await GenericContainer.fromDockerfile(
+      path.resolve(TS_DIR, ".."),
+      "docker/Dockerfile"
+    ).withBuildkit().withCache(true).build();
+
+    container = await ocImage
       .withNetwork(network)
       .withNetworkAliases("openclaw")
       .withWorkingDir("/app")
@@ -289,19 +294,8 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
       console.log("[prod-sim] Container setup failed:", String(e));
       throw e;
     }
-    // Install OC
-    console.log("[prod-sim] Installing openclaw...");
-    const installResult = await container.exec([
-      "npm", "install", "--prefix", "/app", `openclaw@${OC_VERSION}`,
-    ]);
-    expect(installResult.exitCode).toBe(0);
-    console.log("[prod-sim] openclaw installed");
-    // Install tsx for proper TypeScript ESM resolution (.js→.ts)
-    const tsxResult = await container.exec([
-      "npm", "install", "--prefix", "/app", "tsx",
-    ]);
-    expect(tsxResult.exitCode).toBe(0);
-    console.log("[prod-sim] tsx installed");
+    // OC + tsx already baked into the image — no npm install needed
+    console.log("[prod-sim] OC + tsx already in image");
   }, 300000);
 
   afterAll(async () => {
