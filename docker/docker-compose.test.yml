@@ -12,7 +12,7 @@ services:
       sh -c "
         npm ci --include=dev &&
         npx tsc --noEmit -p tsconfig.ci.json &&
-        npx vitest run --reporter=verbose --exclude "tests/oc-source/**"
+        npx vitest run --config vitest.config.docker.ts --reporter=verbose
       "
     healthcheck:
       test: ["CMD", "node", "-e", "process.exit(0)"]
