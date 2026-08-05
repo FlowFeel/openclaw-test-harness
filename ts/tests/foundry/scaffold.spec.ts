@@ -115,8 +115,8 @@ describe("scaffoldPlugin file generation", () => {
       tools: ["health", "cleanup"],
     });
     const index = files.get("src/index.ts")!;
-    expect(index).toContain('registerHook("session_end"');
-    expect(index).toContain('registerHook("after_compaction"');
+    expect(index).toContain('api.on("session_end"');
+    expect(index).toContain('api.on("after_compaction"');
     expect(index).toContain('name: "health"');
     expect(index).toContain('name: "cleanup"');
     expect(index).not.toContain('import { readFileSync }'); // no direct node:fs

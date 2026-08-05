@@ -46,13 +46,15 @@ describe("oc-compaction-helper hook registration", () => {
     expect(source).toContain('"after_compaction"');
   });
 
-  it("names hooks with compaction-helper prefix", () => {
+  it("registers hooks via api.on (typed lifecycle hooks)", () => {
     const source = readFileSync(resolve(dir, "src/index.ts"), "utf8");
 
-    expect(source).toContain("compaction-helper-before-prompt-build");
-    expect(source).toContain("compaction-helper-agent-end");
-    expect(source).toContain("compaction-helper-before-compaction");
-    expect(source).toContain("compaction-helper-after-compaction");
+    expect(source).toContain('api.on(');
+    expect(source).toContain('"before_prompt_build"');
+    expect(source).toContain('"agent_end"');
+    expect(source).toContain('"before_compaction"');
+    expect(source).toContain('"after_compaction"');
+    expect(source).not.toContain('api.registerHook(');
   });
 
   it("does NOT register before_agent_reply (wrong hook for this plugin)", () => {
@@ -125,7 +127,7 @@ describe("oc-compaction-helper source structure", () => {
   it("catches errors in all hooks (never blocks agent runs)", () => {
     const source = readFileSync(resolve(dir, "src/index.ts"), "utf8");
     // Every hook should have a try/catch
-    const hookBlocks = source.match(/registerHook\(/g) ?? [];
+    const hookBlocks = source.match(/api\.on\(/g) ?? [];
     const catchBlocks = source.match(/catch \(err\)/g) ?? [];
     expect(hookBlocks.length).toBe(4); // 4 hooks
     expect(catchBlocks.length).toBeGreaterThanOrEqual(4); // at least 4 catch blocks

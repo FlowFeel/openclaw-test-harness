@@ -8,6 +8,11 @@
  *
  * Pure logic functions (computeP99, computeErrorRate, shouldFallback,
  * getFastestModel) are exported for testing.
+ *
+ * @dft
+ * - Pure logic functions (computeP99, computeErrorRate, shouldFallback, getFastestModel) are exported for testing.
+ * - In-memory state tracking is the only I/O — no file or network access.
+ * - Hook handlers are thin: record timing → aggregate → expose via tool.
  */
 
 import { definePluginEntry, Type, type PluginApi, type HookEvent } from "../../shared/types.js";
@@ -147,7 +152,7 @@ export default definePluginEntry({
     }
 
     // ── Hook: model_call_started — track start time ───────────
-    api.registerHook("model_call_started", async (event: HookEvent) => {
+    api.on("model_call_started", async (event: HookEvent) => {
       try {
         const modelId = (event?.modelId as string) ?? "";
         if (!modelId) return;
@@ -157,10 +162,10 @@ export default definePluginEntry({
       } catch {
         // Non-fatal
       }
-    }, { name: "model-router-call-started" });
+    });
 
     // ── Hook: model_call_ended — record latency and errors ────
-    api.registerHook("model_call_ended", async (event: HookEvent) => {
+    api.on("model_call_ended", async (event: HookEvent) => {
       try {
         const modelId = (event?.modelId as string) ?? "";
         if (!modelId) return;
@@ -179,7 +184,7 @@ export default definePluginEntry({
       } catch {
         // Non-fatal
       }
-    }, { name: "model-router-call-ended" });
+    });
 
     // ── Tool: model_health ────────────────────────────────────
     api.registerTool({

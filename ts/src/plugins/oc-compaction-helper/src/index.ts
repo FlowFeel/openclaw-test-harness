@@ -85,7 +85,7 @@ export default definePluginEntry({
     // Fires on every turn, before OC assembles the model prompt.
     // This is the optimal position: strip bloat BEFORE it gets injected
     // into model context, saving tokens per turn.
-    api.registerHook(
+    api.on(
       "before_prompt_build",
       async () => {
         try {
@@ -139,12 +139,11 @@ export default definePluginEntry({
             `[oc-compaction-helper] before_prompt_build cleanup failed: ${String(err)}`
           );
         }
-      },
-      { name: "compaction-helper-before-prompt-build" }
+      }
     );
 
     // ── Hook: before_compaction — warn on large transcripts ──
-    api.registerHook(
+    api.on(
       "before_compaction",
       async () => {
         try {
@@ -168,8 +167,7 @@ export default definePluginEntry({
             `[oc-compaction-helper] before_compaction failed: ${String(err)}`
           );
         }
-      },
-      { name: "compaction-helper-before-compaction" }
+      }
     );
 
     // ── Hook: agent_end — strip bloat fields after turn completes ──
@@ -177,7 +175,7 @@ export default definePluginEntry({
     // cleanup: strip bloat that OC re-injected during the turn, so the
     // file is clean for the next turn. Uses the same throttle as
     // before_prompt_build to avoid redundant writes.
-    api.registerHook(
+    api.on(
       "agent_end",
       async () => {
         try {
@@ -224,14 +222,13 @@ export default definePluginEntry({
             `[oc-compaction-helper] agent_end cleanup failed: ${String(err)}`
           );
         }
-      },
-      { name: "compaction-helper-agent-end" }
+      }
     );
 
     // ── Hook: after_compaction — strip bloat fields ──────────
     // Fires after compaction completes. This is a deep cleanup that
     // also purges stale subagent entries.
-    api.registerHook(
+    api.on(
       "after_compaction",
       async () => {
         try {
@@ -254,8 +251,7 @@ export default definePluginEntry({
             `[oc-compaction-helper] after_compaction failed: ${String(err)}`
           );
         }
-      },
-      { name: "compaction-helper-after-compaction" }
+      }
     );
 
     // ── Tool: compact_check ──────────────────────────────────

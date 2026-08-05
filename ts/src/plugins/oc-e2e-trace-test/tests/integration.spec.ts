@@ -14,6 +14,9 @@ describe("oc-e2e-trace-test plugin wiring", () => {
     const hooks: string[] = [];
     const tools: string[] = [];
     const api = {
+      on: (events: string, _handler: unknown) => {
+        hooks.push(events);
+      },
       registerHook: (events: string | string[], _handler: unknown) => {
         if (typeof events === "string") hooks.push(events);
         else hooks.push(...events);

@@ -672,8 +672,8 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
               '/app/workspace/plugins/' + p.name + '/src/index.ts',
               'utf8'
             );
-            // Count registerHook calls (approximate hook registration count)
-            const hookMatches = src.match(/api\\.registerHook\\(/g);
+            // Count api.on calls (typed hook registration)
+            const hookMatches = src.match(/api\\.on\\(/g);
             const hookCount = hookMatches ? hookMatches.length : 0;
             results.push({ plugin: p.name, hooks: hookCount, expected: p.expected });
             total += hookCount;

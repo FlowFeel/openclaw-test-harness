@@ -270,12 +270,12 @@ export default definePluginEntry({
     const collector = new TelemetryCollector();
 
     // ── Hook: gateway_start — initialize ─────────────────────
-    api.registerHook("gateway_start", async () => {
+    api.on("gateway_start", async () => {
       api.logger?.info?.("[orchestrator] Initialized — managing subagents");
-    }, { name: "orchestrator-gateway-start" });
+    });
 
     // ── Hook: gateway_stop — cleanup ──────────────────────────
-    api.registerHook("gateway_stop", async () => {
+    api.on("gateway_stop", async () => {
       state.queue = null;
       state.subagents.clear();
       state.sessionToTaskMap.clear();
@@ -284,10 +284,10 @@ export default definePluginEntry({
       state.cache.clear();
       collector.destroy();
       api.logger?.info?.("[orchestrator] Shut down");
-    }, { name: "orchestrator-gateway-stop" });
+    });
 
     // ── Hook: after_compaction — read, clean, write ─────────
-    api.registerHook("after_compaction", async () => {
+    api.on("after_compaction", async () => {
       try {
         const sessions = readSessions();
         if (sessions) {
@@ -307,13 +307,13 @@ export default definePluginEntry({
       } catch (err) {
         api.logger?.error?.(`[orchestrator] after_compaction failed: ${String(err)}`);
       }
-    }, { name: "orchestrator-after-compaction" });
+    });
 
     // ── Hook: agent_end — purge stale subagents (every turn) ──
     // Fires when the conversation turn completes. This is the right
     // frequency for stale detection — session_end only fires when a
     // session closes, which is too rare for active topics.
-    api.registerHook("agent_end", async () => {
+    api.on("agent_end", async () => {
       try {
         // In-memory stale detection
         const { result } = detectStale(state.subagents, cfg.runTimeoutSeconds, Date.now());
@@ -340,10 +340,10 @@ export default definePluginEntry({
       } catch (err) {
         api.logger?.error?.(`[orchestrator] agent_end cleanup failed: ${String(err)}`);
       }
-    }, { name: "orchestrator-agent-end" });
+    });
 
     // ── Hook: subagent_spawned — track + link to task ID ──────
-    api.registerHook("subagent_spawned", async (event: { sessionKey?: string; resolvedModel?: string }) => {
+    api.on("subagent_spawned", async (event: { sessionKey?: string; resolvedModel?: string }) => {
       if (!event.sessionKey) return;
 
       // Link this spawned session to the next pending task ID (FIFO order)
@@ -363,10 +363,10 @@ export default definePluginEntry({
         `[orchestrator] Tracked spawn: ${event.sessionKey}${linkInfo} ` +
         `(active: ${getActiveCount(state.subagents)}/${cfg.maxConcurrent})`
       );
-    }, { name: "orchestrator-subagent-spawned" });
+    });
 
     // ── Hook: subagent_ended — record + dispatch next ─────────
-    api.registerHook("subagent_ended", async (event: { sessionKey?: string }) => {
+    api.on("subagent_ended", async (event: { sessionKey?: string }) => {
       if (!event.sessionKey) return;
       state.subagents = trackEnd(state.subagents, event.sessionKey, Date.now());
 
@@ -396,10 +396,10 @@ export default definePluginEntry({
           );
         }
       }
-    }, { name: "orchestrator-subagent-ended" });
+    });
 
     // ── Hook: model_call_started/ended — telemetry ───────────
-    api.registerHook("model_call_started", async () => {
+    api.on("model_call_started", async () => {
       try {
         state.healthSnapshot = collector.collect("main");
         api.logger?.info?.(
@@ -412,15 +412,15 @@ export default definePluginEntry({
       } catch (err) {
         api.logger?.error?.(`[orchestrator] model_call_started telemetry failed: ${String(err)}`);
       }
-    }, { name: "orchestrator-model-call-started" });
+    });
 
-    api.registerHook("model_call_ended", async () => {
+    api.on("model_call_ended", async () => {
       try {
         state.healthSnapshot = collector.collect("main");
       } catch (err) {
         api.logger?.error?.(`[orchestrator] model_call_ended telemetry failed: ${String(err)}`);
       }
-    }, { name: "orchestrator-model-call-ended" });
+    });
 
     // ═══════════════════════════════════════════════════════════
     // Tools

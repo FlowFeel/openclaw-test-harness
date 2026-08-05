@@ -171,7 +171,7 @@ export default definePluginEntry({
     const maxEntries = cfg.maxEntries ?? 100;
 
     // ── Hook: before_prompt_build — inject cached context ─────
-    api.registerHook("before_prompt_build", async () => {
+    api.on("before_prompt_build", async () => {
       try {
         const expired = invalidateExpired(cache, Date.now(), ttlMs);
         if (expired > 0) {
@@ -185,10 +185,10 @@ export default definePluginEntry({
           `[oc-context-cache] before_prompt_build failed: ${String(err)}`
         );
       }
-    }, { name: "context-cache-before-prompt" });
+    });
 
     // ── Hook: gateway_start — initialize cache ────────────────
-    api.registerHook("gateway_start", async () => {
+    api.on("gateway_start", async () => {
       try {
         invalidateExpired(cache, Date.now(), ttlMs);
         api.logger?.info?.(
@@ -199,10 +199,10 @@ export default definePluginEntry({
           `[oc-context-cache] gateway_start failed: ${String(err)}`
         );
       }
-    }, { name: "context-cache-gateway-start" });
+    });
 
     // ── Hook: gateway_stop — clear cache ──────────────────────
-    api.registerHook("gateway_stop", async () => {
+    api.on("gateway_stop", async () => {
       try {
         const size = cache.size;
         cache.clear();
@@ -214,7 +214,7 @@ export default definePluginEntry({
           `[oc-context-cache] gateway_stop failed: ${String(err)}`
         );
       }
-    }, { name: "context-cache-gateway-stop" });
+    });
 
     // ── Tool: context_cache_stats ─────────────────────────────
     api.registerTool({

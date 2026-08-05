@@ -146,7 +146,7 @@ export default definePluginEntry({
 
     // ── Hook: before_dispatch ────────────────────────────────────────
     // Routes by topic, short-circuits duplicates, assigns pool.
-    api.registerHook(
+    api.on(
       "before_dispatch",
       async (event) => {
         try {
@@ -204,13 +204,12 @@ export default definePluginEntry({
             `[oc-topic-worker-pool] before_dispatch failed: ${String(err)}`,
           );
         }
-      },
-      { name: "oc-topic-worker-pool-before-dispatch" },
+      }
     );
 
     // ── Hook: before_agent_run ───────────────────────────────────────
     // Admission gate — acquires a main pool slot. The await IS the queue.
-    api.registerHook(
+    api.on(
       "before_agent_run",
       async (event) => {
         try {
@@ -236,13 +235,12 @@ export default definePluginEntry({
           // On error, don't block the agent — let it proceed.
           return { outcome: "pass" };
         }
-      },
-      { name: "oc-topic-worker-pool-before-agent-run" },
+      }
     );
 
     // ── Hook: agent_end ──────────────────────────────────────────────
     // Releases the main pool slot.
-    api.registerHook(
+    api.on(
       "agent_end",
       async (event) => {
         try {
@@ -261,13 +259,12 @@ export default definePluginEntry({
             `[oc-topic-worker-pool] agent_end failed: ${String(err)}`,
           );
         }
-      },
-      { name: "oc-topic-worker-pool-agent-end" },
+      }
     );
 
     // ── Hook: subagent_spawning ──────────────────────────────────────
     // Acquires a sub-pool slot for the subagent.
-    api.registerHook(
+    api.on(
       "subagent_spawning",
       async (event) => {
         try {
@@ -289,13 +286,12 @@ export default definePluginEntry({
             `[oc-topic-worker-pool] subagent_spawning failed: ${String(err)}`,
           );
         }
-      },
-      { name: "oc-topic-worker-pool-subagent-spawning" },
+      }
     );
 
     // ── Hook: subagent_ended ─────────────────────────────────────────
     // Releases the sub-pool slot.
-    api.registerHook(
+    api.on(
       "subagent_ended",
       async (event) => {
         try {
@@ -314,13 +310,12 @@ export default definePluginEntry({
             `[oc-topic-worker-pool] subagent_ended failed: ${String(err)}`,
           );
         }
-      },
-      { name: "oc-topic-worker-pool-subagent-ended" },
+      }
     );
 
     // ── Hook: before_agent_reply ─────────────────────────────────────
     // Egress — can be used for rate-limiting replies per topic.
-    api.registerHook(
+    api.on(
       "before_agent_reply",
       async (event) => {
         try {
@@ -335,8 +330,7 @@ export default definePluginEntry({
             `[oc-topic-worker-pool] before_agent_reply failed: ${String(err)}`,
           );
         }
-      },
-      { name: "oc-topic-worker-pool-before-agent-reply" },
+      }
     );
 
     // Expose pool stats for health checks (via a tool if needed).

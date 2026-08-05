@@ -61,6 +61,9 @@ describe("oc-context-cache plugin", () => {
         info: () => {},
         error: () => {},
       },
+      on: (events: string, _handler: Function, opts?: { name?: string }) => {
+        registeredHooks.push({ event: events, name: opts?.name ?? "" });
+      },
       registerHook: (
         events: string | string[],
         _handler: Function,
@@ -81,25 +84,20 @@ describe("oc-context-cache plugin", () => {
     // Should have 3 hooks
     expect(registeredHooks).toHaveLength(3);
 
-    // Find hooks by name
+    // Find hooks by event name (api.on uses hook name directly, no opts.name)
     const beforePrompt = registeredHooks.find(
-      (h) => h.name === "context-cache-before-prompt",
+      (h) => h.event === "before_prompt_build",
     );
     const gatewayStart = registeredHooks.find(
-      (h) => h.name === "context-cache-gateway-start",
+      (h) => h.event === "gateway_start",
     );
     const gatewayStop = registeredHooks.find(
-      (h) => h.name === "context-cache-gateway-stop",
+      (h) => h.event === "gateway_stop",
     );
 
     expect(beforePrompt).toBeDefined();
-    expect(beforePrompt!.event).toBe("before_prompt_build");
-
     expect(gatewayStart).toBeDefined();
-    expect(gatewayStart!.event).toBe("gateway_start");
-
     expect(gatewayStop).toBeDefined();
-    expect(gatewayStop!.event).toBe("gateway_stop");
   });
 
   it("registers 1 tool (context_cache_stats)", async () => {
@@ -110,6 +108,7 @@ describe("oc-context-cache plugin", () => {
         info: () => {},
         error: () => {},
       },
+      on: () => {},
       registerHook: () => {},
       registerTool: (tool: { name: string }) => {
         registeredTools.push(tool);
@@ -134,6 +133,7 @@ describe("oc-context-cache plugin", () => {
         info: () => {},
         error: () => {},
       },
+      on: () => {},
       registerHook: () => {},
       registerTool: (tool: { name: string; execute: Function }) => {
         registeredTool = tool;

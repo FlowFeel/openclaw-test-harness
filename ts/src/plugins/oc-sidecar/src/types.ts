@@ -52,6 +52,20 @@ export interface PluginApi {
     error?: (msg: string) => void;
     warn?: (msg: string) => void;
   };
+  /**
+   * Register a TYPED lifecycle hook (gateway_start, session_end, etc.).
+   * This is the correct API for lifecycle hooks — it registers to
+   * typedHooks which is visible to hasHooks()/getHooksForName() and
+   * actually dispatches. The handler receives (event, ctx).
+   */
+  on: (
+    hookName: string,
+    handler: (event: HookEvent, ctx?: HookContext) => Promise<void>,
+    opts?: { priority?: number; timeoutMs?: number; registrationId?: string }
+  ) => void;
+  /**
+   * Legacy hook registration — use api.on() for lifecycle hooks.
+   */
   registerHook: (
     events: string | string[],
     handler: (event: HookEvent) => Promise<void>,

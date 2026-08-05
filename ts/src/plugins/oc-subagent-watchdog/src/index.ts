@@ -5,6 +5,11 @@
  * Hooks into subagent_spawned and subagent_ended to track lifecycle.
  * Registers a subagent_health tool that reports active count, stale
  * detection, and spawn availability.
+ *
+ * @dft
+ * - Lifecycle tracking logic (trackSpawn, trackEnd, detectStale, getActiveCount) is pure — exported from shared/subagent-lifecycle.ts.
+ * - Hook handlers are thin: track event → query state → expose via tool.
+ * - No file I/O — all state is in-memory.
  */
 
 import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
@@ -36,7 +41,7 @@ export default definePluginEntry({
     let subagents: SubagentMap = new Map();
 
     // ── Hook: subagent_spawned ───────────────────────────────
-    api.registerHook("subagent_spawned", async (event: {
+    api.on("subagent_spawned", async (event: {
       sessionKey?: string;
       resolvedModel?: string;
       resolvedProvider?: string;
@@ -52,17 +57,17 @@ export default definePluginEntry({
         `[oc-watchdog] Tracked spawn: ${event.sessionKey} ` +
         `(active: ${getActiveCount(subagents)}/${maxConcurrent})`
       );
-    }, { name: "oc-watchdog-subagent-spawned" });
+    });
 
     // ── Hook: subagent_ended ─────────────────────────────────
-    api.registerHook("subagent_ended", async (event: { sessionKey?: string }) => {
+    api.on("subagent_ended", async (event: { sessionKey?: string }) => {
       if (!event.sessionKey) return;
       subagents = trackEnd(subagents, event.sessionKey, Date.now());
       api.logger?.info?.(
         `[oc-watchdog] Tracked end: ${event.sessionKey} ` +
         `(active: ${getActiveCount(subagents)}/${maxConcurrent})`
       );
-    }, { name: "oc-watchdog-subagent-ended" });
+    });
 
     // ── Tool: subagent_health ───────────────────────────────
     api.registerTool({

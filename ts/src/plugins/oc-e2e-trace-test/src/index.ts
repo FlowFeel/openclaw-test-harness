@@ -31,14 +31,14 @@ export default definePluginEntry({
     const cfg = (config as OcE2eTraceTestConfig) ?? {};
 
     // ── Hook: gateway_start ──────────────────────────────────────────
-    api.registerHook("gateway_start", async (event) => {
+    api.on("gateway_start", async (event) => {
       try {
         // TODO: read state via reader, call pure logic, write via writer.
         api.logger?.info?.("[oc-e2e-trace-test] gateway start hook fired");
       } catch (err) {
         api.logger?.error?.("[oc-e2e-trace-test] gateway_start failed: " + String(err));
       }
-    }, { name: "oc-e2e-trace-test-gateway_start" });
+    });
 
   },
 });

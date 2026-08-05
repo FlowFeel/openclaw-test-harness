@@ -53,7 +53,7 @@ export default definePluginEntry({
 
     // ── Gateway lifecycle: start/stop the sidecar ───────────────
 
-    api.registerHook("gateway_start", async () => {
+    api.on("gateway_start", async () => {
       try {
         sidecar = await startSidecar({
           port: sidecarPort,
@@ -65,16 +65,16 @@ export default definePluginEntry({
       } catch (err) {
         api.logger?.error?.(`[oc-sidecar] Failed to start sidecar: ${String(err)}`);
       }
-    }, { name: "oc-sidecar-gateway-start" });
+    });
 
-    api.registerHook("gateway_stop", async () => {
+    api.on("gateway_stop", async () => {
       if (sidecar) {
         await stopSidecar(sidecar);
         sidecar = null;
         client = null;
         api.logger?.info?.("[oc-sidecar] Sidecar stopped");
       }
-    }, { name: "oc-sidecar-gateway-stop" });
+    });
 
     // ── Tool: sidecar_health ─────────────────────────────────────
 

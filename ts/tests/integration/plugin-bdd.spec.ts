@@ -57,6 +57,9 @@ function createMockApi() {
       error: (msg: string) => logs.push(`[error] ${msg}`),
       warn: (msg: string) => logs.push(`[warn] ${msg}`),
     },
+    on: (event: string, handler: (event: Record<string, unknown>) => Promise<void>) => {
+      hooks.push({ event, handler });
+    },
     registerHook: (events: string | string[], handler: (event: Record<string, unknown>) => Promise<void>) => {
       const eventList = Array.isArray(events) ? events : [events];
       for (const event of eventList) hooks.push({ event, handler });

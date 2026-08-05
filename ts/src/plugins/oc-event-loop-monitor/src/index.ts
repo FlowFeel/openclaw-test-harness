@@ -8,6 +8,11 @@
  *
  * The aggregation logic is pure (shared/telemetry-logic.ts).
  * The collection (I/O) is here.
+ *
+ * @dft
+ * - Aggregation logic is pure (shared/telemetry-logic.ts) — testable without perf_hooks.
+ * - Collection is I/O (perf_hooks) — separated from logic seam.
+ * - Hook handlers are thin: collect → aggregate → expose via tool.
  */
 
 import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
@@ -88,27 +93,27 @@ export default definePluginEntry({
     const collector = new TelemetryCollector();
 
     // ── Hook: model_call_started — collect telemetry ────────
-    api.registerHook("model_call_started", async () => {
+    api.on("model_call_started", async () => {
       try {
         collector.collect("main");
       } catch {
         // Non-fatal
       }
-    }, { name: "oc-monitor-model-call-started" });
+    });
 
     // ── Hook: model_call_ended — collect post-call metrics ───
-    api.registerHook("model_call_ended", async () => {
+    api.on("model_call_ended", async () => {
       try {
         collector.collect("main");
       } catch {
         // Non-fatal
       }
-    }, { name: "oc-monitor-model-call-ended" });
+    });
 
     // ── Hook: gateway_stop — cleanup ─────────────────────────
-    api.registerHook("gateway_stop", async () => {
+    api.on("gateway_stop", async () => {
       collector.stop();
-    }, { name: "oc-monitor-gateway-stop" });
+    });
 
     // ── Tool: event_loop_health ──────────────────────────────
     api.registerTool({

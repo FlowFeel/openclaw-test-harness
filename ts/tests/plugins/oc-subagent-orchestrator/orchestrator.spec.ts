@@ -28,6 +28,9 @@ function createMockApi() {
       error: (m: string) => logs.push(`[error] ${m}`),
       warn: (m: string) => logs.push(`[warn] ${m}`),
     },
+    on: (events: string, handler: any, opts?: { name?: string }) => {
+      hooks.push({ event: events, handler, name: opts?.name });
+    },
     registerHook: (events: string | string[], handler: any, opts?: { name?: string }) => {
       const list = Array.isArray(events) ? events : [events];
       for (const event of list) hooks.push({ event, handler, name: opts?.name });
@@ -88,10 +91,9 @@ describe("Feature: Plugin Entry Registration", () => {
     expect(events).toContain("model_call_ended");
     expect(events).toHaveLength(8);
 
-    // All hooks have names
+    // All hooks registered via api.on (no name opts needed)
     for (const hook of api.hooks) {
-      expect(hook.name).toBeDefined();
-      expect(hook.name).toContain("orchestrator-");
+      expect(hook.event).toBeDefined();
     }
   });
 

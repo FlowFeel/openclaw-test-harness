@@ -197,14 +197,14 @@ function indexTemplate(params: ScaffoldParams): string {
       const hookName = hook.replace(/[-_]/g, " ");
       return `
     // ── Hook: ${hook} ──────────────────────────────────────────
-    api.registerHook("${hook}", async (event) => {
+    api.on("${hook}", async (event) => {
       try {
         // TODO: read state via reader, call pure logic, write via writer.
         api.logger?.info?.("[${params.name}] ${hookName} hook fired");
       } catch (err) {
         api.logger?.error?.("[${params.name}] ${hook} failed: " + String(err));
       }
-    }, { name: "${params.name}-${hook}" });`;
+    });`;
     })
     .join("\n");
 
@@ -390,6 +390,9 @@ describe("${params.name} plugin wiring", () => {
     const hooks: string[] = [];
     const tools: string[] = [];
     const api = {
+      on: (events: string, _handler: unknown) => {
+        hooks.push(events);
+      },
       registerHook: (events: string | string[], _handler: unknown) => {
         if (typeof events === "string") hooks.push(events);
         else hooks.push(...events);

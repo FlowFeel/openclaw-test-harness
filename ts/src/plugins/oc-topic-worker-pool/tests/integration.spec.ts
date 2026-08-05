@@ -14,6 +14,9 @@ describe("oc-topic-worker-pool plugin wiring", () => {
     const hooks: string[] = [];
     const tools: string[] = [];
     const api = {
+      on: (events: string, _handler: unknown) => {
+        hooks.push(events);
+      },
       registerHook: (events: string | string[], _handler: unknown) => {
         if (typeof events === "string") hooks.push(events);
         else hooks.push(...events);
@@ -40,6 +43,7 @@ describe("oc-topic-worker-pool plugin wiring", () => {
   it("logs initialization with pool sizes", () => {
     const logs: string[] = [];
     const api = {
+      on: () => {},
       registerHook: () => {},
       registerTool: () => {},
       logger: {

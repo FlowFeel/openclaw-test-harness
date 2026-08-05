@@ -145,6 +145,11 @@ describe("oc-stream-relay plugin registration", () => {
         error: vi.fn(),
         warn: vi.fn(),
       },
+      on: vi.fn(
+        (event: string, _handler: unknown) => {
+          hooks.push({ event, opts: { name: "" } });
+        }
+      ),
       registerHook: vi.fn(
         (event: string | string[], _handler: unknown, opts?: { name: string }) => {
           const events = Array.isArray(event) ? event : [event];
@@ -168,13 +173,7 @@ describe("oc-stream-relay plugin registration", () => {
     // Should have 3 hooks
     expect(hooks).toHaveLength(3);
 
-    // Check hook names match the stream-relay-<event> pattern
-    const hookNames = hooks.map((h) => h.opts.name);
-    expect(hookNames).toContain("stream-relay-gateway-start");
-    expect(hookNames).toContain("stream-relay-gateway-stop");
-    expect(hookNames).toContain("stream-relay-model-call-started");
-
-    // Check hook events
+    // Check hook events (api.on uses the hook name directly, no opts.name)
     const hookEvents = hooks.map((h) => h.event);
     expect(hookEvents).toContain("gateway_start");
     expect(hookEvents).toContain("gateway_stop");
@@ -190,6 +189,7 @@ describe("oc-stream-relay plugin registration", () => {
         error: vi.fn(),
         warn: vi.fn(),
       },
+      on: vi.fn(),
       registerHook: vi.fn(),
       registerTool: vi.fn((tool: { name: string }) => {
         tools.push(tool.name);

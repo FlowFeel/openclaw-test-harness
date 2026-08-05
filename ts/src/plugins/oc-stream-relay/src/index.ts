@@ -121,7 +121,7 @@ export default definePluginEntry({
 
     // ── Gateway lifecycle: start/stop the relay process ─────────
 
-    api.registerHook("gateway_start", async () => {
+    api.on("gateway_start", async () => {
       try {
         state.started = true;
         state.startedAt = Date.now();
@@ -134,17 +134,17 @@ export default definePluginEntry({
           `[oc-stream-relay] Failed to start relay: ${String(err)}`
         );
       }
-    }, { name: "stream-relay-gateway-start" });
+    });
 
-    api.registerHook("gateway_stop", async () => {
+    api.on("gateway_stop", async () => {
       state.started = false;
       consecutiveFailures = 0;
       api.logger?.info?.("[oc-stream-relay] Relay process stopped");
-    }, { name: "stream-relay-gateway-stop" });
+    });
 
     // ── Model call interception: relay stream through sidecar ────
 
-    api.registerHook("model_call_started", async (event) => {
+    api.on("model_call_started", async (event) => {
       const modelId = (event?.modelId as string) ?? "";
       const sidecarAvailable = state.started;
 
@@ -192,7 +192,7 @@ export default definePluginEntry({
           `[oc-stream-relay] Relay failed for ${modelId}: ${String(err)}`
         );
       }
-    }, { name: "stream-relay-model-call-started" });
+    });
 
     // ── Tool: stream_relay_health ─────────────────────────────────
 
