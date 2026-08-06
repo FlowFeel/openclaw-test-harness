@@ -9,8 +9,9 @@
     "build:plugins": "node scripts/build-plugins.mjs",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit -p tsconfig.ci.json",
+    "validate:foundry": "for d in src/plugins/oc-*/; do npx tsx src/foundry/cli.ts validate \"$d\" || exit 1; done",
     "lint": "eslint src/ tests/",
-    "gate": "npm run typecheck && npm run lint && npm run test"
+    "gate": "npm run typecheck && npm run validate:foundry && npm run lint && npm run test"
   },
   "dependencies": {
     "@effect/schema": "^0.75.0",

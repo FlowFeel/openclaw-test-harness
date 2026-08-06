@@ -20,6 +20,7 @@ services:
       sh -c "
         npm ci --include=dev &&
         npx tsc --noEmit -p tsconfig.ci.json &&
+        npm run validate:foundry &&
         npm run build:plugins &&
         npx vitest run --config vitest.config.docker.ts --reporter=verbose
       "

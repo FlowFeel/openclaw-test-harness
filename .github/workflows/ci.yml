@@ -73,6 +73,8 @@ jobs:
         run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Foundry validation
+        run: npm run validate:foundry
       - name: Build plugin bundles
         run: npm run build:plugins
       - name: Unit + BDD tests
