@@ -20,21 +20,28 @@
 import type { SidecarProtocol } from "./sidecar-protocol.js";
 import { NullSidecar } from "./sidecar-protocol.js";
 
-let instance: SidecarProtocol = new NullSidecar();
+// Use globalThis so the singleton survives across esbuild bundles.
+// Each plugin bundles its own copy of sidecar-registry.ts, but they
+// share the same globalThis — so the singleton is truly shared.
+const GLOBAL_KEY = "__OC_SIDECAR_REGISTRY__";
+
+function getGlobal(): SidecarProtocol {
+  return (globalThis as any)[GLOBAL_KEY] ?? new NullSidecar();
+}
 
 export function registerSidecar(sidecar: SidecarProtocol): void {
-  instance = sidecar;
+  (globalThis as any)[GLOBAL_KEY] = sidecar;
 }
 
 export function unregisterSidecar(): void {
-  instance = new NullSidecar();
+  delete (globalThis as any)[GLOBAL_KEY];
 }
 
 export function getSidecar(): SidecarProtocol {
-  return instance;
+  return getGlobal();
 }
 
 /** Reset to NullSidecar — for tests only */
 export function resetSidecarRegistry(): void {
-  instance = new NullSidecar();
+  delete (globalThis as any)[GLOBAL_KEY];
 }
