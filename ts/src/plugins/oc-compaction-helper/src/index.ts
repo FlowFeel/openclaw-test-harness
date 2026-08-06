@@ -28,6 +28,9 @@
  */
 
 import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
+import { shouldOffload, estimatePayloadBytes } from "../../shared/sidecar-router.js";
+import { type SidecarProtocol, NullSidecar } from "../../shared/sidecar-protocol.js";
+import { writeFileSync as fsWriteFileSync } from "node:fs";
 import { cleanupSessions, type SessionsMap } from "../../shared/session-cleanup.js";
 import {
   readSessions,
@@ -40,6 +43,8 @@ export interface CompactionHelperConfig {
   maxTranscriptMb?: number;
   bloatFields?: string[];
   sessionsPath?: string;
+  /** Sidecar protocol for CPU offloading (injected by gateway). */
+  sidecar?: SidecarProtocol;
   /** Minimum milliseconds between bloat cleanup passes. Default: 60000 (1 min). */
   throttleMs?: number;
   /** Minimum bloat size in bytes before triggering a write. Default: 10240 (10KB). */
@@ -74,7 +79,31 @@ export default definePluginEntry({
     const sessionsPath = cfg.sessionsPath;
     const throttleMs = cfg.throttleMs ?? DEFAULT_THROTTLE_MS;
     const bloatThresholdBytes = cfg.bloatThresholdBytes ?? DEFAULT_BLOAT_THRESHOLD;
+    const sidecar: SidecarProtocol = cfg.sidecar ?? new NullSidecar();
+    // Sidecar-aware writer: offloads JSON.stringify when beneficial
+    const sidecarWriter: SessionsWriter = (data, path) => {
+      const payloadBytes = estimatePayloadBytes(data);
+      const decision = shouldOffload({
+        operation: "serialize.session",
+        payloadBytes,
+        sidecarAvailable: sidecar.isAvailable(),
+        poolFull: sidecar.getStats().active >= sidecar.getStats().poolSize,
+      });
+      if (decision.offload) {
+        api.logger?.info?.(`[oc-compaction-helper] ${decision.rationale}`);
+        sidecar.exec("serialize.session", { session: data }).then((result) => {
+          if (typeof result === "string") {
+            fsWriteFileSync(path ?? sessionsPath ?? "", result);
+          } else {
+            writeSessions(data, path ?? sessionsPath);
+          }
+        }).catch(() => writeSessions(data, path ?? sessionsPath));
+      } else {
+        writeSessions(data, path ?? sessionsPath);
+      }
+    };
 
+// Sidecar-aware I/O: reader stays inline (small reads), writer offloads JSON.stringify
     const reader: SessionsReader = (path) => readSessions(path ?? sessionsPath);
     const writer: SessionsWriter = (data, path) => writeSessions(data, path ?? sessionsPath);
 
@@ -127,7 +156,7 @@ export default definePluginEntry({
             maxAgeHours: 24,
             nowMs: now,
           });
-          writer(cleaned, sessionsPath);
+          sidecarWriter(cleaned, sessionsPath);
           lastCleanupMs = now;
           api.logger?.info?.(
             `[oc-compaction-helper] before_prompt_build cleanup: ` +
@@ -210,7 +239,7 @@ export default definePluginEntry({
             maxAgeHours: 24,
             nowMs: now,
           });
-          writer(cleaned, sessionsPath);
+          sidecarWriter(cleaned, sessionsPath);
           lastCleanupMs = now;
           api.logger?.info?.(
             `[oc-compaction-helper] agent_end cleanup: ` +
@@ -239,7 +268,7 @@ export default definePluginEntry({
             maxAgeHours: 24,
             nowMs: Date.now(),
           });
-          writer(cleaned, sessionsPath);
+          sidecarWriter(cleaned, sessionsPath);
           lastCleanupMs = Date.now();
           api.logger?.info?.(
             `[oc-compaction-helper] after_compaction cleanup: ` +
