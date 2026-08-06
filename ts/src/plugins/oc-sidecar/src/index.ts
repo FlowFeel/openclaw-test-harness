@@ -45,6 +45,29 @@ export default definePluginEntry({
   description:
     "Standalone sidecar process for session cleanup, worker pool offloading, and live telemetry.",
   register(api: PluginApi, config?: Record<string, unknown>) {
+    // Check if sidecar is already running (from a previous gateway_start
+    // that survived a hot restart). If so, register it immediately.
+    const hotRestartPort = (config as any)?.sidecar?.port ?? 18900;
+    fetch(`http://127.0.0.1:${hotRestartPort}/health`)
+      .then((r) => r.ok ? r.json() : null)
+      .then(() => {
+        // Sidecar is running — create client and register
+        const client = createSidecarClient(`http://127.0.0.1:${hotRestartPort}`);
+        let cachedStats = { active: 0, poolSize: 3, completed: 0, failed: 0 };
+        registerSidecar({
+          isAvailable: () => true,
+          getStats: () => cachedStats,
+          exec: async (operation: string, data: unknown) => {
+            const resp = await client.post("/exec", { operation, data });
+            try { const h = await client.get("/health") as any; if (h?.pool) cachedStats = h.pool; } catch {}
+            return resp;
+          },
+        });
+        api.logger?.info?.(`[oc-sidecar] Sidecar already running on port ${hotRestartPort} (registered in sidecar-registry via hot-restart check)`);
+      })
+      .catch(() => {
+        // Sidecar not running — will be started by gateway_start hook
+      });
     const cfg: SidecarPluginConfig = (config as SidecarPluginConfig) ?? {};
     const sidecarPort = cfg.sidecar?.port ?? 18900;
     const startupTimeoutMs = cfg.sidecar?.startupTimeoutMs ?? 10_000;
@@ -61,7 +84,7 @@ export default definePluginEntry({
           workerThreads: cfg.sidecar?.workerThreads ?? 3,
           startupTimeoutMs,
         });
-        client = createSidecarClient(`http://127.0.0.1:${sidecarPort}`);
+        client = createSidecarClient(`http://127.0.0.1:${hotRestartPort}`);
         // Register the client so other plugins can use it
         // Cache last known stats (updated periodically by sidecar_health tool)
         let cachedStats = { active: 0, poolSize: 3, completed: 0, failed: 0 };
@@ -75,7 +98,7 @@ export default definePluginEntry({
             return resp;
           },
         });
-        api.logger?.info?.(`[oc-sidecar] Sidecar started on port ${sidecarPort} (registered in sidecar-registry)`);
+        api.logger?.info?.(`[oc-sidecar] Sidecar started on port ${hotRestartPort} (registered in sidecar-registry)`);
       } catch (err) {
         api.logger?.error?.(`[oc-sidecar] Failed to start sidecar: ${String(err)}`);
       }
