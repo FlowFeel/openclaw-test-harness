@@ -29,7 +29,8 @@
 
 import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
 import { shouldOffload } from "../../shared/sidecar-router.js";
-import { type SidecarProtocol, NullSidecar } from "../../shared/sidecar-protocol.js";
+import { type SidecarProtocol } from "../../shared/sidecar-protocol.js";
+import { getSidecar } from "../../shared/sidecar-registry.js";
 import { writeFileSync as fsWriteFileSync, statSync } from "node:fs";
 import { cleanupSessions, type SessionsMap } from "../../shared/session-cleanup.js";
 import {
@@ -79,7 +80,9 @@ export default definePluginEntry({
     const sessionsPath = cfg.sessionsPath;
     const throttleMs = cfg.throttleMs ?? DEFAULT_THROTTLE_MS;
     const bloatThresholdBytes = cfg.bloatThresholdBytes ?? DEFAULT_BLOAT_THRESHOLD;
-    const sidecar: SidecarProtocol = cfg.sidecar ?? new NullSidecar();
+    // Sidecar from the cross-plugin registry (registered by oc-sidecar on gateway_start)
+    // Falls back to NullSidecar if oc-sidecar isn't running
+    const sidecar: SidecarProtocol = cfg.sidecar ?? getSidecar();
     // Sidecar-aware writer: offloads JSON.stringify when beneficial
     // Must be awaited by the hook handler — the write must complete before
     // the hook returns so the next read sees the cleaned data.
