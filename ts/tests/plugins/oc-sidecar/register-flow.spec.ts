@@ -17,7 +17,7 @@
  * 6. Config is parsed via SidecarPluginConfig (P5: no `as any`)
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 // Mock sidecar-manager so gateway_start doesn't spawn a real process
 vi.mock("../../../src/plugins/oc-sidecar/src/sidecar-manager.js", () => ({
@@ -70,7 +70,7 @@ function createMockApi() {
 }
 
 describe("P2 fix: register() does not fire fetch (no race condition)", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -120,7 +120,7 @@ describe("P2 fix: register() does not fire fetch (no race condition)", () => {
 });
 
 describe("P2 fix: gateway_start hot-restart flow", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -196,7 +196,7 @@ describe("P2 fix: gateway_start hot-restart flow", () => {
 });
 
 describe("P2 fix: gateway_stop cleanup", () => {
-  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let fetchSpy: MockInstance;
 
   beforeEach(() => {
     fetchSpy = vi.spyOn(globalThis, "fetch");
