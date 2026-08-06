@@ -31,12 +31,12 @@ import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
 import { shouldOffload } from "../../shared/sidecar-router.js";
 import { type SidecarProtocol } from "../../shared/sidecar-protocol.js";
 import { getSidecar } from "../../shared/sidecar-registry.js";
-import { writeFileSync as fsWriteFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
 import { cleanupSessions, type SessionsMap } from "../../shared/session-cleanup.js";
 import {
   readSessions,
   writeSessions,
+  getSessionFileSize,
+  writeSessionsString,
   type SessionsReader,
   type SessionsWriter,
 } from "./sessions-io.js";
@@ -88,8 +88,10 @@ export default definePluginEntry({
     // Must be awaited by the hook handler — the write must complete before
     // the hook returns so the next read sees the cleaned data.
     const sidecarWriter = async (data: SessionsMap, path?: string) => {
-      // Use file size as a free estimate (avoids JSON.stringify on main thread)
-      const payloadBytes = (() => { try { return statSync(sessionsPath ?? resolve(process.env.HOME || "/home/node", ".openclaw/agents/main/sessions/sessions.json")).size; } catch { return 0; } })();
+      // Use file size as a free estimate (avoids JSON.stringify on main thread).
+      // Uses the path argument (not just sessionsPath) so tests with temp dirs
+      // get an accurate estimate — one statSync syscall vs N JSON.stringify calls.
+      const payloadBytes = getSessionFileSize(path ?? sessionsPath);
       const decision = shouldOffload({
         operation: "serialize.session",
         payloadBytes,
@@ -101,7 +103,7 @@ export default definePluginEntry({
         try {
           const result = await sidecar.exec("serialize.session", { session: data });
           if (typeof result === "string") {
-            fsWriteFileSync(path ?? sessionsPath ?? "", result);
+            writeSessionsString(result, path ?? sessionsPath);
           } else {
             writeSessions(data, path ?? sessionsPath);
           }
