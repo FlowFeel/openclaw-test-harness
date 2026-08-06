@@ -32,13 +32,13 @@ See [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) for the f
 | Metric | Value |
 |--------|-------|
 | Plugins | **11** (all DFT-valid, all use `api.on()`) |
-| CI tests | **1,125** (71 files, `vitest.config.ci.ts`) |
-| Full suite | **1,133** (82 files, includes e2e + oc-source) |
-| Statement coverage | **88.5%** (CI config) |
-| Branch coverage | **79.6%** |
+| CI tests | **1,176** (77 files, `vitest.config.ci.ts`) |
+| Full suite | **1,292** (92 files, includes e2e + oc-source) |
+| Statement coverage | **82.5%** (CI config) |
+| Branch coverage | **74.4%** |
 | Hook registrations | **36** (all via `api.on()`) |
-| Tools registered | **19** |
-| Pure logic modules | **15** (in `shared/`, 97%+ coverage) |
+| Tools registered | **16** |
+| Pure logic modules | **18** (in `shared/`, 97%+ coverage) |
 | Efficiency tests | **26** (6 hypotheses, 3 tiers) |
 | Foundry validation | **11/11 pass** (all six DFT axioms) |
 | CI layers | 4 (unit → docker → e2e → staging) |
@@ -52,6 +52,10 @@ See [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) for the f
 3. **The efficiency derivation** — 7 hypotheses derived as logical consequences of the 6 DFT axioms. 6 implemented as tests (26 tests across 3 tiers: deterministic, runtime-deterministic, statistical). The axioms are the preconditions that make efficiency measurable.
 
 4. **The three gaps** — the application layer on top of the concurrency infrastructure: outbound `sendMediaGroup` batching, configurable `timeoutMs` policy, and subagent progress heartbeats. Three pure-logic modules with 76 tests.
+
+5. **Plugin packaging & the esbuild bundle** — five ship-readiness risks fixed (B1/B2/H1/M1/M2). Each plugin builds to a self-contained `dist/index.js` with `shared/` inlined. A 34-test smoke test catches the entire class of packaging bugs.
+
+6. **Sidecar wiring & code review** — the junior team wired the sidecar into `oc-compaction-helper` via the DFT pattern (`sidecar-protocol` + `sidecar-registry` + `sidecar-router`). A code review found one foundry violation (P0: `node:fs` import), a fetch race (P2: top-level fetch in `register()`), and a path-arg bug (P1). All fixed with 29 new tests. Coverage dropped to 82.5% because the wiring layer (sidecar spawn/stop, compaction-helper hooks) is mostly untested — the pure logic is at 97%+, the wiring is at <10%.
 
 ### Production metrics (require re-verification)
 
@@ -168,9 +172,12 @@ All scheduling, admission, cleanup, tracking, and send policy logic is pure — 
 | `subagent-tracker` | 25 | Lifecycle tracking, stale detection, spawn capacity |
 | `telemetry-logic` | 10 | Health aggregation, status thresholds |
 | `sessions-io` | 10 | File I/O for sessions.json (injectable path) |
-| **`media-batcher`** | 22 | Gap 1: outbound sendMediaGroup batching (90% API call reduction) |
-| **`document-send-policy`** | 26 | Gap 2: load-aware timeout, exponential retry, chunk fallback |
-| **`subagent-progress-tracker`** | 28 | Gap 3: heartbeat progress tracking, stuck detection |
+| `media-batcher` | 22 | Gap 1: outbound sendMediaGroup batching (90% API call reduction) |
+| `document-send-policy` | 26 | Gap 2: load-aware timeout, exponential retry, chunk fallback |
+| `subagent-progress-tracker` | 28 | Gap 3: heartbeat progress tracking, stuck detection |
+| `sidecar-protocol` | 6 | Sidecar Protocol interface + NullSidecar fallback |
+| `sidecar-registry` | 6 | `globalThis` singleton (survives esbuild bundling) |
+| `sidecar-router` | 21 | Pure offload-decision logic (threshold-based, returns rationale) |
 
 ---
 
@@ -239,11 +246,25 @@ The six DFT axioms are not just code-quality rules — they are the *preconditio
 
 ### Two anti-patterns the axioms expose
 
-1. **Sync I/O on the main event loop** — `sessions-io.ts` uses `readFileSync`/`writeFileSync` in hooks. H1 proves it blocks. Fix: migrate to `fs/promises` (derived from A1).
+1. **Sync I/O on the main event loop** — `sessions-io.ts` uses `readFileSync`/`writeFileSync` in hooks. H1 proves it blocks. Fix: migrate to `fs/promises` (derived from A1). **Status: fix in progress** — the compaction-helper's `getSessionFileSize` and `writeSessionsString` are sync wrappers behind the Protocol; migrating to `fs/promises` is the next step.
 
-2. **`JSON.stringify` in the bloat scan hot path** — `oc-compaction-helper` serializes every bloat field just to count bytes. H2 proves it's expensive. Fix: replace with one `statSync` (derived from A1).
+2. **`JSON.stringify` in the bloat scan hot path** — `oc-compaction-helper` serializes every bloat field just to count bytes. H2 proves it's expensive. Fix: replace with one `statSync` (derived from A1). **Status: partially fixed** — the sidecar-aware writer now uses `getSessionFileSize` (one `statSync`) instead of `JSON.stringify` for the offload decision, but the bloat-scan loop in the hook handlers still serializes per-field. Extracting `scanForBloat()` into pure logic is the remaining work.
 
 See [`docs/efficiency-testing.md`](./docs/efficiency-testing.md) for the full derivation: axioms → propositions → hypotheses → tests → fixes.
+
+---
+
+## Remaining Work
+
+| Item | Priority | Status |
+|------|----------|--------|
+| Add foundry validation to CI | 🔴 High | Not started — the P0 violation shipped because foundry only runs locally |
+| Wiring tests for `oc-sidecar` + `oc-compaction-helper` | 🟠 Medium | The pure logic is at 97%+, the wiring is at <10% (coverage dropped to 82.5%) |
+| Extract `scanForBloat()` into pure logic | 🟠 Medium | P4 from the review — duplicated bloat-scan loop in compaction-helper (the H2 anti-pattern) |
+| H7: dispatch overhead with 0 handlers | 🟡 Low | Needs E2E `createHookRunner` from OC source mod test bed |
+| Production re-verification | 🟡 Low | Deploy fixed plugins (with `api.on()` + bundles), observe real metrics |
+
+See [`docs/junior-team-review.md`](./docs/junior-team-review.md) for the full review with P0–P6 items.
 
 ---
 
@@ -433,6 +454,7 @@ See `docker/README.md` for build/run/debug instructions.
 | [`docs/postmortem-sunday-senddocument-timeout.md`](./docs/postmortem-sunday-senddocument-timeout.md) | Postmortem: Sunday gateway websocket timeout on sendDocument — diagnosis, the document send policy, wiring instructions |
 | [`docs/plugin-gaps.md`](./docs/plugin-gaps.md) | The three gaps: outbound sendMediaGroup batching (Gap 1), configurable timeoutMs policy (Gap 2), subagent progress heartbeats (Gap 3) |
 | [`docs/ship-review.md`](./docs/ship-review.md) | Ship readiness review: all five packaging risks (B1/B2/H1/M1/M2) fixed, the Option A/B/C bundling decision, build + smoke test, install instructions |
+| [`docs/junior-team-review.md`](./docs/junior-team-review.md) | Code review of junior team PRs #18–#20 (sidecar wiring): P0 foundry violation, P1 path-arg bug, P2 fetch race, coverage gaps, wiring test plan |
 | [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) | oc-topic-worker-pool: semaphore admission control for concurrent Telegram topic sessions |
 | [`docs/SESSION-HANDOFF.md`](./docs/SESSION-HANDOFF.md) | Dense literate snapshot of working state — restores context after compaction |
 | [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) | War story: patching OC's event loop from 834ms P99 to worker threads |

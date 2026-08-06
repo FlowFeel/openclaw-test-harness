@@ -387,11 +387,10 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
     expect(parsed.tools).toContain("queue_work");
     expect(parsed.tools).toContain("queue_status");
     expect(parsed.tools).toContain("queue_results");
-    expect(parsed.tools).toContain("subagent_health");
-    expect(parsed.tools).toContain("session_health");
     expect(parsed.tools).toContain("merge_results");
-    expect(parsed.tools).toContain("event_loop_health");
-    expect(parsed.toolsLen).toBe(7);
+    // Note: subagent_health, session_health, event_loop_health were moved to
+    // oc-sidecar in PR #18 (the orchestrator no longer re-exports them).
+    expect(parsed.toolsLen).toBe(4);
     expect(parsed.onStartup).toBe(true);
   });
 
@@ -633,23 +632,11 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
     ]);
     expect(result.exitCode).toBe(0);
     const parsed = safeJsonParse(result.output)
-    // The orchestrator intentionally aggregates tools from smaller plugins.
-    // Verify: no UNEXPECTED tool name conflicts. Known overlaps are:
-    // - subagent_health (also in oc-subagent-watchdog)
-    // - session_health (also in oc-session-guard)
-    // - event_loop_health (also in oc-event-loop-monitor)
-    // The orchestrator supersedes these plugins and re-exports their tools
-    // for single-plugin deployments.
-    const knownOverlaps = new Set(["subagent_health", "session_health", "event_loop_health"]);
+    // The orchestrator no longer re-exports tools from other plugins (PR #18
+    // moved subagent_health/session_health/event_loop_health to oc-sidecar).
+    // Verify: no tool name conflicts at all — every tool should be unique.
     const actualDuplicates = new Set(parsed.duplicates || []);
-    // Every duplicate must be a known overlap
-    for (const d of Array.from(actualDuplicates) as string[]) {
-      expect(knownOverlaps.has(d)).toBe(true);
-    }
-    // Every known overlap must actually appear in duplicates
-    for (const k of knownOverlaps) {
-      expect(actualDuplicates.has(k)).toBe(true);
-    }
+    expect(actualDuplicates.size).toBe(0);
   });
 
   // ── Total hooks = 20 (orchestrator 8 + sidecar 2 + compaction-helper 4 + context-cache 3 + stream-relay 3) ──

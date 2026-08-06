@@ -149,13 +149,43 @@ The harness architectural review surfaced two remaining structural anti-patterns
 - **Closed Admission Loop**: Injected real `SystemHealth` snapshots directly into `evaluateAdaptiveSpawn` so adaptive spawn admission reacts to real runtime process pressure rather than synthetic fixtures.
 - **100% Era 3 Completion**: All 7 Era 3 tickets (#11–#17) completed and verified across 303 total automated tests.
 
+### Phase 19: The Plugin Foundry & the `api.on()` Discovery (Era 4 opens)
+
+Era 4 shifted from patching OC's compiled bundles to building a **plugin suite** that hooks into OC's gateway lifecycle without touching core files. The test harness became three things at once: a plugin foundry, an OC source mod test bed, and an 11-plugin suite.
+
+- **The `api.on()` discovery**: OC's plugin SDK has two hook registration APIs — `api.on()` (registers to `typedHooks`, visible to `hasHooks()`, **fires**) and `api.registerHook()` (registers to `legacyInternalHooks`, invisible to `hasHooks()`, **never fires**). Every plugin originally used `api.registerHook()`. The hooks registered successfully (no error) but never dispatched. The plugins were no-ops in production. This was the root cause of "plugins didn't help." Proven end-to-end with a real running OC gateway: `api.on("gateway_start")` fired immediately; `api.registerHook("gateway_start")` never fired. All 36 hook registrations migrated to `api.on()`.
+- **The plugin foundry** (`ts/src/foundry/`): Scaffolds new plugins and validates them against six DFT axioms (A1 pure-io-separation, A2 determinism, A3 manifest-conformance, A4 dft-docs, A5 mock-doubles, A6 check-result). `scaffoldPlugin → validatePlugin → zero errors` — templates cannot produce a non-compliant plugin. 11/11 plugins pass foundry validation.
+- **The three gaps**: The application layer on top of the concurrency infrastructure — outbound `sendMediaGroup` batching (Gap 1, 90% API call reduction), configurable `timeoutMs` policy (Gap 2, Sunday's 232KB sendDocument timeout), and subagent progress heartbeats (Gap 3, stuck detection before run timeout). Three pure-logic modules with 76 tests.
+- **Efficiency testing**: 7 hypotheses derived as logical consequences of the 6 DFT axioms. 6 implemented as tests (26 tests across 3 tiers: deterministic, runtime-deterministic, statistical). The axioms are the preconditions that make efficiency measurable — A1 isolates I/O cost from logic cost, A2 makes guarantees structural not statistical, A5 forbids `vi.fn()` mocks so we measure real behavior.
+
+### Phase 20: Plugin Packaging & the esbuild Bundle Decision (Era 4 ship readiness)
+
+With 11 plugins built, the question shifted to: can they be installed individually without crashing OC? A ship-readiness review identified five packaging crash risks:
+
+- **B1** (crash): Plugins missing `openclaw.extensions` in `package.json` — OC's installer requires it (`install-shared.ts:41`). Fixed in 2 plugins.
+- **H1** (crash after compile): 11 `.ts` imports in the orchestrator — work via jiti but break after compiling to `dist/`. Changed to `.js`.
+- **M1** (wrong metadata): 9 plugins declared `main: "./dist/index.js"` but `dist/` didn't exist. Changed to `src/index.ts`.
+- **M2** (no build step): No build existed; plugins relied on jiti source-transform overhead in production. Added `scripts/build-plugins.mjs`.
+- **B2** (crash on individual install): 10 of 11 plugins import from `../../shared/*.js`. Individual `openclaw plugins install` copies only the plugin dir — `shared/` is missing. Three options evaluated: (A) bundle with esbuild, (B) publish `shared/` as npm package, (C) suite install. **Option B is dead** — OC's installer only runs `npm install` for `plugin-archive` kind, not `plugin-dir` (`install-package.ts:280`). **Option C is a dev stopgap.** **Option A was chosen**: esbuild bundles each plugin's `src/index.ts` + all `shared/` imports into a self-contained `dist/index.js`. Works for all install methods, no network, no npm publishing, follows the standard OC pattern. A 34-test smoke test loads each `dist/index.js` and verifies the `PluginDefinition` export — catching the entire class of packaging bugs.
+
+### Phase 21: Sidecar Wiring & Code Review (Era 4 junior team)
+
+The junior team shipped three PRs wiring the sidecar into `oc-compaction-helper` via the DFT pattern: `sidecar-protocol.ts` (Protocol interface + `NullSidecar` fallback), `sidecar-registry.ts` (`globalThis` singleton — survives esbuild bundling since each plugin bundles its own copy of `shared/` but shares `globalThis`), and `sidecar-router.ts` (pure offload-decision logic returning a `SidecarDecision` with rationale). The orchestrator was stripped of 109 lines of inline sidecar logic (moved to `oc-compaction-helper`).
+
+A code review identified one P0 (foundry violation), two P1-P2 issues, and several code-quality gaps. The pure logic was excellent; the wiring needed work:
+
+- **P0 fix**: `oc-compaction-helper/src/index.ts` imported `node:fs` directly — violating A1 (pure-io-separation). First foundry failure since 11/11. Fixed by moving `statSync`/`writeFileSync` behind the `sessions-io.ts` Protocol wrapper (`getSessionFileSize`, `writeSessionsString`). Also fixed P1: the `statSync` estimate now uses the `path` argument (previously ignored it, always used the closure's `sessionsPath` — tests with temp dirs got `payloadBytes=0`).
+- **P2 fix**: `oc-sidecar/src/index.ts` fired a top-level `fetch()` during `register()` — a fire-and-forget async with no timeout that raced with `gateway_start`. Moved the hot-restart check into `gateway_start` via `tryAdoptRunningSidecar()` (200ms timeout probe). Also fixed P5 (`(config as any)` → `SidecarPluginConfig`) and P6 (`hotRestartPort` vs `sidecarPort` → single variable). `gateway_stop` now always calls `unregisterSidecar` but only calls `stopSidecar` when we started the process (not when we adopted it).
+
+The review also identified a structural gap: **the foundry doesn't run in CI** — it's a local check. The P0 violation shipped to `main` because no CI step caught it. Adding foundry validation to CI is the highest-value remaining fix.
+
 ---
 
 ## What Worked
 
 1. **Pure logic / I/O separation** — every evaluation function is pure (takes immutable snapshots, returns result dataclasses). I/O behind Protocol interfaces. Tests run in 0.08s with zero fixtures. This pattern (from the phosphene axiomatics) made the whole pipeline possible.
 
-2. **The test pyramid** — unit (0.08s) → BDD integration (SQLite) → Docker (compose) → testcontainers (real patched OC). Each layer tests the same logic against a different I/O boundary. 303 tests, all green in CI.
+2. **The test pyramid** — unit (0.08s) → BDD integration (SQLite) → Docker (compose) → testcontainers (real patched OC). Each layer tests the same logic against a different I/O boundary. 1,176 CI tests, all green.
 
 3. **Patching the compiled bundle** — OC ships as compiled JS chunks, not TypeScript source. We can't patch the source without maintaining a full fork. Instead, we inject into the compiled bundle with `node -e` scripts. The patch is small (15-20 lines), the backup is `.orig`, and the test harness has the TypeScript replacement for reference.
 
@@ -166,6 +196,14 @@ The harness architectural review surfaced two remaining structural anti-patterns
 6. **Deterministic testability as a first-class concern** — Replacing `Date.now()`/`Math.random()` with injectable providers and a monotonic counter made the same inputs yield byte-identical outputs across parallel suites. The DFT pass (clocks, mock sidecar, V8 heap assertions, fault injection) added 31 tests without a single new flake.
 
 7. **Hermetic offline E2E via a shared-network sidecar** — Running the OpenRouter mock as a real long-lived container on a testcontainers `Network`, with the OC container attached by alias, gave us the full `admit spawn → model call` flow 100% offline. No live API keys, no external network, no hardcoded port.
+
+8. **`api.on()` not `api.registerHook()`** — The single most important discovery: `api.registerHook()` registers to `legacyInternalHooks`, invisible to `hasHooks()`, so it never fires. `api.on()` registers to `typedHooks`, which `hasHooks()` checks. Every plugin was a no-op until this was fixed. Proven end-to-end with a real running gateway.
+
+9. **esbuild bundling over npm packages or suite install** — Each plugin's `dist/index.js` is self-contained with `shared/` inlined. Works for all OC install methods (directory, archive, `plugins.load.paths`). No network, no npm publishing, no version coordination. The 34-test smoke test catches the entire class of packaging bugs.
+
+10. **The foundry as a regression guard** — The six DFT axioms caught a `node:fs` import in `oc-compaction-helper` that would have violated A1 (pure-io-separation). `scaffoldPlugin → validatePlugin → zero errors` means templates cannot produce a non-compliant plugin. The gap: the foundry only runs locally — it needs to be in CI.
+
+11. **`globalThis` for cross-bundle singletons** — Each plugin bundles its own copy of `shared/` via esbuild. Module-level variables are per-bundle, so a module-level singleton wouldn't be shared across plugins. `globalThis.__OC_SIDECAR_REGISTRY__` is shared across all bundles in the same process. Subtle esbuild issue, easy to miss.
 
 ## What Didn't Work
 
@@ -181,6 +219,12 @@ The harness architectural review surfaced two remaining structural anti-patterns
 
 6. **`executeAdmissionCheck`'s JSON-embedded eval is fragile** — `JSON.stringify(params).replace(/"/g, '\\"')` breaks on backslashes and strings containing escaped quotes. Rather than harden the regex, the new `executeModelCall` base64-encodes the body and passes it as `process.argv[1]` — robust to any payload.
 
+7. **The foundry doesn't run in CI** — The six DFT axioms are enforced by `npx tsx src/foundry/cli.ts validate`, a local check. A `node:fs` import violation (P0) shipped to `main` because no CI step ran the foundry. Fix: add a "Foundry validation" step to CI between typecheck and build. This is the highest-value remaining fix — it prevents the entire class of DFT violations from shipping.
+
+8. **Top-level fetch during plugin register()** — `oc-sidecar` fired a `fetch()` at module load time (not inside a hook) to check for a hot-restart sidecar. This was a fire-and-forget async with no timeout that raced with `gateway_start`: if the hook fired before the fetch resolved, both paths could try to register a sidecar. On a closed port, the OS took ~1s for ECONNREFUSED, during which the plugin was half-initialized. Fix: move the check into `gateway_start` via `tryAdoptRunningSidecar()` with a 200ms timeout.
+
+9. **Module-level singletons don't survive esbuild bundling** — Each plugin bundles its own copy of `shared/`. A module-level variable in `sidecar-registry.ts` would be per-bundle — `oc-sidecar` would register to its bundle's copy, `oc-compaction-helper` would read from its own copy, never seeing the registration. Fix: `globalThis.__OC_SIDECAR_REGISTRY__` is shared across all bundles in the same process.
+
 ## The Numbers
 
 | Metric | Before | After |
@@ -191,13 +235,23 @@ The harness architectural review surfaced two remaining structural anti-patterns
 | CPU | 1.467 cores | 0.6% (idle) |
 | maxConcurrent | 2 (static) | 6 (with worker pool) |
 | runTimeoutSeconds | 300 (static) | 300 (with stale detection) |
-| Tests | 0 | **303** (25 Python + 278 TS) |
-| CI layers | 0 | 4 (unit → docker → staging → integration) |
+| Tests | 0 | **1,176** CI (77 files) |
+| Full suite | 0 | **1,292** (92 files, includes E2E + oc-source) |
+| Statement coverage | 0 | **82.5%** (CI config) |
+| CI layers | 0 | 4 (unit → docker → e2e → staging) |
+| Plugins | 0 | **11** (all DFT-valid, all use `api.on()`) |
+| Hook registrations | 0 | **36** (all via `api.on()`) |
+| Tools registered | 0 | **16** |
+| Pure logic modules | 0 | **18** (in `shared/`, 97%+ coverage) |
+| Foundry validation | — | **11/11 pass** (six DFT axioms) |
+| Efficiency tests | 0 | **26** (6 hypotheses, 3 tiers) |
 | Releases | 0 | 2 (v0.1.0, v0.2.0) |
 
 ---
 
-## Completed Roadmap (All 17 Tickets ✅)
+## Completed Roadmap
+
+### Era 1–3: OC Source Mods (Tickets #1–#17 ✅)
 
 1. ✅ Replace sessions.json with SQLite registry (`sqlite-accessor.ts` built & tested)
 2. ✅ Move compaction off main loop (worker pool built & shipped)
@@ -217,7 +271,21 @@ The harness architectural review surfaced two remaining structural anti-patterns
 16. ✅ Per-topic actor isolation (`TopicRouter` sibling crash containment)
 17. ✅ Live process telemetry feeding admission (`TelemetryCollector` + `aggregateSystemHealth`)
 
-All 17 tickets are **fully tested and verified** across all layers of the test pyramid (303 tests: 25 Python + 278 TS).
+### Era 4: Plugin Suite & Foundry (PRs #1–#20 ✅)
+
+18. ✅ The `api.on()` migration — 36 hook registrations moved from `api.registerHook()` (never fires) to `api.on()` (fires). Hooks live for the first time.
+19. ✅ The plugin foundry — scaffold + validate against six DFT axioms. 11/11 pass.
+20. ✅ The three gaps — `media-batcher` (Gap 1), `document-send-policy` (Gap 2), `subagent-progress-tracker` (Gap 3). 76 tests.
+21. ✅ Efficiency testing — 7 hypotheses derived from 6 DFT axioms. 26 tests across 3 tiers.
+22. ✅ Plugin packaging — esbuild bundling (Option A), 5 ship-review risks fixed, 34-test smoke test.
+23. ✅ Sidecar wiring (junior team PRs #18–#20) — `sidecar-protocol`, `sidecar-registry` (`globalThis`), `sidecar-router`. Orchestrator stripped of 109 lines.
+24. ✅ Code review fixes (P0–P2) — foundry violation (`node:fs` → Protocol wrapper), fetch race (top-level → `gateway_start` with 200ms timeout), path arg fix.
+
+### Remaining
+
+- ⏳ Add foundry validation to CI (prevents DFT violations from shipping)
+- ⏳ H7: dispatch overhead with 0 handlers (needs E2E `createHookRunner`)
+- ⏳ Production re-verification (deploy fixed plugins with `api.on()` + bundles, observe real metrics)
 
 ---
 
