@@ -1,16 +1,13 @@
 {
   "id": "oc-subagent-orchestrator",
   "name": "OC Subagent Orchestrator",
-  "description": "Full subagent management — work queue dispatch, depth limiting, adaptive admission, priority, topic isolation, result merging, and caching. The one plugin that manages subagents.",
+  "description": "Full subagent management \u2014 work queue dispatch, depth limiting, adaptive admission, priority, topic isolation, result merging, and caching. The one plugin that manages subagents.",
   "contracts": {
     "tools": [
       "queue_work",
       "queue_status",
       "queue_results",
-      "subagent_health",
-      "session_health",
-      "merge_results",
-      "event_loop_health"
+      "merge_results"
     ]
   },
   "activation": {
@@ -20,18 +17,48 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "maxConcurrent": { "type": "number", "default": 6 },
-      "maxChildrenPerAgent": { "type": "number", "default": 4 },
-      "runTimeoutSeconds": { "type": "number", "default": 300 },
-      "archiveAfterMinutes": { "type": "number", "default": 10 },
-      "maxSpawnDepth": { "type": "number", "default": 2 },
+      "maxConcurrent": {
+        "type": "number",
+        "default": 6
+      },
+      "maxChildrenPerAgent": {
+        "type": "number",
+        "default": 4
+      },
+      "runTimeoutSeconds": {
+        "type": "number",
+        "default": 300
+      },
+      "archiveAfterMinutes": {
+        "type": "number",
+        "default": 10
+      },
+      "maxSpawnDepth": {
+        "type": "number",
+        "default": 2
+      },
       "bloatFields": {
         "type": "array",
-        "items": { "type": "string" },
-        "default": ["compactionCheckpoints", "systemPromptReport", "skillsSnapshot", "contextBudgetStatus", "usageFamilySessionIds", "lastHeartbeatText"]
+        "items": {
+          "type": "string"
+        },
+        "default": [
+          "compactionCheckpoints",
+          "systemPromptReport",
+          "skillsSnapshot",
+          "contextBudgetStatus",
+          "usageFamilySessionIds",
+          "lastHeartbeatText"
+        ]
       },
-      "maxAgeHours": { "type": "number", "default": 15 },
-      "cacheTtlMs": { "type": "number", "default": 86400000 }
+      "maxAgeHours": {
+        "type": "number",
+        "default": 15
+      },
+      "cacheTtlMs": {
+        "type": "number",
+        "default": 86400000
+      }
     }
   }
 }

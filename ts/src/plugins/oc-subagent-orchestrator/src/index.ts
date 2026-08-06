@@ -644,88 +644,9 @@ export default definePluginEntry({
       },
     });
 
-    // ── Tool: subagent_health ──────────────────────────────────
-    api.registerTool({
-      name: "subagent_health",
-      description:
-        "Check subagent health — active count, stale detection, " +
-        "spawn availability, depth limits, and per-depth timeouts.",
-      parameters: Type.Object({}),
-      async execute(_id: string, _params: Record<string, unknown>) {
-        const { result } = detectStale(state.subagents, cfg.runTimeoutSeconds, Date.now());
-        const activeCount = getActiveCount(state.subagents);
-        const effectiveMax = computeEffectiveMaxConcurrent(
-          cfg.maxConcurrent,
-          state.healthSnapshot.status
-        );
-        const canSpawnNow = activeCount < effectiveMax;
-        const depthDecision = getDepthDecision(0, depthConfig);
+    
 
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              ok: true,
-              activeCount,
-              staleCount: result.staleKeys.length,
-              staleKeys: result.staleKeys,
-              maxConcurrent: cfg.maxConcurrent,
-              effectiveMaxConcurrent: effectiveMax,
-              canSpawn: canSpawnNow,
-              healthStatus: state.healthSnapshot.status,
-              maxSpawnDepth: cfg.maxSpawnDepth,
-              depth1Timeout: getDepthDecision(0, depthConfig).timeoutSeconds,
-              depth2Timeout: getDepthDecision(1, depthConfig).timeoutSeconds,
-            }, null, 2),
-          }],
-        };
-      },
-    });
-
-    // ── Tool: session_health ──────────────────────────────────
-    api.registerTool({
-      name: "session_health",
-      description:
-        "Check sessions.json health — file size, entry count, subagent count. " +
-        "Run before and after compaction to monitor bloat.",
-      parameters: Type.Object({}),
-      async execute(_id: string, _params: Record<string, unknown>) {
-        // Read actual sessions.json for file metrics
-        let fileMetrics = {
-          fileSizeBytes: 0,
-          entryCount: 0,
-          subagentEntryCount: 0,
-        };
-        try {
-          const sessions = readSessions();
-          if (sessions) {
-            const entries = Object.entries(sessions);
-            fileMetrics.entryCount = entries.length;
-            fileMetrics.subagentEntryCount = entries.filter(([k]) => SUBAGENT_KEY.test(k)).length;
-            fileMetrics.fileSizeBytes = Buffer.byteLength(JSON.stringify(sessions, null, 0), "utf8");
-          }
-        } catch {
-          // File not accessible — report zeroes
-        }
-
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              ok: true,
-              ...fileMetrics,
-              bloatFieldsTracked: cfg.bloatFields.length,
-              maxAgeHours: cfg.maxAgeHours,
-              staleSubagentCount: result_staleCount(state, cfg.runTimeoutSeconds),
-              cacheSize: state.cache.size,
-              cacheHitRate: state.totalQueries > 0
-                ? Math.round((state.cacheHits / state.totalQueries) * 100) / 100
-                : 0,
-            }, null, 2),
-          }],
-        };
-      },
-    });
+    
 
     // ── Tool: merge_results ────────────────────────────────────
     api.registerTool({
@@ -755,34 +676,7 @@ export default definePluginEntry({
       },
     });
 
-    // ── Tool: event_loop_health ────────────────────────────────
-    api.registerTool({
-      name: "event_loop_health",
-      description:
-        "Report event loop health — P99 delay, utilization, heap usage, " +
-        "CPU ratio, and overall status (healthy/degraded/critical). " +
-        "Drives adaptive admission throttling.",
-      parameters: Type.Object({}),
-      async execute(_id: string, _params: Record<string, unknown>) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              ok: true,
-              status: state.healthSnapshot.status,
-              eventLoopP99Ms: Math.round(state.healthSnapshot.eventLoopP99Ms * 100) / 100,
-              eventLoopUtilization: Math.round(state.healthSnapshot.eventLoopUtilization * 1000) / 1000,
-              usedHeapMB: Math.round(state.healthSnapshot.usedHeapSize / (1024 * 1024)),
-              cpuRatio: Math.round(state.healthSnapshot.cpuRatio * 1000) / 1000,
-              effectiveMaxConcurrent: computeEffectiveMaxConcurrent(
-                cfg.maxConcurrent,
-                state.healthSnapshot.status
-              ),
-            }, null, 2),
-          }],
-        };
-      },
-    });
+    
   },
 });
 
