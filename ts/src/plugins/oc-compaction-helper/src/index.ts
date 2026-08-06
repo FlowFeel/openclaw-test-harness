@@ -32,6 +32,7 @@ import { shouldOffload } from "../../shared/sidecar-router.js";
 import { type SidecarProtocol } from "../../shared/sidecar-protocol.js";
 import { getSidecar } from "../../shared/sidecar-registry.js";
 import { writeFileSync as fsWriteFileSync, statSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanupSessions, type SessionsMap } from "../../shared/session-cleanup.js";
 import {
   readSessions,
@@ -88,7 +89,7 @@ export default definePluginEntry({
     // the hook returns so the next read sees the cleaned data.
     const sidecarWriter = async (data: SessionsMap, path?: string) => {
       // Use file size as a free estimate (avoids JSON.stringify on main thread)
-      const payloadBytes = (() => { try { return statSync(sessionsPath ?? "").size; } catch { return 0; } })();
+      const payloadBytes = (() => { try { return statSync(sessionsPath ?? resolve(process.env.HOME || "/home/node", ".openclaw/agents/main/sessions/sessions.json")).size; } catch { return 0; } })();
       const decision = shouldOffload({
         operation: "serialize.session",
         payloadBytes,
