@@ -28,6 +28,7 @@
 
 import { definePluginEntry, Type, type PluginApi } from "./types.js";
 import { startSidecar, stopSidecar, type SidecarHandle } from "./sidecar-manager.js";
+import { registerSidecar, unregisterSidecar } from "../../shared/sidecar-registry.js";
 import { createSidecarClient, type SidecarClient } from "./sidecar-client.js";
 
 export interface SidecarPluginConfig {
@@ -61,7 +62,20 @@ export default definePluginEntry({
           startupTimeoutMs,
         });
         client = createSidecarClient(`http://127.0.0.1:${sidecarPort}`);
-        api.logger?.info?.(`[oc-sidecar] Sidecar started on port ${sidecarPort}`);
+        // Register the client so other plugins can use it
+        // Cache last known stats (updated periodically by sidecar_health tool)
+        let cachedStats = { active: 0, poolSize: 3, completed: 0, failed: 0 };
+        registerSidecar({
+          isAvailable: () => true,
+          getStats: () => cachedStats,
+          exec: async (operation: string, data: unknown) => {
+            const resp = await client!.post("/exec", { operation, data });
+            // Update cache after each exec
+            try { const h = await client!.get("/health") as any; if (h?.pool) cachedStats = h.pool; } catch {}
+            return resp;
+          },
+        });
+        api.logger?.info?.(`[oc-sidecar] Sidecar started on port ${sidecarPort} (registered in sidecar-registry)`);
       } catch (err) {
         api.logger?.error?.(`[oc-sidecar] Failed to start sidecar: ${String(err)}`);
       }
@@ -72,7 +86,8 @@ export default definePluginEntry({
         await stopSidecar(sidecar);
         sidecar = null;
         client = null;
-        api.logger?.info?.("[oc-sidecar] Sidecar stopped");
+        unregisterSidecar();
+        api.logger?.info?.("[oc-sidecar] Sidecar stopped (unregistered from sidecar-registry)");
       }
     });
 
