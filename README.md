@@ -6,7 +6,7 @@
 
 ## The Critical Discovery: `api.on()` vs `api.registerHook()`
 
-The single most important finding from this work:
+A most important finding from this work:
 
 **OC's plugin SDK has two hook registration APIs, and only one works for typed lifecycle hooks.**
 
