@@ -3,16 +3,19 @@
  *
  * @behavior
  * Two tools, both thin shells over the pure core:
- * - topic_audit: parse topics + registrations, report orphans and
- *   stale registrations (topic-registration-loss war story).
- * - topic_recover: build the canonical registration plan for one
- *   orphaned topic.
+ * - topic_audit: parse topics, diff against registrations (injected, or read
+ *   from the OC session registry when omitted), report orphans, stale
+ *   registrations, and per-topic archival decisions.
+ * - topic_recover: build the canonical registration plan for one orphaned
+ *   topic. With apply=true, writes the registration into the registry
+ *   (idempotent — an existing entry is refused, never overwritten).
  *
  * @invariants
  * - No OC core files modified.
- * - No network I/O here: callers supply topic payloads and the
- *   registration list (source injection happens upstream).
- * - Pure logic lives in parse-topics / detect-orphans / recovery-plan.
+ * - Topic payloads are caller-supplied (no Bot API network I/O here).
+ * - Registry I/O is confined to registry-io; all decisions are pure.
+ * - Pure logic lives in parse-topics / detect-orphans / archival-policy /
+ *   recovery-plan / apply-recovery.
  *
  * @dft
  * - Tools return JSON strings so unit tests assert on data, not prose.
@@ -22,8 +25,14 @@
 import { definePluginEntry, Type } from "../../shared/types.js";
 import { parseTopics } from "./parse-topics.js";
 import { detectOrphans } from "./detect-orphans.js";
+import { decideArchival } from "./archival-policy.js";
 import { buildRecoveryPlan, sessionKeyFor } from "./recovery-plan.js";
-import type { SessionRegistration } from "./types.js";
+import { readRegistrations, writeRecoveryPlan } from "./registry-io.js";
+import type {
+  RecoveryApplication,
+  SessionRegistration,
+  TopicAuditReport,
+} from "./types.js";
 
 /** Extract a positive integer topic id, or null. */
 function asTopicId(value: unknown): number | null {
@@ -67,18 +76,32 @@ export default definePluginEntry({
     api.registerTool({
       name: "topic_audit",
       description:
-        "Compare Telegram forum topics against session registrations; " +
-        "returns orphaned topics and unregistered sessions.",
+        "Compare Telegram forum topics against session registrations " +
+        "(injected, or read from the OC session registry when omitted); " +
+        "returns orphaned topics, unregistered sessions, and archival decisions.",
       parameters: Type.Object({
-        topics: Type.Any({ description: "Raw forum topics payload ({topics:[...]})" }),
-        registrations: Type.Array(
-          Type.Object({ topicId: Type.Number(), sessionKey: Type.String() }),
-          { description: "Registered topic sessions" }
+        topics: Type.Any({ description: "Raw forum topics payload ({topics:[...]}); entries may carry lastActiveAt (ISO) if the source derives it" }),
+        registrations: Type.Optional(
+          Type.Array(
+            Type.Object({ topicId: Type.Number(), sessionKey: Type.String() }),
+            { description: "Registered topic sessions. Omit to read from the OC session registry on disk." }
+          )
+        ),
+        sessionsPath: Type.Optional(
+          Type.String({ description: "Override path to sessions.json (defaults to the active agent's registry)" })
         ),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const topics = parseTopics(params.topics);
-        const report = detectOrphans(topics, asRegistrations(params.registrations));
+        const registrations: SessionRegistration[] = Array.isArray(params.registrations)
+          ? asRegistrations(params.registrations)
+          : readRegistrations(
+              typeof params.sessionsPath === "string" ? params.sessionsPath : undefined
+            );
+        const report: TopicAuditReport = {
+          ...detectOrphans(topics, registrations),
+          archivalDecisions: topics.map((t) => decideArchival(t, Date.now(), thresholds)),
+        };
         return textResponse(report);
       },
     });
@@ -87,12 +110,17 @@ export default definePluginEntry({
       name: "topic_recover",
       description:
         "Build the canonical session key and registration plan for an " +
-        "orphaned forum topic. Returns the plan; does not register it.",
+        "orphaned forum topic. With apply=true, registers it in the OC "+
+        "session registry (idempotent). Default: plan only.",
       parameters: Type.Object({
         topicId: Type.Number({ description: "Forum topic id" }),
         title: Type.Optional(Type.String()),
         chatId: Type.String({ description: "Telegram chat id" }),
         agentId: Type.String({ description: "Agent to bind" }),
+        apply: Type.Optional(
+          Type.Any({ description: "When true, write the registration into the OC session registry (idempotent). Default false — plan only." })
+        ),
+        sessionsPath: Type.Optional(Type.String()),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const topicId = asTopicId(params.topicId);
@@ -107,7 +135,14 @@ export default definePluginEntry({
           chatId,
           agentId
         );
-        return textResponse(plan);
+        if (params.apply !== true) {
+          return textResponse(plan);
+        }
+        const application: RecoveryApplication = writeRecoveryPlan(
+          plan,
+          typeof params.sessionsPath === "string" ? params.sessionsPath : undefined
+        );
+        return textResponse({ plan, application });
       },
     });
 

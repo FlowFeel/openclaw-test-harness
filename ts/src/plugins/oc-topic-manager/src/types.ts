@@ -30,6 +30,12 @@ export interface OrphanReport {
   unregistered: SessionRegistration[];
 }
 
+/** Full topic_audit output: registry mismatches plus per-topic archival decisions. */
+export interface TopicAuditReport extends OrphanReport {
+  /** Archival policy decision for every topic in the forum payload. */
+  archivalDecisions: ArchivalDecision[];
+}
+
 /** Thresholds governing the archival policy. */
 export interface ArchivalThresholds {
   maxIdleDays: number;
@@ -50,4 +56,18 @@ export interface RecoveryPlan {
   agentId: string;
   sessionKey: string;
   action: "register";
+}
+
+/** A6 report for an applied (or refused) recovery plan. */
+export interface RecoveryApplication {
+  topicId: number;
+  sessionKey: string;
+  /** True when the registry now contains the sessionKey (or already did). */
+  applied: boolean;
+  /** False when the key was already registered — idempotent no-op. */
+  created: boolean;
+  before: "absent" | "present";
+  after: "registered";
+  /** Set when applied is false. */
+  reason?: string;
 }

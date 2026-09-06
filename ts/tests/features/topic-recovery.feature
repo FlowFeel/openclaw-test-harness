@@ -33,6 +33,22 @@ orphans topics silently (war story: topics 82385, 73239).
 **When** the archival policy evaluates it
 **Then** the decision is leave
 
+**Given** a topic whose last activity is unknown (no source supplied it)
+**When** the archival policy evaluates it
+**Then** the decision is leave with an "unknown" reason
+**And** the idle rule is reported as unevaluated, not passed
+
+**Given** a topic with more than 2000 messages whose last activity is unknown
+**When** the archival policy evaluates it
+**Then** the decision is compact
+
+## Rule: Registry source injection
+
+**Given** topic_audit invoked without injected registrations
+**When** the audit runs
+**Then** registrations are read from the OC session registry on disk
+**And** non-topic session keys are ignored
+
 ## Rule: Recovery plan
 
 **Given** orphaned topic 82385 in chat -1003842172831
@@ -51,3 +67,19 @@ orphans topics silently (war story: topics 82385, 73239).
 **When** topic_recover executes
 **Then** the response states the input is invalid
 **And** no plan is produced
+
+## Rule: Apply recovery
+
+**Given** an orphaned topic and a healthy session registry
+**When** topic_recover executes with apply=true
+**Then** the registry contains the canonical session key
+**And** the report states applied=true with before=absent
+
+**Given** a topic whose session key is already registered
+**When** topic_recover executes with apply=true
+**Then** the existing registry entry is preserved unchanged
+**And** the report states applied=false with reason "already registered"
+
+**Given** a registry that was just repaired via apply=true
+**When** a topic audit runs against the same registry
+**Then** no topics are reported as orphaned
