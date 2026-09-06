@@ -7,21 +7,31 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: oc-admission-test
+    # No container_name: it blocks concurrent runs (local + CI, two checkouts).
     working_dir: /app/ts
     volumes:
       - ../ts:/app/ts
+      # Shadow the bind mount's node_modules: npm ci in-container installs
+      # linux-x64 natives without clobbering the host's darwin/arm64 ones.
+      - ts-node-modules:/app/ts/node_modules
       - ../oc-source:/app/oc-source
       - npm-cache:/root/.npm
     environment:
       - NODE_ENV=test
       - OPENCLAW_HOOK_DEBUG=1
+    # No healthcheck: the previous one was `node -e "process.exit(0)"` — a no-op.
     command: |
       sh -c "
         npm ci --include=dev &&
         npx tsc --noEmit -p tsconfig.ci.json &&
         npm run validate:foundry &&
         npm run build:plugins &&
+        for p in patches/*.patch; do
+          [ -f \"$p\" ] || continue;
+          echo \"Verifying patch $p against oc-source\";
+          (cd /app/oc-source/upstream && patch --dry-run --fuzz=0 -p1 < /app/ts/\"$p\") ||
+            { echo 'FATAL: patch does not apply to pinned OC source' >&2; exit 1; };
+        done &&
         npx vitest run --config vitest.config.docker.ts --reporter=verbose
       "
     healthcheck:
@@ -32,3 +42,4 @@ services:
 
 volumes:
   npm-cache:
+  ts-node-modules:
