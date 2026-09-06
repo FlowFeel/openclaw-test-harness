@@ -250,9 +250,9 @@ export default definePluginEntry({
           };
         }
         try {
-          const result = activeClient === client
-            ? await client.post("/exec", params)
-            : await activeClient.exec(params.operation as string, params.data);
+          const result = "exec" in activeClient
+            ? await activeClient.exec(params.operation as string, params.data)
+            : await (activeClient as SidecarClient).post("/exec", params);
           return {
             content: [
               {
