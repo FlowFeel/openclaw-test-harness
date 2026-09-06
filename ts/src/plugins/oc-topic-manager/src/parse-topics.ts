@@ -18,6 +18,10 @@ interface RawTopic {
   title?: unknown;
   message_count?: unknown;
   pinned?: unknown;
+  /** Optional: last activity, supplied by ingestion (the Bot API topic
+   *  payload does NOT carry it — sources that can derive it set it here). */
+  lastActiveAt?: unknown;
+  last_active_at?: unknown;
 }
 
 /** True when the raw entry carries a numeric topic id. */
@@ -35,6 +39,16 @@ function isCount(value: unknown): value is number {
 }
 
 /**
+ * Extract a last-activity timestamp from a raw entry. Accepts either spelling;
+ * returns "" when absent or unparseable ("" means "unknown", never "now").
+ */
+function lastActiveAtOf(entry: RawTopic): string {
+  const raw = entry.lastActiveAt ?? entry.last_active_at;
+  if (typeof raw !== "string" || !raw) return "";
+  return Number.isNaN(Date.parse(raw)) ? "" : raw;
+}
+
+/**
  * Normalize an unknown payload into TopicMeta[].
  * Accepts either a bare array or `{ topics: [...] }`.
  * Malformed entries are dropped.
@@ -49,7 +63,7 @@ export function parseTopics(payload: unknown): TopicMeta[] {
     id: entry.message_thread_id as number,
     title: typeof entry.title === "string" ? entry.title : "",
     messageCount: isCount(entry.message_count) ? entry.message_count : 0,
-    lastActiveAt: "",
+    lastActiveAt: lastActiveAtOf(entry),
     pinned: entry.pinned === true,
   }));
 }
