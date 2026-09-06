@@ -5,11 +5,20 @@
  */
 
 export const Type = {
-  Object(properties: Record<string, unknown>) {
-    return { type: "object", properties };
+  Object(properties: Record<string, unknown>, opts?: { description?: string }) {
+    return { type: "object", properties, ...opts };
   },
   String(opts?: { description?: string }) {
     return { type: "string", ...opts };
+  },
+  Number(opts?: { description?: string }) {
+    return { type: "number", ...opts };
+  },
+  Array(items: unknown, opts?: { description?: string }) {
+    return { type: "array", items, ...opts };
+  },
+  Optional(schema: unknown) {
+    return { ...(schema as Record<string, unknown>), optional: true };
   },
   Any(opts?: { description?: string }) {
     return { type: "any", ...opts };

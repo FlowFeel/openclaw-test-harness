@@ -1,0 +1,19 @@
+{
+  "id": "oc-topic-manager",
+  "name": "OC Topic Manager",
+  "description": "Forum topic registry hygiene — detects orphaned topics and stale registrations, builds recovery plans. Pure core, no sidecar.",
+  "contracts": {
+    "tools": ["topic_audit", "topic_recover"]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "maxIdleDays": { "type": "number", "default": 14, "description": "Days idle before archive is suggested" },
+      "maxMessages": { "type": "number", "default": 2000, "description": "Message count before compaction is suggested" }
+    }
+  }
+}
