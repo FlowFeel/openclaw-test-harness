@@ -28,7 +28,7 @@
 
 import { definePluginEntry, Type, type PluginApi } from "./types.js";
 import { startSidecar, stopSidecar, type SidecarHandle } from "./sidecar-manager.js";
-import { registerSidecar, unregisterSidecar } from "../../shared/sidecar-registry.js";
+import { registerSidecar, unregisterSidecar, getSidecar } from "../../shared/sidecar-registry.js";
 import { createSidecarClient, type SidecarClient } from "./sidecar-client.js";
 
 export interface SidecarPluginConfig {
@@ -168,7 +168,15 @@ export default definePluginEntry({
         "session registry size, event loop delay, CPU, and heap usage.",
       parameters: Type.Object({}),
       async execute(_id: string, _params: Record<string, unknown>) {
-        if (!client) {
+        // Try local client first, then fall back to globalThis registry.
+        // This handles the case where a duplicate plugin load re-registered
+        // the tool with a null client, but the first load's sidecar is still
+        // registered in the globalThis singleton.
+        const activeClient = client ?? (() => {
+          const s = getSidecar();
+          return s.isAvailable() ? s : null;
+        })();
+        if (!activeClient) {
           return {
             content: [
               {
@@ -179,7 +187,15 @@ export default definePluginEntry({
           };
         }
         try {
-          const health = await client.get("/health");
+          // SidecarProtocol doesn't have get(), so use exec to fetch health
+          const health = activeClient === client
+            ? await client.get("/health")
+            : await (async () => {
+                // For registry-based sidecar, use exec to get health info
+                // via a sidecar health request
+                const c = createSidecarClient(`http://127.0.0.1:${sidecarPort}`);
+                return await c.get("/health");
+              })();
           return {
             content: [
               {
@@ -219,7 +235,11 @@ export default definePluginEntry({
         }),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
-        if (!client) {
+        const activeClient = client ?? (() => {
+          const s = getSidecar();
+          return s.isAvailable() ? s : null;
+        })();
+        if (!activeClient) {
           return {
             content: [
               {
@@ -230,7 +250,9 @@ export default definePluginEntry({
           };
         }
         try {
-          const result = await client.post("/exec", params);
+          const result = activeClient === client
+            ? await client.post("/exec", params)
+            : await activeClient.exec(params.operation as string, params.data);
           return {
             content: [
               {
