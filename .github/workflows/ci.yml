@@ -148,7 +148,7 @@ jobs:
       - name: Run E2E tests (testcontainers)
         working-directory: ts
         run: |
-          npx vitest run tests/e2e/ tests/oc-source/ --reporter=verbose --testTimeout=120000 --maxWorkers=1
+          npx vitest run tests/e2e/ tests/oc-source/ --reporter=verbose --testTimeout=120000 --minWorkers=1 --maxWorkers=1
       - name: Container cleanup
         if: always()
         run: |
