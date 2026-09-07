@@ -145,8 +145,13 @@ jobs:
       - name: Build plugin bundles (boot gate tests built artifacts)
         working-directory: ts
         run: npm run build:plugins
+      - name: Pre-build test image (surface real build errors; warm cache)
+        run: |
+          docker build -f docker/Dockerfile --build-arg OC_VERSION=2026.7.1 -t oc-e2e-prebuild:debug .
       - name: Run E2E tests (testcontainers)
         working-directory: ts
+        env:
+          DEBUG: testcontainers,testcontainers:build
         run: |
           npx vitest run tests/e2e/ tests/oc-source/ --reporter=verbose --testTimeout=120000 --minWorkers=1 --maxWorkers=1
       - name: Container cleanup
