@@ -278,7 +278,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
     const ocImage = await GenericContainer.fromDockerfile(
       path.resolve(TS_DIR, ".."),
       "docker/Dockerfile"
-    ).withBuildkit().withCache(true).build();
+    ).withCache(true).build();
 
     container = await ocImage
       .withNetwork(network)

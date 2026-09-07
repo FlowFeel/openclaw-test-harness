@@ -76,7 +76,7 @@ describe("OC Session Guard Plugin E2E (Testcontainers)", () => {
     const builder = await GenericContainer.fromDockerfile(
       path.resolve(__dirname, "../../.."),
       "docker/Dockerfile"
-    ).withBuildkit().withCache(true).build();
+    ).withCache(true).build();
 
     container = await builder
       .withWorkingDir("/app")

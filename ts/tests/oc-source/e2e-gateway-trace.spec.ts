@@ -52,7 +52,7 @@ async function setupContainer() {
   const builder = await GenericContainer.fromDockerfile(
       path.resolve(REPO_ROOT),
       "docker/Dockerfile"
-    ).withBuildkit().withCache(true).build();
+    ).withCache(true).build();
 
   builder
     .withWorkingDir("/app")
