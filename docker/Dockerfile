@@ -25,7 +25,7 @@ RUN npm install -g tsx
 # in the oc-source submodule. Patch verification therefore happens at RUN time
 # (see docker-compose.test.yml: `patch --dry-run` against /app/oc-source), not
 # at build time.
-ARG OC_VERSION=2026.6.8
+ARG OC_VERSION=2026.7.1
 RUN npm install -g openclaw@${OC_VERSION}
 
 # Patch tooling is needed at RUN time for --dry-run verification against the
