@@ -107,6 +107,9 @@ describe("Feature: every plugin boots in a real OpenClaw gateway", () => {
       },
     })
     await gw.stop()
+    // Dump the gateway log on failure — the boot contract claim must be
+    // diagnosable from CI output alone (no local repro needed).
+    if (gw.ready) console.log("[boot-gate] hostile-config gateway log:\n" + gw.log)
     expect(gw.ready).toBe(false)
     expect(gw.log).toContain("Invalid config")
     expect(gw.log).toContain("oc-topic-manager")

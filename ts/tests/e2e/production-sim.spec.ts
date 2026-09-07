@@ -42,7 +42,7 @@ const PLUGIN_DIRS = [
   "oc-stream-relay",
 ];
 const SHARED_DIR = path.resolve(TS_DIR, "src/plugins/shared");
-const OC_VERSION = "2026.6.8";
+const OC_VERSION = "2026.7.1"; // must match docker/Dockerfile ARG OC_VERSION
 
 // Expected hook counts per plugin (from source code audit)
 const HOOK_COUNTS: Record<string, number> = {
