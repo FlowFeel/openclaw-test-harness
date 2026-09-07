@@ -25,9 +25,16 @@
     "src/**/*",
     "tests/**/*"
   ],
+// tests/oc-source and ../oc-source are excluded from the harness tsc program:
+// the submodule is the OpenClaw fork compiled with ITS OWN tsconfig. Under the
+// harness's strict settings the fork source produces ~16k errors (TS18046 etc.)
+// and plain tsc cannot resolve @openclaw/* (only vitest aliases can, at
+// runtime). oc-source specs are runtime-verified in the E2E layer (90/90).
   "exclude": [
     "node_modules",
     "dist",
-    "oc-source"
+    "oc-source",
+    "../oc-source",
+    "tests/oc-source"
   ]
 }

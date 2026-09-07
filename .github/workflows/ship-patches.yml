@@ -53,7 +53,7 @@ jobs:
           # Same pattern as the testcontainers reuse hash (patch sha in a label).
           PATCH_SHA=$(cat ts/patches/* 2>/dev/null | sha256sum | cut -c1-12)
           PATCH_COUNT=$(ls ts/patches/* 2>/dev/null | wc -l | tr -d ' ')
-          OC_VERSION="2026.6.8"
+          OC_VERSION="2026.7.1"
           NEW_TAG="v0.${PATCH_COUNT}.${PATCH_SHA}-oc-${OC_VERSION}"
           echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
           echo "patch_sha=${PATCH_SHA}" >> $GITHUB_OUTPUT
@@ -102,7 +102,7 @@ jobs:
             --title "OC Patch $TAG" \
             --notes "## Patches shipped automatically from CI
 
-          **Patches against:** OpenClaw 2026.6.8 (commit f47542c5)
+          **Patches against:** OpenClaw 2026.7.1 (commit f47542c5)
           **Patch content sha:** ${{ steps.check.outputs.patch_sha }}
 
           ### Commits in this release
