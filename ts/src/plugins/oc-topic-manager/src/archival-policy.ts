@@ -31,23 +31,31 @@ function stateFor(meta: TopicMeta, nowMs: number, t: ArchivalThresholds): string
 
 /**
  * Evaluate one topic against the thresholds.
+ *
+ * When last activity is unknown (lastActiveAt "" or unparseable), the idle
+ * rule is NOT evaluated — an oversized topic still compacts, but a healthy-
+ * looking topic is reported as "last activity unknown" rather than silently
+ * "within thresholds", so a missing data source is visible in the report.
  */
 export function decideArchival(
   meta: TopicMeta,
   nowMs: number,
   thresholds: ArchivalThresholds
 ): ArchivalDecision {
-  const decision: ArchivalDecision = {
-    topicId: meta.id,
-    action: "leave",
-    reason: "within thresholds",
-  };
+  const idle = idleMs(meta, nowMs);
   switch (stateFor(meta, nowMs, thresholds)) {
     case "idle":
       return { topicId: meta.id, action: "archive", reason: `idle > ${thresholds.maxIdleDays}d` };
     case "oversized":
       return { topicId: meta.id, action: "compact", reason: `messages > ${thresholds.maxMessages}` };
     default:
-      return decision;
+      return {
+        topicId: meta.id,
+        action: "leave",
+        reason:
+          idle === null
+            ? "last activity unknown — idle rule not evaluated"
+            : "within thresholds",
+      };
   }
 }

@@ -114,8 +114,12 @@ export async function startOpenClaw(
 
   // Build the image from our Dockerfile — OC + tsx baked in.
   // build() returns a GenericContainer we can configure directly.
+  // Classic docker API build — buildkit's session layer flakes on GHA runners
+  // ("no active session: context deadline exceeded" while resolving base image
+  // metadata). The CI pre-build step warms the layer cache, so classic builds
+  // are fast. Dockerfile has no buildkit-only syntax (verified: no RUN
+  // --mount, no heredocs).
   const containerBuilder = await GenericContainer.fromDockerfile(REPO_ROOT, "docker/Dockerfile")
-    .withBuildkit()
     .withCache(true)
     .build();
 

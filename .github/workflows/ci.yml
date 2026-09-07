@@ -142,10 +142,18 @@ jobs:
       - name: Install OC submodule deps
         run: |
           cd ts/../oc-source/upstream && npm install -g pnpm@11.15.1 && pnpm install --ignore-scripts
+      - name: Build plugin bundles (boot gate tests built artifacts)
+        working-directory: ts
+        run: npm run build:plugins
+      - name: Pre-build test image (surface real build errors; warm cache)
+        run: |
+          docker build -f docker/Dockerfile --build-arg OC_VERSION=2026.7.1 -t oc-e2e-prebuild:debug .
       - name: Run E2E tests (testcontainers)
         working-directory: ts
+        env:
+          DEBUG: testcontainers,testcontainers:build
         run: |
-          npx vitest run tests/e2e/ tests/oc-source/ --reporter=verbose --timeout=120000 || true
+          npx vitest run tests/e2e/ tests/oc-source/ --reporter=verbose --testTimeout=120000 --minWorkers=1 --maxWorkers=1
       - name: Container cleanup
         if: always()
         run: |
@@ -160,26 +168,24 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: "3.12"
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.12
       - name: Install TS deps
         working-directory: ts
         run: npm ci --include=dev
-      - name: Run Piscina worker pool integration
-        working-directory: ts
-        run: |
-          # Run the worker pool tests with real Piscina (not mock)
-          npx vitest run tests/spec/worker-pool.spec.ts --reporter=verbose
-      - name: Run adaptive spawn integration
-        working-directory: ts
-        run: |
-          npx vitest run tests/spec/adaptive.spec.ts --reporter=verbose
+      # Real-Piscina coverage lives in tests/integration/piscina-pool.spec.ts
+      # (tests/spec/worker-pool.spec.ts exercises MockWorkerPool and already ran
+      # in the Layer-1 unit job — don't pay for it twice here).
       - name: Run BDD scenarios end-to-end
         working-directory: ts
         env:
@@ -201,8 +207,8 @@ jobs:
           fi
       - name: Run Python integration tests
         run: |
-          pip install -e ".[dev]"
-          pytest tests/integration/ tests/e2e/ -v --tb=short
+          uv venv && uv pip install -e ".[dev]"
+          uv run pytest tests/integration/ tests/e2e/ -v --tb=short
       - name: Staging summary
         if: always()
         run: |
@@ -210,8 +216,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Worker pool (Piscina) | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Adaptive spawn logic | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| BDD scenarios | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| BDD scenarios (integration + e2e) | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| OC patch verification | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Python integration | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY

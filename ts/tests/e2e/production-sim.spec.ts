@@ -42,7 +42,7 @@ const PLUGIN_DIRS = [
   "oc-stream-relay",
 ];
 const SHARED_DIR = path.resolve(TS_DIR, "src/plugins/shared");
-const OC_VERSION = "2026.6.8";
+const OC_VERSION = "2026.7.1"; // must match docker/Dockerfile ARG OC_VERSION
 
 // Expected hook counts per plugin (from source code audit)
 const HOOK_COUNTS: Record<string, number> = {
@@ -278,7 +278,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
     const ocImage = await GenericContainer.fromDockerfile(
       path.resolve(TS_DIR, ".."),
       "docker/Dockerfile"
-    ).withBuildkit().withCache(true).build();
+    ).withCache(true).build();
 
     container = await ocImage
       .withNetwork(network)

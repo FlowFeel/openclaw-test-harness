@@ -12,6 +12,7 @@ FROM node:22-bookworm-slim
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
+    patch \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -19,16 +20,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g tsx
 
 # OpenClaw — pinned, baked in. No runtime npm install.
-ARG OC_VERSION=2026.6.8
+# NOTE: the npm tarball ships a trimmed src/ (no src/agents/*), so the patches
+# in ts/patches/ CANNOT be applied to this tree — they target the full source
+# in the oc-source submodule. Patch verification therefore happens at RUN time
+# (see docker-compose.test.yml: `patch --dry-run` against /app/oc-source), not
+# at build time.
+ARG OC_VERSION=2026.7.1
 RUN npm install -g openclaw@${OC_VERSION}
 
-# Apply patches if any exist (no-op when none)
+# Patch tooling is needed at RUN time for --dry-run verification against the
+# mounted oc-source submodule (see docker-compose.test.yml command).
 COPY ts/patches/ /patches/
 RUN OC_ROOT="$(npm root -g)/openclaw" && \
-    if [ -d "$OC_ROOT" ]; then \
-      for p in /patches/*.patch; do \
-        [ -f "$p" ] && (cd "$OC_ROOT" && patch -p1 < "$p") || true; \
-      done; \
+    if [ ! -d "$OC_ROOT" ]; then \
+      echo "FATAL: openclaw@${OC_VERSION} not found in npm global root" >&2; exit 1; \
     fi
 
 WORKDIR /app

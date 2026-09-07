@@ -11,11 +11,14 @@ docker build -t oc-test -f docker/Dockerfile .
 ## Run
 
 ```bash
-# Interactive shell
-docker run -v $(pwd)/ts:/app/ts -v $(pwd)/oc-source:/app/oc-source -it oc-test
+# Run tests via docker compose (this is the prod-CI-parity path — the exact
+# command the docker-integration GHA job runs):
+docker compose -f docker/docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from oc-test
 
-# Run tests via docker compose
-docker compose -f docker/docker-compose.test.yml up
+# Interactive shell (occasional debugging only — the compose path is canonical:
+# a bare `docker run` skips the compose mounts, the node_modules volume, and
+# the typecheck/foundry/build/vitest command chain)
+docker run -v $(pwd)/ts:/app/ts -v $(pwd)/oc-source:/app/oc-source -it oc-test sh
 ```
 
 ## What's in the image
