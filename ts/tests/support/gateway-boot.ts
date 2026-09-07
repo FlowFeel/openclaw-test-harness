@@ -53,6 +53,41 @@ export interface BootGatewayOptions {
 }
 
 /**
+ * Stage root-owned copies of plugin dirs inside the container.
+ *
+ * @why
+ * OC's discovery blocks `plugins.load.paths` candidates whose owner uid
+ * differs from the gateway process ("suspicious ownership" — anti-tamper
+ * for other-user plugin injection). The harness mounts ts/ from the host
+ * (runner uid 1001) but runs the gateway as root (uid 0), so host-mounted
+ * plugin dirs are never actually loaded — only warning-blocked. Copying the
+ * dirs inside the container as root re-owners them, letting discovery and
+ * register() run for real.
+ *
+ * @dft I/O in container only; no mocks, no host mutation.
+ */
+export async function stagePluginDirs(
+  container: StartedTestContainer,
+  containerDirs: string[],
+): Promise<string[]> {
+  const stagedRoot = "/app/staged-plugins"
+  const rm = await container.exec(["sh", "-c", `rm -rf ${stagedRoot} && mkdir -p ${stagedRoot}`])
+  if (rm.exitCode !== 0) throw new Error(`staging prep failed: ${rm.output}`)
+  for (const dir of containerDirs) {
+    const name = dir.split("/").pop() ?? dir
+    const cp = await container.exec([
+      "sh",
+      "-c",
+      `cp -r ${dir} ${stagedRoot}/${name} && chown -R root:root ${stagedRoot}/${name}`,
+    ])
+    if (rm.exitCode !== 0 || cp.exitCode !== 0) {
+      throw new Error(`staging failed for ${dir}: ${cp.output}`)
+    }
+  }
+  return containerDirs.map((d) => `${stagedRoot}/${d.split("/").pop()}`)
+}
+
+/**
  * Boot a real gateway in the container. Resolves when the listener is up;
  * the caller must stop() it.
  */

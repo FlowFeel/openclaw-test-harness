@@ -35,6 +35,7 @@ import {
   bootGateway,
   builtPluginDirs,
   probeGateway,
+  stagePluginDirs,
   PLUGINS_SRC_DIR,
 } from "../support/gateway-boot.js"
 
@@ -48,6 +49,9 @@ let port = 18901
 // Container-path form of a host plugin dir (ts is mounted at /app/ts).
 const toContainerPath = (hostDir: string) => hostDir.replace(/^.*\/ts\//, "/app/ts/")
 
+/** Staged (root-owned) copy path for a plugin, after stagePluginDirs in beforeAll. */
+const stagedDir = (name: string) => `/app/staged-plugins/${name}`
+
 beforeAll(async () => {
   // The gate tests built artifacts; build deterministically up front.
   if (!fs.existsSync(distMarker)) {
@@ -55,10 +59,15 @@ beforeAll(async () => {
   }
   env = await startOpenClaw()
   const hostDirs = builtPluginDirs()
-  pluginDirs = hostDirs.map(toContainerPath)
+  // Stage root-owned copies inside the container: the gateway process runs as
+  // root, and OC blocks load.paths candidates whose owner uid differs from
+  // the process ("suspicious ownership"). Host-mounted dirs (runner uid
+  // 1001) would be silently warning-blocked — the boot gate must exercise
+  // plugins OC actually discovers and loads.
   pluginIds = hostDirs.map(
     (d) => JSON.parse(fs.readFileSync(path.join(d, "openclaw.plugin.json"), "utf8")).id as string,
   )
+  pluginDirs = await stagePluginDirs(env.container, hostDirs.map(toContainerPath))
   expect(pluginDirs.length).toBeGreaterThan(0)
 }, 180_000)
 
@@ -97,7 +106,7 @@ describe("Feature: every plugin boots in a real OpenClaw gateway", () => {
     // gateway — it must be a loud, named, diagnosable failure.
     const gw = await bootGateway({
       container: env.container,
-      pluginDirs: ["/app/ts/src/plugins/oc-topic-manager"],
+      pluginDirs: [stagedDir("oc-topic-manager")],
       port: port++,
       entries: {
         "oc-topic-manager": {
@@ -120,7 +129,7 @@ describe("Feature: every plugin boots in a real OpenClaw gateway", () => {
     // OC fails closed on undiscoverable load paths — pinned real behavior.
     const gw = await bootGateway({
       container: env.container,
-      pluginDirs: ["/app/ts/src/plugins/oc-topic-manager", "/nonexistent-xyz"],
+      pluginDirs: [stagedDir("oc-topic-manager"), "/nonexistent-xyz"],
       port: port++,
       entries: { "oc-topic-manager": { enabled: true } },
     })
