@@ -14,7 +14,7 @@ jobs:
     name: Ship Patch Release
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    timeout-minutes: 5
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -65,13 +65,33 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install TS deps
+        if: steps.check.outputs.should_ship == 'true'
+        working-directory: ts
+        run: npm ci --include=dev
+
+      # The verify suite includes tests/oc-source/** specs that import OC
+      # source (contract specs, hook proofs) and spawn the submodule's tsx.
+      # Without this step those specs fail on module resolution (ENOENT /
+      # broken zod subpaths) — an environment gap, not a patch defect.
+      - name: Install OC submodule deps
+        if: steps.check.outputs.should_ship == 'true'
+        run: |
+          cd oc-source/upstream && npm install -g pnpm@11.15.1 && pnpm install --ignore-scripts
+
       - name: Verify patches pass tests
         if: steps.check.outputs.should_ship == 'true'
         working-directory: ts
         run: |
-          npm ci --include=dev
-          npx tsc --noEmit
-          npx vitest run --reporter=dot
+          # Same commands + config as the CI typescript-tests job — the ship
+          # gate must verify in the same environment CI proved, not a
+          # different one (parity rule). ci config excludes tests/e2e and
+          # tests/oc-source, which the CI e2e job already ran to green
+          # (this workflow only triggers after CI succeeds).
+          npx tsc --noEmit -p tsconfig.ci.json
+          npm run validate:foundry
+          npm run build:plugins
+          npx vitest run --config vitest.config.ci.ts --reporter=dot
 
       - name: Create release
         if: steps.check.outputs.should_ship == 'true'
