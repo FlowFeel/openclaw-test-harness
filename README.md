@@ -27,7 +27,7 @@ See [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) for the f
 
 ---
 
-## Current State (August 2026)
+## Current State (August 2026 — point-in-time snapshot; test-count truth lives in CI)
 
 | Metric | Value |
 |--------|-------|
@@ -444,35 +444,23 @@ See `docker/README.md` for build/run/debug instructions.
 
 ## Documentation Index
 
-### Architecture docs (`docs/`)
+The canonical documentation map lives in **[`docs/README.md`](./docs/README.md)** —
+organized by task (ship a plugin, run tests, debug an incident, patch OC,
+telegram topic work) with reading order for new team members and explicit
+markers for point-in-time reviews vs load-bearing standards.
 
-| Document | Description |
-|----------|-------------|
-| [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) | The foundry: scaffold, validate, test. Six DFT axioms, round-trip proof, pure seams vs thin I/O |
-| [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) | OC source mod test bed: patch 0001, Level 1 + Level 2 E2E, the dual API split (`on()` vs `registerHook()`) |
-| [`docs/efficiency-testing.md`](./docs/efficiency-testing.md) | Efficiency testing: an axiomatic derivation — 7 hypotheses from the 6 DFT axioms, 3 testability tiers, 2 anti-patterns |
-| [`docs/postmortem-sunday-senddocument-timeout.md`](./docs/postmortem-sunday-senddocument-timeout.md) | Postmortem: Sunday gateway websocket timeout on sendDocument — diagnosis, the document send policy, wiring instructions |
-| [`docs/plugin-gaps.md`](./docs/plugin-gaps.md) | The three gaps: outbound sendMediaGroup batching (Gap 1), configurable timeoutMs policy (Gap 2), subagent progress heartbeats (Gap 3) |
-| [`docs/ship-review.md`](./docs/ship-review.md) | Ship readiness review: all five packaging risks (B1/B2/H1/M1/M2) fixed, the Option A/B/C bundling decision, build + smoke test, install instructions |
-| [`docs/junior-team-review.md`](./docs/junior-team-review.md) | Code review of junior team PRs #18–#20 (sidecar wiring): P0 foundry violation, P1 path-arg bug, P2 fetch race, coverage gaps, wiring test plan |
-| [`docs/topic-worker-pool.md`](./docs/topic-worker-pool.md) | oc-topic-worker-pool: semaphore admission control for concurrent Telegram topic sessions |
-| [`docs/SESSION-HANDOFF.md`](./docs/SESSION-HANDOFF.md) | Dense literate snapshot of working state — restores context after compaction |
-| [`docs/WAR-STORY.md`](./docs/WAR-STORY.md) | War story: patching OC's event loop from 834ms P99 to worker threads |
+Quick pointers:
 
-### Component docs
+| If you want to… | Read |
+|---|---|
+| Join the team / onboard an agent | [`docs/README.md`](./docs/README.md) → "Start here" |
+| Know how we test (and where) | [`docs/testing-policy.md`](./docs/testing-policy.md) |
+| Know the quality standard | [`docs/plugin-foundry.md`](./docs/plugin-foundry.md) — the six DFT axioms |
+| Know what OC lets our plugins do | [`docs/oc-plugin-capability-map.md`](./docs/oc-plugin-capability-map.md) |
+| Reference a plugin | [`ts/src/plugins/README.md`](./ts/src/plugins/README.md) |
+| Work on OC patches | [`ts/patches/README.md`](./ts/patches/README.md), [`docs/oc-source-mod-testbed.md`](./docs/oc-source-mod-testbed.md) |
 
-| Document | Description |
-|----------|-------------|
-| [`ts/src/plugins/README.md`](./ts/src/plugins/README.md) | All 11 plugins: hooks, tools, test counts, design principles |
-| [`oc-source/README.md`](./oc-source/README.md) | OC source mod test bed: submodule structure, patch listing |
-| [`ts/patches/README.md`](./ts/patches/README.md) | OC patches: child-admission, worker-pool, sqlite-accessor |
-
-### Project history & tickets
-
-| Document | Description |
-|----------|-------------|
-| [`POST_MORTEM.md`](./POST_MORTEM.md) | Retrospective: event loop saturation, bloat fields, plugin-only mitigation |
-| [`ISSUES.md`](./ISSUES.md) | Tickets #1-#17: initial plugin suite, pure logic, session cleanup |
-| [`PROJECT_SUBAGENT_EFFICIENCY.md`](./PROJECT_SUBAGENT_EFFICIENCY.md) | Tickets #18-#25: subagent dispatch, depth limits, adaptive admission |
-| [`PROJECT_OC_EFFICIENCY.md`](./PROJECT_OC_EFFICIENCY.md) | Tickets #26-#33: context cache, stream relay, compaction helper, model router |
-| [`PROJECT_NEXT_IMPROVEMENTS.md`](./PROJECT_NEXT_IMPROVEMENTS.md) | Tickets #34-#42: foundry, OC source mod test bed, E2E verification, worker pool |
+Ticket history: [`ISSUES.md`](./ISSUES.md) (#1–#17),
+[`PROJECT_SUBAGENT_EFFICIENCY.md`](./PROJECT_SUBAGENT_EFFICIENCY.md) (#18–#25),
+[`PROJECT_OC_EFFICIENCY.md`](./PROJECT_OC_EFFICIENCY.md) (#26–#33),
+[`PROJECT_NEXT_IMPROVEMENTS.md`](./PROJECT_NEXT_IMPROVEMENTS.md) (#34–#42).

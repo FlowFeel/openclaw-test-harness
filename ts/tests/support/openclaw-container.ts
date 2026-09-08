@@ -103,10 +103,24 @@ function existingContainerExists(label: string): boolean {
  * - Plugin source and oc-source submodule are volume-mounted.
  * - Content-hash label enables reuse across test runs.
  * - Patches are applied at image build time (not runtime).
+ *
+ * Policy guard (docs/testing-policy.md): agents must not execute the OC
+ * runtime on a host machine. Local execution requires an explicit human
+ * opt-in via OC_E2E_ALLOW_LOCAL=1; GHA runs are always allowed.
  */
 export async function startOpenClaw(
   opts: StartOpenClawOptions = {},
 ): Promise<StartedOpenClawContainer> {
+  if (
+    process.env.GITHUB_ACTIONS !== "true" &&
+    process.env.OC_E2E_ALLOW_LOCAL !== "1"
+  ) {
+    throw new Error(
+      "Refusing to run the OC runtime locally (docs/testing-policy.md). " +
+        "Agents: open a PR and let GHA run the e2e gates. " +
+        "Humans: set OC_E2E_ALLOW_LOCAL=1 to override.",
+    )
+  }
   const pluginSha = dirSha256(path.resolve(TS_DIR, "src/plugins"));
 
   let network: StartedNetwork | undefined;

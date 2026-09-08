@@ -4,6 +4,9 @@
 > derived from the pinned submodule (`oc-source/upstream` @ 2026.7.2, file paths
 > cited). When OC bumps, re-verify the citations before trusting this doc.
 >
+> **Testing rule:** agents execute everything in GHA — never run the OC runtime
+> locally (see `docs/testing-policy.md`).
+>
 > Purpose: (1) know every seam we can use, (2) know exactly where a plugin can
 > hurt the gateway, (3) know what our harness proves vs. what is prose.
 
