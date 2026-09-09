@@ -7,7 +7,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:plugins": "node scripts/build-plugins.mjs",
-    "test:e2e": "playwright test",
+    "test:e2e": "vitest run tests/e2e/ tests/oc-source/ --reporter=verbose --testTimeout=120000 --minWorkers=1 --maxWorkers=1",
     "typecheck": "tsc --noEmit -p tsconfig.ci.json",
     "validate:foundry": "for d in src/plugins/oc-*/; do npx tsx src/foundry/cli.ts validate \"$d\" || exit 1; done",
     "lint": "eslint src/ tests/",
@@ -25,7 +25,6 @@
   "devDependencies": {
     "@eslint/js": "^9.0.0",
     "@openclaw/fs-safe": "^0.5.0",
-    "@playwright/test": "^1.49.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "2.1.9",

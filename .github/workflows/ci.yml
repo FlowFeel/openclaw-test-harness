@@ -152,8 +152,7 @@ jobs:
         working-directory: ts
         env:
           DEBUG: testcontainers,testcontainers:build
-        run: |
-          npx vitest run tests/e2e/ tests/oc-source/ --reporter=verbose --testTimeout=120000 --minWorkers=1 --maxWorkers=1
+        run: npm run test:e2e
       - name: Container cleanup
         if: always()
         run: |
@@ -186,14 +185,21 @@ jobs:
       # Real-Piscina coverage lives in tests/integration/piscina-pool.spec.ts
       # (tests/spec/worker-pool.spec.ts exercises MockWorkerPool and already ran
       # in the Layer-1 unit job — don't pay for it twice here).
+      # Same invocation as the e2e job (npm run test:e2e) plus the
+      # integration suite. The pre-build + worker limits are required:
+      # without them, concurrent docker builds blow past the specs'
+      # beforeAll timeouts (PR #25 main-CI failure, 2026-09-08).
+      - name: Pre-build test image (surface real build errors; warm cache)
+        run: |
+          docker build -f docker/Dockerfile --build-arg OC_VERSION=2026.7.1 -t oc-e2e-prebuild:debug .
       - name: Run BDD scenarios end-to-end
         working-directory: ts
         env:
           # CI gets a fresh container every run (no reuse) so Ryuk cleans up and
           # there's no cross-run state leakage. Dev runs reuse by default.
           TESTCONTAINERS_REUSE_ENABLE: "false"
-        run: |
-          npx vitest run tests/integration/ tests/e2e/ --reporter=verbose
+          DEBUG: testcontainers,testcontainers:build
+        run: npm run test:e2e -- tests/integration/
       - name: Verify patch against OC source
         working-directory: ts
         run: |
