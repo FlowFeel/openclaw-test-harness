@@ -182,6 +182,13 @@ jobs:
       - name: Install TS deps
         working-directory: ts
         run: npm ci --include=dev
+      # tests/oc-source/ (pulled in by test:e2e) imports OC source and spawns
+      # the submodule's tsx — without this it fails on module resolution
+      # (ENOENT tsx, MODULE_NOT_FOUND chalk/semver via the missing
+      # oc-source/upstream/node_modules). Same env as the e2e job.
+      - name: Install OC submodule deps
+        run: |
+          cd ts/../oc-source/upstream && npm install -g pnpm@11.15.1 && pnpm install --ignore-scripts
       # Real-Piscina coverage lives in tests/integration/piscina-pool.spec.ts
       # (tests/spec/worker-pool.spec.ts exercises MockWorkerPool and already ran
       # in the Layer-1 unit job — don't pay for it twice here).
