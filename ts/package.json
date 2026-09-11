@@ -7,6 +7,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:plugins": "node scripts/build-plugins.mjs",
+    "pack:plugins": "node scripts/pack-plugins.mjs",
     "test:e2e": "vitest run tests/e2e/ tests/oc-source/ --reporter=verbose --testTimeout=120000 --minWorkers=1 --maxWorkers=1",
     "typecheck": "tsc --noEmit -p tsconfig.ci.json",
     "validate:foundry": "for d in src/plugins/oc-*/; do npx tsx src/foundry/cli.ts validate \"$d\" || exit 1; done",

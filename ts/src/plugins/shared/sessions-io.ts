@@ -12,7 +12,7 @@
  * - Returns null on missing file (not an error)
  */
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, renameSync, copyFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { SessionsMap } from "./session-cleanup.ts";
 
@@ -40,5 +40,14 @@ export function readSessions(path?: string): SessionsMap | null {
 
 export function writeSessions(data: SessionsMap, path?: string): void {
   const p = path ?? getDefaultPath();
-  writeFileSync(p, JSON.stringify(data, null, 0));
+  // Crash-safe write: serialize FIRST (throws before touching the target),
+  // back up the previous content, then write tmp + atomic rename. A crash
+  // mid-write can never leave sessions.json truncated or half-written.
+  const payload = JSON.stringify(data, null, 0);
+  if (existsSync(p)) {
+    copyFileSync(p, `${p}.bak`);
+  }
+  const tmp = `${p}.tmp`;
+  writeFileSync(tmp, payload);
+  renameSync(tmp, p);
 }

@@ -4,7 +4,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "openclaw": {
-    "extensions": ["./dist/index.js"]
-  },
-  "dependencies": {}
+    "extensions": ["./dist/index.js"],
+    "compat": {
+      "pluginApi": ">=2026.6.8",
+      "minGatewayVersion": "2026.6.8"
+    }
+  }
 }

@@ -19,9 +19,7 @@ import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
 
 
 
-export interface OcE2eTraceTestConfig {
-  // TODO: add config fields
-}
+export type OcE2eTraceTestConfig = Record<string, unknown>;
 
 export default definePluginEntry({
   id: "oc-e2e-trace-test",

@@ -285,7 +285,7 @@ export function computeProgress(
 
   for (const [id, task] of state.tasks) {
     switch (task.status) {
-      case "queued":
+      case "queued": {
         queued++;
         // Check if this task can dispatch next
         const deps = task.spec.dependsOn ?? [];
@@ -297,6 +297,7 @@ export function computeProgress(
           nextTaskIds.push(id);
         }
         break;
+      }
       case "dispatched":
         dispatched++;
         break;

@@ -82,7 +82,7 @@ describe("H1: sync I/O blocks the event loop, async doesn't", () => {
     expect(delay).toBeGreaterThan(3);
   });
 
-  it("readFile (async) of a 5MB file does NOT cause significant event loop blocking", async () => {
+  it("Scenario: async I/O does not cause significant event loop blocking", async () => {
     const dir = makeTmpDir();
     const filePath = resolve(dir, "sessions.json");
     const content = generateLargeJson();

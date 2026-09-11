@@ -94,7 +94,7 @@ describe("writeSessions + readSessions round-trip", () => {
     expect(result).toEqual({});
   });
 
-  it("overwrites an existing file", () => {
+  it("Scenario: a successful write replaces the file atomically", () => {
     const dir = makeTmpDir();
     const path = resolve(dir, "sessions.json");
     writeSessions({ "topic:1": { model: "old" } } as SessionsMap, path);
@@ -110,5 +110,46 @@ describe("writeSessions + readSessions round-trip", () => {
     expect(existsSync(path)).toBe(false);
     writeSessions({ "topic:1": { model: "gpt" } } as SessionsMap, path);
     expect(existsSync(path)).toBe(true);
+  });
+
+  it("does not leave temporary files behind (atomic rename)", () => {
+    const dir = makeTmpDir();
+    const path = resolve(dir, "sessions.json");
+    writeSessions({ "topic:1": { model: "gpt" } } as SessionsMap, path);
+    expect(existsSync(`${path}.tmp`)).toBe(false);
+    expect(existsSync(path)).toBe(true);
+  });
+
+  it("Scenario: each write backs up the previous content", () => {
+    const dir = makeTmpDir();
+    const path = resolve(dir, "sessions.json");
+    const previous = { "topic:1": { model: "old" } } as unknown as SessionsMap;
+    const next = { "topic:2": { model: "new" } } as SessionsMap;
+    writeSessions(previous, path);
+    writeSessions(next, path);
+    expect(readSessions(`${path}.bak`)).toEqual(previous);
+    expect(readSessions(path)).toEqual(next);
+  });
+
+  it("does not create a backup when the file does not exist yet", () => {
+    const dir = makeTmpDir();
+    const path = resolve(dir, "sessions.json");
+    writeSessions({ "topic:1": { model: "gpt" } } as SessionsMap, path);
+    expect(existsSync(`${path}.bak`)).toBe(false);
+  });
+
+  it("Scenario: a failed write leaves the previous file intact", () => {
+    const dir = makeTmpDir();
+    const path = resolve(dir, "sessions.json");
+    const previous = { "topic:1": { model: "keep" } } as SessionsMap;
+    writeSessions(previous, path);
+    // Circular reference — JSON.stringify throws before the target is touched.
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(() =>
+      writeSessions({ "topic:x": circular } as unknown as SessionsMap, path),
+    ).toThrow();
+    expect(readSessions(path)).toEqual(previous);
+    expect(existsSync(`${path}.tmp`)).toBe(false);
   });
 });

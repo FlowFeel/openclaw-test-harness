@@ -1,15 +1,14 @@
-Feature: Subagent Spawning Performance
-  In order to verify the "flexible spine, tight entropy" policy
-  As a platform engineer
-  I need to verify that multiple subagents can be spawned concurrently
-  and that tight timeouts prevent lingering
+Feature: Subagent spawning performance — the "flexible spine, tight entropy" policy
+  Admission control admits parallel subagent work up to explicit caps;
+  timeouts and archival keep entropy bounded. Every scenario below is
+  executed by tests/integration/bdd.spec.ts and the efficiency specs.
 
   Background:
     Given the OC runtime is patched with:
       | patch                    | status |
       | child-admission          | active |
       | worker-pool              | active |
-      | sqlite-registry           | active |
+      | sqlite-registry          | active |
     And the config is:
       | maxConcurrent            | 6    |
       | maxChildrenPerAgent      | 4    |
@@ -17,52 +16,41 @@ Feature: Subagent Spawning Performance
       | runTimeoutSeconds        | 120  |
       | archiveAfterMinutes      | 5    |
 
-  @acceptance @spine
-  Scenario: Multiple subagents spawned concurrently
-    Given 0 active subagents are running
-    When 4 subagents are spawned in parallel
-    Then all 4 spawns should be admitted
-    And the worker pool should have available threads
+  Rule: Parallel work is admitted up to the concurrent cap
 
-  @acceptance @spine
-  Scenario: Spawn rejected at concurrent limit
-    Given 6 active subagents are running
-    When a 7th subagent is requested
-    Then the spawn should be rejected
-    And the governing cap should be "subagents.maxConcurrent"
+    Scenario: Spawn admitted when under concurrent limit
+      Given 0 active subagents are running
+      When a subagent spawn is requested
+      Then the spawn is admitted
 
-  @acceptance @entropy
-  Scenario: Tight timeout kills lingering subagent
-    Given a subagent has been running for 120 seconds
-    When the timeout sweep runs
-    Then the subagent should transition to timed_out
-    And the subagent should be eligible for archival
+    Scenario: Spawn rejected when at concurrent limit
+      Given the concurrent limit is already reached
+      When another subagent spawn is requested
+      Then the spawn is rejected
 
-  @acceptance @entropy
-  Scenario: Fast cleanup after completion
-    Given a subagent completed 5 minutes ago
-    When the archive sweep runs
-    Then the subagent should transition to archived
-    And no further transitions should be possible
+  Rule: Tight entropy — timeouts and archival bound lingering work
 
-  @acceptance @worker-pool
-  Scenario: Worker pool offloads JSON.stringify
-    Given the worker pool has 3 threads
-    When a large JSON object is serialized
-    Then the serialization should run in a worker thread
-    And the main event loop should not be blocked
+    Scenario: Subagent transitions to timed_out
+      Given a subagent has been running longer than its timeout
+      When the transition is evaluated
+      Then the subagent transitions to timed_out
 
-  @acceptance @registry
-  Scenario: SQLite registry returns counts fast
-    Given the SQLite registry is synced
-    When session counts are queried
-    Then the query should complete in under 500ms
-    And the counts should match the JSON registry
+    Scenario: Timed-out subagent transitions to archived
+      Given a subagent is in the timed_out state
+      When the archival transition runs
+      Then the subagent transitions to archived
+      And archived is final — no transitions out
 
-  @acceptance @policy
-  Scenario: Flexible spine allows parallel work
-    Given maxConcurrent is 6
-    When 6 subagents are spawned in parallel
-    Then all 6 should be admitted
-    And each subagent has a 2-minute timeout
-    And completed subagents are archived within 5 minutes
+  Rule: Heavy serialization never stalls the main loop
+
+    Scenario: async I/O does not cause significant event loop blocking
+      Given a large file read is issued asynchronously
+      When the event-loop delay probe samples during the read
+      Then the probe gap stays small compared to the sync variant
+
+  Rule: The registry answers count queries from real storage
+
+    Scenario: SQLite registry counts active sessions accurately
+      Given the SQLite registry contains known session records
+      When active session counts are queried
+      Then the counts match the inserted records

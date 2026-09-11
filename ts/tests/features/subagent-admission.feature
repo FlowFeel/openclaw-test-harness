@@ -34,7 +34,7 @@ Feature: Subagent Spawn Admission
     And the error should contain "must be cleaned up"
 
   @admission @runTimeout
-  Scenario: Spawn admitted after timed-out subagent is cleaned up
+  Scenario: Spawn admitted after cleanup
     Given 0 subagents have exceeded runTimeoutSeconds
     When a session requests to spawn a subagent
     Then the spawn should be admitted
@@ -56,7 +56,7 @@ Feature: Subagent Spawn Admission
     And the governing cap should be "subagents.maxChildrenPerAgent"
 
   @lifecycle @timeout
-  Scenario: Subagent transitions to timed_out after exceeding timeout
+  Scenario: Subagent transitions to timed_out
     Given a subagent is in running state
     And the runTimeoutSeconds is configured to 1
     When 1.5 seconds have elapsed

@@ -179,6 +179,16 @@ A code review identified one P0 (foundry violation), two P1-P2 issues, and sever
 
 The review also identified a structural gap: **the foundry doesn't run in CI** — it's a local check. The P0 violation shipped to `main` because no CI step caught it. Adding foundry validation to CI is the highest-value remaining fix.
 
+### Phase 22: Track B Ship Readiness & Automated Plugin Release Pipeline
+
+With all 12 plugins building to self-contained bundles, we completed the distribution architecture for Track B (the stock OpenClaw plugin suite):
+
+- **Package Metadata Uniformity**: Standardized all plugins to `@flowfeel/` package names and enforced `"openclaw.compat": { "pluginApi": ">=2026.6.8", "minGatewayVersion": "2026.6.8" }` across all manifests.
+- **Bundle Isolation & Lint Cleanliness**: Updated `eslint.config.js` to ignore `**/dist/**`, preventing ESLint collisions with minified JS bundles while guaranteeing 0 lint errors across the `src/` tree.
+- **Automated Packaging Toolchain (`pack-plugins.mjs`)**: Created `npm run pack:plugins` which packages all 12 plugins into `.tgz` archives inside `dist-plugins/` using standard `npm pack`, computing SHA256 checksums and emitting `plugins-manifest.json`.
+- **Automated GitHub Actions Release (`ship-plugins.yml`)**: Modeled after `ship-patches.yml`, this pipeline automatically triggers after CI succeeds on `main`, runs full static validation (`typecheck`, `validate:foundry`, `build:plugins`, unit specs), and publishes tagged GitHub Releases with all 12 plugin `.tgz` assets and checksum catalogs.
+- **Crash-Safe File I/O & Traceability**: Implemented atomic crash-safe writes in `sessions-io.ts` (serialize-first, `.bak` backup, atomic temp-file rename), executable Gherkin traceability in `traceability.spec.ts`, and verified H7 dispatch overhead in `hook-loop-budget.spec.ts`.
+
 ---
 
 ## What Worked
@@ -239,11 +249,11 @@ The review also identified a structural gap: **the foundry doesn't run in CI** �
 | Full suite | 0 | **1,292** (92 files, includes E2E + oc-source) |
 | Statement coverage | 0 | **82.5%** (CI config) |
 | CI layers | 0 | 4 (unit → docker → e2e → staging) |
-| Plugins | 0 | **11** (all DFT-valid, all use `api.on()`) |
-| Hook registrations | 0 | **36** (all via `api.on()`) |
-| Tools registered | 0 | **16** |
+| Plugins | 0 | **12** (all DFT-valid, all use `api.on()`) |
+| Hook registrations | 0 | **37** (all via `api.on()`) |
+| Tools registered | 0 | **21** |
 | Pure logic modules | 0 | **18** (in `shared/`, 97%+ coverage) |
-| Foundry validation | — | **11/11 pass** (six DFT axioms) |
+| Foundry validation | — | **12/12 pass** (six DFT axioms) |
 | Efficiency tests | 0 | **26** (6 hypotheses, 3 tiers) |
 | Releases | 0 | 2 (v0.1.0, v0.2.0) |
 
@@ -271,20 +281,22 @@ The review also identified a structural gap: **the foundry doesn't run in CI** �
 16. ✅ Per-topic actor isolation (`TopicRouter` sibling crash containment)
 17. ✅ Live process telemetry feeding admission (`TelemetryCollector` + `aggregateSystemHealth`)
 
-### Era 4: Plugin Suite & Foundry (PRs #1–#20 ✅)
+### Era 4: Plugin Suite & Foundry (PRs #1–#22 ✅)
 
-18. ✅ The `api.on()` migration — 36 hook registrations moved from `api.registerHook()` (never fires) to `api.on()` (fires). Hooks live for the first time.
-19. ✅ The plugin foundry — scaffold + validate against six DFT axioms. 11/11 pass.
+18. ✅ The `api.on()` migration — 37 hook registrations moved from `api.registerHook()` (never fires) to `api.on()` (fires). Hooks live for the first time.
+19. ✅ The plugin foundry — scaffold + validate against six DFT axioms. 12/12 pass.
 20. ✅ The three gaps — `media-batcher` (Gap 1), `document-send-policy` (Gap 2), `subagent-progress-tracker` (Gap 3). 76 tests.
 21. ✅ Efficiency testing — 7 hypotheses derived from 6 DFT axioms. 26 tests across 3 tiers.
 22. ✅ Plugin packaging — esbuild bundling (Option A), 5 ship-review risks fixed, 34-test smoke test.
 23. ✅ Sidecar wiring (junior team PRs #18–#20) — `sidecar-protocol`, `sidecar-registry` (`globalThis`), `sidecar-router`. Orchestrator stripped of 109 lines.
 24. ✅ Code review fixes (P0–P2) — foundry violation (`node:fs` → Protocol wrapper), fetch race (top-level → `gateway_start` with 200ms timeout), path arg fix.
+25. ✅ Foundry validation in CI — `typescript-tests` gates all PRs/commits on `validate:foundry`.
+26. ✅ H7 loop budget verification — `hook-loop-budget.spec.ts` verifies negligible 0-handler overhead against real `createHookRunner`.
+27. ✅ Track B automated packaging & release pipeline — `pack-plugins.mjs`, `ship-plugins.yml`, `.tgz` tarball creation with SHA256 catalog.
+28. ✅ Crash insurance & atomic sessions.json writes — `sessions-io.ts` serialize-first, `.bak` backup, atomic rename, and Gherkin traceability.
 
 ### Remaining
 
-- ⏳ Add foundry validation to CI (prevents DFT violations from shipping)
-- ⏳ H7: dispatch overhead with 0 handlers (needs E2E `createHookRunner`)
 - ⏳ Production re-verification (deploy fixed plugins with `api.on()` + bundles, observe real metrics)
 
 ---

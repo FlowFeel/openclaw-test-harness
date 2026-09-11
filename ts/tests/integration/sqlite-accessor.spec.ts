@@ -60,7 +60,7 @@ describe("SQLite Session Registry Accessor", () => {
     expect(retrieved!.status).toBe("completed");
   });
 
-  it("should count active sessions accurately", () => {
+  it("Scenario: SQLite registry counts active sessions accurately", () => {
     saveSession({ sessionKey: "s1", status: "created" });
     saveSession({ sessionKey: "s2", status: "running" });
     saveSession({ sessionKey: "s3", status: "completed" }); // Terminal

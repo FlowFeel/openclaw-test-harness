@@ -39,7 +39,7 @@ const topic = (over: Partial<TopicMeta> = {}): TopicMeta => ({
 });
 
 describe("parseTopics", () => {
-  it("normalizes a Telegram forum topics payload", () => {
+  it("Scenario: normalizes a Telegram forum topics payload", () => {
     const payload = {
       topics: [
         { message_thread_id: 82385, title: "Flow agent", message_count: 10, pinned: false },
@@ -94,13 +94,13 @@ describe("detectOrphans", () => {
     { topicId: 99999, sessionKey: "agent:main:telegram:group:-100:topic:99999" },
   ];
 
-  it("flags topics without a registration as orphaned", () => {
+  it("Scenario: flags topics without a registration as orphaned", () => {
     const topics = [topic({ id: 1 }), topic({ id: 82385, title: "Flow agent" })];
     const report = detectOrphans(topics, sessions);
     expect(report.orphaned.map((t) => t.id)).toEqual([82385]);
   });
 
-  it("flags registrations whose topic vanished as unregisteredSessions", () => {
+  it("Scenario: flags registrations whose topic vanished as unregisteredSessions", () => {
     const topics = [topic({ id: 1 })];
     const report = detectOrphans(topics, sessions);
     expect(report.unregistered.map((s) => s.topicId)).toEqual([99999]);
@@ -123,14 +123,14 @@ describe("decideArchival", () => {
     expect(d.action).toBe("leave");
   });
 
-  it("archives an idle topic", () => {
+  it("Scenario: archives an idle topic", () => {
     const t = topic({ lastActiveAt: "2026-08-01T10:00:00Z" });
     const d = decideArchival(t, NOW, thresholds);
     expect(d.action).toBe("archive");
     expect(d.reason).toMatch(/idle/i);
   });
 
-  it("compacts an oversized topic", () => {
+  it("Scenario: compacts an oversized topic", () => {
     const t = topic({ lastActiveAt: "2026-09-06T10:00:00Z", messageCount: 3000 });
     const d = decideArchival(t, NOW, thresholds);
     expect(d.action).toBe("compact");
@@ -141,7 +141,7 @@ describe("decideArchival", () => {
     expect(decideArchival(t, NOW, thresholds).action).toBe("archive");
   });
 
-  it("does NOT archive on unknown last activity — rule is unevaluated, not passed", () => {
+  it("Scenario: does NOT archive on unknown last activity — rule is unevaluated, not passed", () => {
     // Real Bot API payloads carry no per-topic last-activity field; a missing
     // source must never silently satisfy the idle rule.
     const t = topic({ lastActiveAt: "" });
@@ -150,7 +150,7 @@ describe("decideArchival", () => {
     expect(d.reason).toMatch(/unknown/i);
   });
 
-  it("still compacts an oversized topic when last activity is unknown", () => {
+  it("Scenario: still compacts an oversized topic when last activity is unknown", () => {
     const t = topic({ lastActiveAt: "", messageCount: 3000 });
     const d = decideArchival(t, NOW, thresholds);
     expect(d.action).toBe("compact");
@@ -158,7 +158,7 @@ describe("decideArchival", () => {
 });
 
 describe("buildRecoveryPlan", () => {
-  it("produces a canonical OC session key", () => {
+  it("Scenario: produces a canonical OC session key", () => {
     const plan = buildRecoveryPlan(topic({ id: 82385 }), "-1003842172831", "main");
     expect(plan).toEqual({
       topicId: 82385,
@@ -169,7 +169,7 @@ describe("buildRecoveryPlan", () => {
     });
   });
 
-  it("rejects a missing agent id", () => {
+  it("Scenario: rejects a missing agent id", () => {
     expect(() => buildRecoveryPlan(topic(), "-100", "")).toThrow(/agentId/i);
   });
 });
@@ -221,7 +221,7 @@ describe("applyRecoveryPlan", () => {
     ...over,
   });
 
-  it("inserts the entry and returns an applied report", () => {
+  it("Scenario: inserts the entry and returns an applied report", () => {
     const { updated, report } = applyRecoveryPlan(planOf(), {}, NOW);
     expect(report).toMatchObject({
       applied: true,
@@ -246,7 +246,7 @@ describe("applyRecoveryPlan", () => {
     expect(Object.keys(sessions)).toHaveLength(0);
   });
 
-  it("is idempotent: an existing registration is refused, not overwritten", () => {
+  it("Scenario: topic_recover apply=true is idempotent — existing entries are preserved", () => {
     const existing: SessionsMap = {
       "agent:main:telegram:group:-1003842172831:topic:82385": { model: "precious" },
     };

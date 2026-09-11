@@ -92,7 +92,7 @@ describe("oc-topic-manager tools", () => {
     expect(byId.get(2)?.action).toBe("compact");
   });
 
-  it("topic_recover returns a registration plan", async () => {
+  it("Scenario: topic_recover returns a registration plan", async () => {
     const captured: CapturedTool[] = [];
     plugin.register({ registerTool: (t: CapturedTool) => captured.push(t) } as never);
     const recover = captured.find((t) => t.name === "topic_recover")!;
@@ -109,7 +109,7 @@ describe("oc-topic-manager tools", () => {
     expect(plan.action).toBe("register");
   });
 
-  it("topic_recover rejects a bad topicId", async () => {
+  it("Scenario: topic_recover rejects a bad topicId", async () => {
     const captured: CapturedTool[] = [];
     plugin.register({ registerTool: (t: CapturedTool) => captured.push(t) } as never);
     const recover = captured.find((t) => t.name === "topic_recover")!;
@@ -138,7 +138,7 @@ describe("oc-topic-manager tools", () => {
     const readRegistry = (): Record<string, unknown> =>
       JSON.parse(readFileSync(registryPath, "utf8"));
 
-    it("topic_audit reads registrations from the registry when omitted", async () => {
+    it("Scenario: topic_audit reads registrations from the registry when omitted", async () => {
       writeFileSync(
         registryPath,
         JSON.stringify({
@@ -154,7 +154,7 @@ describe("oc-topic-manager tools", () => {
       expect(report.orphaned.map((t: { id: number }) => t.id)).toEqual([82385]);
     });
 
-    it("topic_recover apply=true registers the orphan; audit then sees it healthy", async () => {
+    it("Scenario: topic_recover apply=true registers the orphan; audit then sees it healthy", async () => {
       const { audit, recover } = capture();
       const result = (await recover.execute("test", {
         topicId: 82385,
@@ -189,7 +189,7 @@ describe("oc-topic-manager tools", () => {
       expect(JSON.parse(recheck.content[0].text).orphaned).toHaveLength(0);
     });
 
-    it("topic_recover apply=true is idempotent — existing entries are preserved", async () => {
+    it("Scenario: topic_recover apply=true is idempotent — existing entries are preserved", async () => {
       const { recover } = capture();
       const result = (await recover.execute("test", {
         topicId: 82385,

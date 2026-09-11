@@ -1,0 +1,130 @@
+name: Ship Plugins
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ship:
+    name: Ship Plugin Suite Release
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run == null || github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Check for plugin changes
+        id: check
+        run: |
+          # Compute content hash of all plugin source files and build/pack scripts
+          PLUGINS_SHA=$(find ts/src/plugins ts/scripts/build-plugins.mjs ts/scripts/pack-plugins.mjs -type f ! -path "*/dist/*" ! -path "*/dist-plugins/*" -exec sha256sum {} + | sort | sha256sum | cut -c1-12)
+          PLUGINS_COUNT=$(find ts/src/plugins -mindepth 1 -maxdepth 1 -name "oc-*" -type d | wc -l | tr -d ' ')
+          OC_VERSION="2026.7.1"
+          NEW_TAG="plugins-v0.1.${PLUGINS_COUNT}.${PLUGINS_SHA}-oc-${OC_VERSION}"
+
+          echo "plugins_sha=${PLUGINS_SHA}" >> $GITHUB_OUTPUT
+          echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+          echo "plugins_count=${PLUGINS_COUNT}" >> $GITHUB_OUTPUT
+          echo "Computed tag: $NEW_TAG"
+
+          # Idempotent: check if release with this tag already exists
+          if gh release view "$NEW_TAG" >/dev/null 2>&1; then
+            echo "Release $NEW_TAG already exists — skipping (idempotent)"
+            echo "should_ship=false" >> $GITHUB_OUTPUT
+          else
+            echo "New plugin release will be shipped: $NEW_TAG"
+            echo "should_ship=true" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Node.js
+        if: steps.check.outputs.should_ship == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install TS deps
+        if: steps.check.outputs.should_ship == 'true'
+        working-directory: ts
+        run: npm ci --include=dev
+
+      - name: Install OC submodule deps
+        if: steps.check.outputs.should_ship == 'true'
+        run: |
+          cd oc-source/upstream && npm install -g pnpm@11.15.1 && pnpm install --ignore-scripts
+
+      - name: Verify plugins pass tests
+        if: steps.check.outputs.should_ship == 'true'
+        working-directory: ts
+        run: |
+          npx tsc --noEmit -p tsconfig.ci.json
+          npm run validate:foundry
+          npm run build:plugins
+          npx vitest run --config vitest.config.ci.ts --reporter=dot
+
+      - name: Package plugins
+        if: steps.check.outputs.should_ship == 'true'
+        working-directory: ts
+        run: |
+          npm run pack:plugins
+
+      - name: Create release
+        if: steps.check.outputs.should_ship == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.check.outputs.new_tag }}"
+
+          echo "Creating plugin release $TAG"
+
+          # Build release notes
+          NOTES=$(git log --oneline --format="- %s" -n 15 -- ts/src/plugins/ ts/scripts/ 2>/dev/null)
+          ASSET_LIST=$(ls ts/dist-plugins/*.tgz ts/dist-plugins/*.json 2>/dev/null | xargs -n1 basename | sed 's/^/- /')
+
+          gh release create "$TAG" \
+            --title "OpenClaw Plugin Suite $TAG" \
+            --notes "## Track B Plugin Suite shipped automatically from CI
+
+          **Compatible with OpenClaw:** >=2026.6.8 (tested on 2026.7.1)
+          **Plugin content SHA:** ${{ steps.check.outputs.plugins_sha }}
+          **Plugin count:** ${{ steps.check.outputs.plugins_count }}
+
+          ### Commits affecting plugins
+          $NOTES
+
+          ### Test status
+          All tests and gates passed in CI before shipping:
+          - TypeScript unit tests & typechecking
+          - Foundry DFT validation (all 6 axioms pass)
+          - esbuild self-contained bundle verification
+          - CI unit & BDD test matrix
+
+          ### Packaged Assets (.tgz + manifest)
+          $ASSET_LIST
+
+          ### Installation
+          To install any plugin directly in OpenClaw:
+          \`\`\`bash
+          openclaw plugins install ./<plugin-archive-name>.tgz
+          \`\`\`" \
+            --prerelease
+
+          for f in ts/dist-plugins/*; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f")
+            gh release upload "$TAG" "$f" --clobber
+            echo "Uploaded asset: $name"
+          done
+
+          echo "Plugin suite release $TAG shipped!"

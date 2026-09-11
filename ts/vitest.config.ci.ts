@@ -30,6 +30,7 @@ export default defineConfig({
       "tests/plugins/**/*.spec.ts",
       "tests/integration/**/*.spec.ts",
       "tests/efficiency/**/*.spec.ts",
+      "tests/features/*.spec.ts",
     ],
     exclude: ["node_modules/**", "dist/**", "tests/e2e/**", "tests/oc-source/**"],
   },

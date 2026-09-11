@@ -25,9 +25,10 @@ The gateway gates dispatch on `hasHooks()`. If the hook isn't visible, it's neve
 | `oc-subagent-watchdog` | 2 | 1 | 17 | Subagent lifecycle tracking + stale detection |
 | `oc-session-guard` | 2 | 2 | 16 | Session bloat management (direct file I/O) |
 | `oc-event-loop-monitor` | 3 | 1 | 13 | Live telemetry (perf_hooks + v8 heap) |
+| `oc-topic-manager` | 1 | 2 | 31 | Telegram forum topic recovery, orphan detection, idempotent registration |
 | `oc-e2e-trace-test` | 1 | 0 | 5 | Test plugin for Level 2 E2E hook trace |
 
-**Totals:** 36 hooks, 19 tools. Plugin tests run as part of the 1,091-test CI suite (`vitest.config.ci.ts`).
+**Totals:** 12 plugins, 37 hooks, 21 tools. All plugins pass `validate:foundry` (six DFT axioms). Plugin tests run in CI (`vitest.config.ci.ts`).
 
 ## Hook inventory by plugin
 
@@ -105,6 +106,14 @@ Direct file I/O (no sidecar). Uses `shared/session-cleanup.ts` pure logic + `ses
 
 Uses real `perf_hooks` (monitorEventLoopDelay, eventLoopUtilization) + `v8.getHeapStatistics`. Aggregation logic is pure (`shared/telemetry-logic.ts`).
 
+### `oc-topic-manager` (1 hook, 2 tools)
+
+**Hooks:** `gateway_start`
+
+**Tools:** `topic_audit`, `topic_recover`
+
+Detects orphaned Telegram forum topics, evaluates compaction and idle archival policies, and generates deterministic, idempotent recovery plans.
+
 ### `oc-e2e-trace-test` (1 hook, 0 tools)
 
 **Hooks:** `gateway_start`
@@ -146,6 +155,7 @@ plugins/
 ├── oc-subagent-watchdog/           # 2 hooks, 1 tool (lifecycle tracking)
 ├── oc-session-guard/               # 2 hooks, 2 tools (direct file I/O)
 ├── oc-event-loop-monitor/          # 3 hooks, 1 tool (live telemetry)
+├── oc-topic-manager/               # 1 hook, 2 tools (topic recovery)
 └── oc-e2e-trace-test/              # 1 hook (test plugin)
 ```
 
@@ -161,10 +171,24 @@ Three pure-logic modules address gaps not covered by the concurrency infrastruct
 
 See [`docs/plugin-gaps.md`](../../docs/plugin-gaps.md) for the full gap analysis and wiring instructions.
 
+## Packaging & Building
+
+```bash
+# Bundle each plugin into a self-contained dist/index.js (inlines shared/ logic)
+npm run build:plugins
+
+# Package all plugins into distributable .tgz archives and emit plugins-manifest.json
+npm run pack:plugins
+```
+
 ## Installation
 
 ```bash
-# Install individual plugins
+# Install from packaged .tgz archives
+openclaw plugins install ./dist-plugins/flowfeel-oc-session-guard-0.1.0.tgz
+openclaw plugins install ./dist-plugins/flowfeel-oc-subagent-watchdog-0.1.0.tgz
+
+# Or install from directory
 openclaw plugins install ./ts/src/plugins/oc-session-guard
 openclaw plugins install ./ts/src/plugins/oc-subagent-watchdog
 openclaw plugins install ./ts/src/plugins/oc-event-loop-monitor
