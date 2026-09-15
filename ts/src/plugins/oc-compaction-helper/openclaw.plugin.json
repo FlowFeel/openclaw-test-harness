@@ -16,6 +16,22 @@
         "type": "number",
         "default": 5
       },
+      "autoCompactionThresholdMb": {
+        "type": "number",
+        "default": 2
+      },
+      "autoCompactionEnabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "compactionProvider": {
+        "type": "string",
+        "default": "literate"
+      },
+      "cooldownMs": {
+        "type": "number",
+        "default": 120000
+      },
       "bloatFields": {
         "type": "array",
         "items": {
