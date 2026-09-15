@@ -21,7 +21,12 @@ export const Type = {
     return { ...(schema as Record<string, unknown>), optional: true };
   },
   Any(opts?: { description?: string }) {
-    return { type: "any", ...opts };
+    // Empty schema {} = "any value" per JSON Schema. A literal
+    // { type: "any" } is NOT valid JSON Schema and OpenRouter's strict
+    // metaschema validation rejects the entire LLM request with:
+    //   "Tool N function has invalid 'parameters' schema: 'any' is not
+    //    valid under any of the given schemas"
+    return { ...opts };
   },
 };
 

@@ -18,7 +18,10 @@ export const Type = {
     return { type: "string", ...opts };
   },
   Any(opts?: { description?: string }) {
-    return { type: "any", ...opts };
+    // Empty schema {} = "any value" per JSON Schema (mirrors shared/types.ts).
+    // A literal { type: "any" } is invalid and OpenRouter rejects the whole
+    // LLM request with a metaschema validation error.
+    return { ...opts };
   },
 };
 
