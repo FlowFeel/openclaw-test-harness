@@ -97,6 +97,29 @@ export interface PluginApi {
     opts?: HookOptions
   ) => void;
   registerTool: (tool: ToolDefinition, opts?: Record<string, unknown>) => void;
+  /** Register a custom compaction provider (e.g. literate compaction). */
+  registerCompactionProvider?: (
+    provider: CompactionProvider,
+    opts?: { ownerPluginId?: string }
+  ) => void;
+}
+
+export interface CompactionProviderSummarizationInstructions {
+  identifierPolicy?: "strict" | "off" | "custom";
+  identifierInstructions?: string;
+}
+
+export interface CompactionProvider {
+  id: string;
+  label: string;
+  summarize: (params: {
+    messages: unknown[];
+    signal?: AbortSignal;
+    compressionRatio?: number;
+    customInstructions?: string;
+    summarizationInstructions?: CompactionProviderSummarizationInstructions;
+    previousSummary?: string;
+  }) => Promise<string>;
 }
 
 export interface PluginDefinition {

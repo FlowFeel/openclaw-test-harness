@@ -40,9 +40,23 @@ import {
   type SessionsReader,
   type SessionsWriter,
 } from "./sessions-io.js";
+import {
+  evaluateCompactionTrigger,
+  DEFAULT_AUTO_COMPACT_THRESHOLD_MB,
+  DEFAULT_TRIGGER_COOLDOWN_MS,
+  type TriggerDecision,
+} from "./trigger-logic.js";
+import {
+  compactLiterate,
+  type LiterateCompactionResult,
+} from "./literate-compaction-logic.js";
 
 export interface CompactionHelperConfig {
   maxTranscriptMb?: number;
+  autoCompactionThresholdMb?: number;
+  autoCompactionEnabled?: boolean;
+  compactionProvider?: string;
+  cooldownMs?: number;
   bloatFields?: string[];
   sessionsPath?: string;
   /** Sidecar protocol for CPU offloading (injected by gateway). */
@@ -78,9 +92,34 @@ export default definePluginEntry({
     const cfg: CompactionHelperConfig = (config as CompactionHelperConfig) ?? {};
     const bloatFields = cfg.bloatFields ?? DEFAULT_BLOAT_FIELDS;
     const maxTranscriptMb = cfg.maxTranscriptMb ?? 5;
+    const autoCompactionThresholdMb =
+      cfg.autoCompactionThresholdMb ?? DEFAULT_AUTO_COMPACT_THRESHOLD_MB;
+    const autoCompactionEnabled = cfg.autoCompactionEnabled ?? true;
+    const cooldownMs = cfg.cooldownMs ?? DEFAULT_TRIGGER_COOLDOWN_MS;
+    const compactionProviderId = cfg.compactionProvider ?? "literate";
     const sessionsPath = cfg.sessionsPath;
     const throttleMs = cfg.throttleMs ?? DEFAULT_THROTTLE_MS;
     const bloatThresholdBytes = cfg.bloatThresholdBytes ?? DEFAULT_BLOAT_THRESHOLD;
+
+    // ── Pluggable Compaction Provider: Literate ──────────────────────
+    if (typeof api.registerCompactionProvider === "function") {
+      api.registerCompactionProvider({
+        id: "literate",
+        label: "Literate Compaction Provider",
+        async summarize({ messages, customInstructions, previousSummary }) {
+          const result = compactLiterate(messages, {
+            customInstructions,
+            previousSummary,
+          });
+          api.logger?.info?.(
+            `[oc-compaction-helper] Literate compaction completed: ${result.reductionPercent}% reduction ` +
+              `(${result.preservedUserTurns} user turns preserved, ${result.strippedToolResults} tools stripped)`
+          );
+          return result.summary;
+        },
+      });
+    }
+
     // Sidecar from the cross-plugin registry (registered by oc-sidecar on gateway_start)
     // Falls back to NullSidecar if oc-sidecar isn't running
     const sidecar: SidecarProtocol = cfg.sidecar ?? getSidecar();
@@ -120,6 +159,7 @@ export default definePluginEntry({
 
     // ── Throttle state (in-memory, no file I/O for the check itself) ──
     let lastCleanupMs = 0;
+    let lastTriggerMs = 0;
 
     // ── Hook: before_prompt_build — strip bloat fields (throttled) ──
     // Fires on every turn, before OC assembles the model prompt.
@@ -134,6 +174,36 @@ export default definePluginEntry({
 
           const raw = reader(sessionsPath);
           if (!raw) return;
+
+          // ── Proactive Auto-Compaction Check ──
+          const fileSize = getSessionFileSize(sessionsPath);
+          const triggerDecision = evaluateCompactionTrigger({
+            currentSizeBytes: fileSize,
+            maxTranscriptMb: autoCompactionThresholdMb,
+            lastTriggerMs,
+            nowMs: now,
+            cooldownMs,
+            enabled: autoCompactionEnabled,
+          });
+
+          if (triggerDecision.shouldTrigger) {
+            api.logger?.warn?.(`[oc-compaction-helper] ${triggerDecision.reason}`);
+            lastTriggerMs = now;
+            // Proactive auto-compaction pass: deep bloat strip & purge stale subagents
+            const { cleaned, report } = cleanupSessions(raw, {
+              bloatFields,
+              maxAgeHours: 12,
+              nowMs: now,
+            });
+            await sidecarWriter(cleaned, sessionsPath);
+            lastCleanupMs = now;
+            api.logger?.info?.(
+              `[oc-compaction-helper] Proactive auto-compaction pass completed: ` +
+                `${report.strippedFieldCount} fields stripped, ` +
+                `${report.reductionPercent}% size reduction`
+            );
+            return;
+          }
 
           // Quick in-memory scan: are bloat fields present?
           let hasBloat = false;
@@ -358,9 +428,17 @@ export default definePluginEntry({
                         ? Math.round((bloatBytes / sizeBytes) * 100)
                         : 0,
                     thresholdMb: maxTranscriptMb,
+                    autoCompactionThresholdMb,
+                    autoCompactionEnabled,
+                    compactionProvider: compactionProviderId,
                     needsCompaction,
                     lastCleanupMs,
+                    lastTriggerMs,
                     throttleMs,
+                    cooldownRemainingMs: Math.max(
+                      0,
+                      cooldownMs - (Date.now() - lastTriggerMs)
+                    ),
                     recommendation: needsCompaction
                       ? `Transcript is ${sizeMb} MB (threshold: ${maxTranscriptMb} MB). ` +
                         "Consider triggering compaction to reduce bloat."
