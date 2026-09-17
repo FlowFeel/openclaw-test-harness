@@ -1,0 +1,40 @@
+{
+  "id": "oc-task-plane",
+  "name": "OcTaskPlane",
+  "description": "TaskPlane: lock-free task abstraction with auto-background, wake-on-completion, per-task timeouts, and crash-safe task registry",
+  "contracts": {
+    "tools": [
+      "task_dispatch",
+      "task_status",
+      "task_output",
+      "task_cancel"
+    ],
+    "hooks": [
+      "gateway_start",
+      "gateway_stop"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "defaultTimeoutMs": {
+        "type": "number",
+        "default": 600000
+      },
+      "registryPath": {
+        "type": "string"
+      },
+      "outputDir": {
+        "type": "string"
+      },
+      "supervisorIntervalMs": {
+        "type": "number",
+        "default": 1000
+      }
+    }
+  }
+}

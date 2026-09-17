@@ -132,3 +132,40 @@ export interface PluginDefinition {
 export function definePluginEntry(def: PluginDefinition): PluginDefinition {
   return def;
 }
+
+// ── TaskPlane Types (Issue #29) ──────────────────────────────────────────
+
+export type TaskPlaneKind = "exec" | "subagent" | "wake" | "cron";
+export type TaskPlaneStatus = "queued" | "running" | "done" | "failed" | "killed";
+
+export interface TaskPlaneTimestamps {
+  queuedAt: number;
+  startedAt?: number;
+  completedAt?: number;
+}
+
+export interface TaskPlaneResult {
+  exitCode?: number;
+  error?: string;
+  outputTail?: string;
+}
+
+export interface TaskPlaneTask {
+  id: string;
+  kind: TaskPlaneKind;
+  payload: Record<string, unknown>;
+  owner: string; // sessionKey
+  timeoutMs: number;
+  status: TaskPlaneStatus;
+  output_handle: string;
+  timestamps: TaskPlaneTimestamps;
+  result?: TaskPlaneResult;
+  pid?: number;
+  subagentSessionKey?: string;
+  readopted?: boolean;
+}
+
+export interface TaskPlaneRegistry {
+  tasks: Record<string, TaskPlaneTask>;
+  version: number;
+}
