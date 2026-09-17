@@ -14,7 +14,7 @@ jobs:
   ship:
     name: Ship Plugin Suite Release
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run == null || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ (github.event.workflow_run != null && github.event.workflow_run.conclusion == 'success') || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
     timeout-minutes: 15
 
     steps:
@@ -26,6 +26,25 @@ jobs:
       - name: Check for plugin changes
         id: check
         run: |
+          # Safety invariant: Releases can ONLY be published from the main branch
+          CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
+          if [ "$CURRENT_BRANCH" != "main" ]; then
+            echo "Branch '$CURRENT_BRANCH' is not main — skipping release (releases only ship from main)."
+            echo "should_ship=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # If triggered manually via workflow_dispatch on main, verify CI passed on HEAD
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            HEAD_SHA=$(git rev-parse HEAD)
+            CI_CONCLUSION=$(gh run list --commit "$HEAD_SHA" --workflow=CI --json conclusion -q '.[0].conclusion' 2>/dev/null || echo "")
+            if [ "$CI_CONCLUSION" != "success" ]; then
+              echo "CI conclusion on $HEAD_SHA is '$CI_CONCLUSION' (must be 'success') — skipping release."
+              echo "should_ship=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+
           # Compute content hash of all plugin source files and build/pack scripts
           PLUGINS_SHA=$(find ts/src/plugins ts/scripts/build-plugins.mjs ts/scripts/pack-plugins.mjs -type f ! -path "*/dist/*" ! -path "*/dist-plugins/*" -exec sha256sum {} + | sort | sha256sum | cut -c1-12)
           PLUGINS_COUNT=$(find ts/src/plugins -mindepth 1 -maxdepth 1 -name "oc-*" -type d | wc -l | tr -d ' ')
