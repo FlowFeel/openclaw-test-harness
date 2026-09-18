@@ -15,6 +15,10 @@
  *   token + operator.admin scope, then `{type:"req", method:"tools.invoke"}`),
  *   mirroring OC's own test-helpers.server.ts rpcReq shape.
  * - Ephemeral ports (no hardcoded races); fresh registry fixture per test.
+ *
+ * Issue #31 contract: an empty topics payload is refused loudly
+ * ({refused: true, phantomRisk}) — the pre-#31 behavior (diff zero topics
+ * against the registry, report everything unregistered) was the bug.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
 import { execFileSync } from "node:child_process"
@@ -234,10 +238,18 @@ describe("Feature: the tool boundary answers every input and survives", () => {
   }, 120_000)
 
   it("Scenario: valid tool call succeeds through the same boundary", async () => {
-    const [res] = await invokeTools(
+    const [refusal, valid] = await invokeTools(
       env.container,
       port,
-      [{ label: "valid", params: { name: "topic_audit", args: { topics: { topics: [] } } } }],
+      [
+        // Issue #31 contract: an empty topics payload is refused loudly —
+        // never diffed against the registry (which would report every
+        // registered session as unregistered).
+        { label: "empty-audit", params: { name: "topic_audit", args: { topics: { topics: [] } } } },
+        { label: "valid", params: { name: "topic_audit", args: { topics: { topics: [
+          { message_thread_id: 82385, title: "Flow agent", message_count: 10 },
+        ] } } } },
+      ],
       { "agent:main:telegram:group:-1003842172831:topic:82385": {
           topicId: 82385,
           chatId: "-1003842172831",
@@ -247,26 +259,52 @@ describe("Feature: the tool boundary answers every input and survives", () => {
           source: "oc-topic-manager",
       } },
     )
-    expect(res.type).toBe("res")
-    expect(res.ok).toBe(true)
-    const payload = res.payload as {
-      ok?: boolean
-      toolName?: string
-      output?: { content?: Array<{ type?: string; text?: string }> }
-    }
-    expect(payload.ok).toBe(true)
-    expect(payload.toolName).toBe("topic_audit")
-    // The audit report round-trips through the boundary as an MCP text
-    // response; parse it and check the report fields, including the entry
-    // read from the real on-disk registry fixture.
-    const text = payload.output?.content?.find((c) => c.type === "text")?.text ?? ""
-    const report = JSON.parse(text) as { orphaned?: unknown[]; unregistered?: Array<{ topicId?: number; sessionKey?: string }>; archivalDecisions?: unknown[] }
+    expect(refusal.type).toBe("res")
+    expect(refusal.ok).toBe(true)
+    expect(valid.type).toBe("res")
+    expect(valid.ok).toBe(true)
+    const asPayload = (res: typeof valid) =>
+      (res.payload ?? {}) as {
+        ok?: boolean
+        toolName?: string
+        output?: { content?: Array<{ type?: string; text?: string }> }
+      }
+    const parseReport = (text: string) =>
+      JSON.parse(text) as {
+        refused?: boolean
+        error?: string
+        phantomRisk?: number
+        orphaned?: unknown[]
+        unregistered?: Array<{ topicId?: number; sessionKey?: string }>
+        archivalDecisions?: unknown[]
+      }
+
+    // Refusal path: empty topics payload → loud refusal naming the phantom
+    // risk (1 registered session in the fixture), no diff output.
+    const refusalPayload = asPayload(refusal)
+    expect(refusalPayload.ok).toBe(true)
+    expect(refusalPayload.toolName).toBe("topic_audit")
+    const refusalReport = parseReport(
+      refusalPayload.output?.content?.find((c) => c.type === "text")?.text ?? ""
+    )
+    expect(refusalReport.refused).toBe(true)
+    expect(refusalReport.phantomRisk).toBe(1)
+    expect(refusalReport.orphaned).toBeUndefined()
+    expect(refusalReport.unregistered).toBeUndefined()
+
+    // Valid path: a real topics payload diffed against the real on-disk
+    // registry read through the boundary. Topic 82385 is registered, so it
+    // is matched — not orphaned, not unregistered.
+    const validPayload = asPayload(valid)
+    expect(validPayload.ok).toBe(true)
+    expect(validPayload.toolName).toBe("topic_audit")
+    const report = parseReport(
+      validPayload.output?.content?.find((c) => c.type === "text")?.text ?? ""
+    )
     expect(Array.isArray(report.orphaned)).toBe(true)
     expect(Array.isArray(report.archivalDecisions)).toBe(true)
-    // The registration from the registry fixture is surfaced as unregistered
-    // (no topics provided to match against) — proves the tool read the real
-    // registry through the boundary.
-    expect(report.unregistered?.some((u) => u.sessionKey === "agent:main:telegram:group:-1003842172831:topic:82385")).toBe(true)
+    expect(report.orphaned).toHaveLength(0)
+    expect(report.unregistered?.some((u) => u.sessionKey === "agent:main:telegram:group:-1003842172831:topic:82385")).toBe(false)
     expect(await probeGateway(env.container, port)).toBe(200)
   }, 120_000)
 })
