@@ -50,6 +50,9 @@ import {
   compactLiterate,
   type LiterateCompactionResult,
 } from "./literate-compaction-logic.js";
+import {
+  streamingCompact,
+} from "./streaming-compaction-logic.js";
 
 export interface CompactionHelperConfig {
   maxTranscriptMb?: number;
@@ -65,6 +68,12 @@ export interface CompactionHelperConfig {
   throttleMs?: number;
   /** Minimum bloat size in bytes before triggering a write. Default: 10240 (10KB). */
   bloatThresholdBytes?: number;
+  /** Streaming provider: per-segment byte budget. Default: 400000. */
+  streamingSegmentBudgetBytes?: number;
+  /** Streaming provider: rolling-summary char cap. Default: 120000. */
+  streamingMaxRollingChars?: number;
+  /** Wedge signature: ms without after_compaction before "wedge suspected". Default: 600000. */
+  wedgeSuspectMs?: number;
 }
 
 const DEFAULT_BLOAT_FIELDS = [
@@ -118,6 +127,28 @@ export default definePluginEntry({
           return result.summary;
         },
       });
+
+      // Streaming provider (topic-70660 dead-end fix): segmented,
+      // bounded-memory summarization — never a single unbounded model call,
+      // never returns empty, never triggers the built-in LLM fallback.
+      api.registerCompactionProvider({
+        id: "streaming",
+        label: "Streaming Compaction Provider",
+        async summarize({ messages, customInstructions, previousSummary }) {
+          const result = await streamingCompact(messages, {
+            customInstructions,
+            previousSummary,
+            segmentBudgetBytes: cfg.streamingSegmentBudgetBytes,
+            maxRollingChars: cfg.streamingMaxRollingChars,
+          });
+          api.logger?.info?.(
+            `[oc-compaction-helper] Streaming compaction completed: ${result.segmentCount} segment(s), ` +
+              `${result.refinedSegments} refined, ${result.reductionPercent}% reduction, ` +
+              `${result.totalInputBytes} → ${result.finalBytes} bytes`
+          );
+          return result.summary;
+        },
+      });
     }
 
     // Sidecar from the cross-plugin registry (registered by oc-sidecar on gateway_start)
@@ -160,6 +191,16 @@ export default definePluginEntry({
     // ── Throttle state (in-memory, no file I/O for the check itself) ──
     let lastCleanupMs = 0;
     let lastTriggerMs = 0;
+
+    // ── Compaction health (wedge-signature tracking, feature request 2026-09-18) ──
+    // Production signature before the hard lock on topic 70660: compaction
+    // running + long idle + compaction-loop errors. Surface it before the wedge.
+    const wedgeSuspectMs = cfg.wedgeSuspectMs ?? 600_000;
+    const compactionHealth = {
+      lastBeforeMs: 0,
+      lastAfterMs: 0,
+      lastDurationMs: 0,
+    };
 
     // ── Hook: before_prompt_build — strip bloat fields (throttled) ──
     // Fires on every turn, before OC assembles the model prompt.
@@ -257,6 +298,7 @@ export default definePluginEntry({
       "before_compaction",
       async () => {
         try {
+          compactionHealth.lastBeforeMs = Date.now();
           const raw = reader(sessionsPath);
           if (!raw) return;
           const sizeBytes = JSON.stringify(raw).length;
@@ -335,13 +377,16 @@ export default definePluginEntry({
       }
     );
 
-    // ── Hook: after_compaction — strip bloat fields ──────────
-    // Fires after compaction completes. This is a deep cleanup that
-    // also purges stale subagent entries.
+    // ── Hook: after_compaction — record completion + strip bloat fields ──
     api.on(
       "after_compaction",
       async () => {
         try {
+          const nowMs = Date.now();
+          if (compactionHealth.lastBeforeMs > 0 && nowMs >= compactionHealth.lastBeforeMs) {
+            compactionHealth.lastAfterMs = nowMs;
+            compactionHealth.lastDurationMs = nowMs - compactionHealth.lastBeforeMs;
+          }
           const raw = reader(sessionsPath);
           if (!raw) return;
           const { cleaned, report } = cleanupSessions(raw, {
@@ -430,8 +475,17 @@ export default definePluginEntry({
                     thresholdMb: maxTranscriptMb,
                     autoCompactionThresholdMb,
                     autoCompactionEnabled,
-                    compactionProvider: compactionProviderId,
                     needsCompaction,
+                    compactionProvider: compactionProviderId,
+                    compactionHealth: {
+                      lastBeforeMs: compactionHealth.lastBeforeMs,
+                      lastAfterMs: compactionHealth.lastAfterMs,
+                      lastDurationMs: compactionHealth.lastDurationMs,
+                      wedgeSuspected:
+                        compactionHealth.lastBeforeMs > compactionHealth.lastAfterMs &&
+                        Date.now() - compactionHealth.lastBeforeMs > wedgeSuspectMs,
+                      wedgeSuspectMs,
+                    },
                     lastCleanupMs,
                     lastTriggerMs,
                     throttleMs,
