@@ -28,6 +28,7 @@ import { detectOrphans } from "./detect-orphans.js";
 import { decideArchival } from "./archival-policy.js";
 import { buildRecoveryPlan, sessionKeyFor } from "./recovery-plan.js";
 import { readRegistrations, writeRecoveryPlan } from "./registry-io.js";
+import { auditPrecheck } from "./audit-precheck.js";
 import type {
   RecoveryApplication,
   SessionRegistration,
@@ -98,6 +99,19 @@ export default definePluginEntry({
           : readRegistrations(
               typeof params.sessionsPath === "string" ? params.sessionsPath : undefined
             );
+
+        // Issue #31: refuse to audit an empty topic set. Every registered
+        // session diffed against zero topics gets reported "unregistered"
+        // (240 phantom entries in production). Fail loudly instead.
+        const precheck = auditPrecheck(topics, registrations.length);
+        if (!precheck.ok) {
+          return textResponse({
+            refused: true,
+            error: precheck.error,
+            phantomRisk: precheck.phantomRisk,
+          });
+        }
+
         const report: TopicAuditReport = {
           ...detectOrphans(topics, registrations),
           archivalDecisions: topics.map((t) => decideArchival(t, Date.now(), thresholds)),
