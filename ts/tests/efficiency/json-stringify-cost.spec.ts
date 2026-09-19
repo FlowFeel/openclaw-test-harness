@@ -127,12 +127,24 @@ describe("H2: JSON.stringify scan costs more than statSync", () => {
     const statTime = performance.now() - statStart;
 
     expect(fileSize).toBeGreaterThan(0);
-    // statSync is a single syscall — should be sub-millisecond
-    expect(statTime).toBeLessThan(5);
+    // statSync is a single syscall — but an ABSOLUTE wall-clock bound flaked
+    // on a loaded CI runner (6.3ms observed against a 5ms bound, 2026-09-18).
+    // Timing assertions on shared runners assert direction, not magnitude:
+    // take the min of several cold+stat passes to remove scheduler noise.
+    const statSamples: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const s = performance.now();
+      statSync(filePath);
+      statSamples.push(performance.now() - s);
+    }
+    const statTimeMin = Math.min(...statSamples);
+    // Min-of-5 of a single syscall is sub-millisecond on any healthy system;
+    // the min is robust to one-off scheduler spikes.
+    expect(statTimeMin).toBeLessThan(5);
 
     // The directional claim: the scan loop costs more than statSync.
     // The scan does 600 serializations; statSync does 1 syscall.
-    expect(scanTime).toBeGreaterThan(statTime);
+    expect(scanTime).toBeGreaterThan(statTimeMin);
   });
 
   it("the field-name check (boolean) is even cheaper — no serialization needed", () => {
