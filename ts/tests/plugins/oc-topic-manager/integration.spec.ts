@@ -76,10 +76,14 @@ describe("oc-topic-manager tools", () => {
     const captured: CapturedTool[] = [];
     plugin.register({ registerTool: (t: CapturedTool) => captured.push(t) } as never);
     const audit = captured.find((t) => t.name === "topic_audit")!;
+    const daysAgoIso = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
     const result = (await audit.execute("test", {
       topics: [
         { message_thread_id: 1, title: "Stale", message_count: 5, lastActiveAt: "2026-01-01T00:00:00Z" },
-        { message_thread_id: 2, title: "Fat", message_count: 5000, lastActiveAt: "2026-09-06T00:00:00Z" },
+        // Relative fixture: always 5 days idle — inside the 14-day compact
+        // window on any run date. A fixed date decayed past the threshold on
+        // 2026-09-20 and flipped the expected decision to 'archive'.
+        { message_thread_id: 2, title: "Fat", message_count: 5000, lastActiveAt: daysAgoIso(5) },
       ],
       registrations: [],
     })) as { content: Array<{ type: string; text: string }> };
@@ -90,6 +94,7 @@ describe("oc-topic-manager tools", () => {
     expect(byId.get(1)?.action).toBe("archive");
     expect(byId.get(1)?.reason).toMatch(/idle/i);
     expect(byId.get(2)?.action).toBe("compact");
+    expect(byId.get(2)?.reason).not.toMatch(/idle/i);
   });
 
   it("Scenario: topic_recover returns a registration plan", async () => {
