@@ -53,6 +53,10 @@ import {
 import {
   streamingCompact,
 } from "./streaming-compaction-logic.js";
+import {
+  providerSelectionReport,
+  type ProviderSelectionReport,
+} from "./provider-selection.js";
 
 export interface CompactionHelperConfig {
   maxTranscriptMb?: number;
@@ -149,6 +153,28 @@ export default definePluginEntry({
           return result.summary;
         },
       });
+    }
+
+    // Issue #35 consistency check: a registered-but-unselected provider is
+    // dead code and OC runs its unbounded built-in summarizer silently.
+    // Make selection state loud at registration (= gateway boot).
+    const registeredProviderIds = ["literate", "streaming"];
+    const selectedOcProviderId =
+      typeof api.config === "object" && api.config !== null
+        ? (api.config as {
+            agents?: { defaults?: { compaction?: { provider?: string } } };
+          })?.agents?.defaults?.compaction?.provider
+        : undefined;
+    const providerSelection: ProviderSelectionReport = providerSelectionReport(
+      selectedOcProviderId,
+      registeredProviderIds
+    );
+    if (providerSelection.warning) {
+      api.logger?.warn?.(`[oc-compaction-helper] ${providerSelection.warning}`);
+    } else {
+      api.logger?.info?.(
+        `[oc-compaction-helper] Compaction provider selection OK: ${providerSelection.consequence}`
+      );
     }
 
     // Sidecar from the cross-plugin registry (registered by oc-sidecar on gateway_start)
@@ -477,6 +503,14 @@ export default definePluginEntry({
                     autoCompactionEnabled,
                     needsCompaction,
                     compactionProvider: compactionProviderId,
+                    providerSelection: {
+                      selected: providerSelection.selected,
+                      registered: providerSelection.registered,
+                      selectedRegistered: providerSelection.selectedRegistered,
+                      unsetDespiteRegistered: providerSelection.unsetDespiteRegistered,
+                      warning: providerSelection.warning ?? null,
+                      consequence: providerSelection.consequence,
+                    },
                     compactionHealth: {
                       lastBeforeMs: compactionHealth.lastBeforeMs,
                       lastAfterMs: compactionHealth.lastAfterMs,

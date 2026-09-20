@@ -97,6 +97,14 @@ export interface PluginApi {
     opts?: HookOptions
   ) => void;
   registerTool: (tool: ToolDefinition, opts?: Record<string, unknown>) => void;
+  /**
+   * Resolved OC config (OpenClawConfig) — same object OC passes to
+   * buildPluginApi (oc-source src/plugins/api-builder.ts). Read-only view;
+   * agents.defaults.compaction.provider lives here.
+   */
+  config?: unknown;
+  /** Plugin-scoped config (the entry for this plugin id). */
+  pluginConfig?: unknown;
   /** Register a custom compaction provider (e.g. literate compaction). */
   registerCompactionProvider?: (
     provider: CompactionProvider,
