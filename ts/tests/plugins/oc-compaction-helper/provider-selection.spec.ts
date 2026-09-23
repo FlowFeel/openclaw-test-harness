@@ -25,6 +25,8 @@ describe("providerSelectionReport (issue #35: the dead-provider class)", () => {
     expect(warn(r)).toContain("#35");
     expect(r.consequence).toContain("built-in LLM summarizer");
     expect(r.consequence).toContain("dead code");
+    expect(r.assertion.verdict).toBe("warn");
+    expect(r.doctorLine).toContain("[doctor:provider-consistency] [WARN ] compaction:");
   });
 
   it("selected-but-unregistered is loud — OC falls back silently otherwise", () => {
@@ -35,6 +37,8 @@ describe("providerSelectionReport (issue #35: the dead-provider class)", () => {
     expect(warn(r)).toContain("literate-typo");
     expect(warn(r)).toContain("NOT registered");
     expect(r.consequence).toContain("fallback");
+    expect(r.assertion.verdict).toBe("error");
+    expect(r.doctorLine).toContain("[doctor:provider-consistency] [ERROR] compaction:");
   });
 
   it("clean selection: selected and registered — no warning, positive consequence", () => {
@@ -43,12 +47,16 @@ describe("providerSelectionReport (issue #35: the dead-provider class)", () => {
     expect(r.unsetDespiteRegistered).toBe(false);
     expect(r.warning).toBeUndefined();
     expect(r.consequence).toContain('plugin provider "streaming"');
+    expect(r.assertion.verdict).toBe("ok");
+    expect(r.doctorLine).toContain("[doctor:provider-consistency] [OK   ] compaction:");
   });
 
   it("unset with nothing registered is consistent — informational, not a warning", () => {
     const r = providerSelectionReport(null, []);
     expect(r.warning).toBeUndefined();
     expect(r.consequence).toContain("consistent");
+    expect(r.assertion.verdict).toBe("ok");
+    expect(r.doctorLine).toContain("[doctor:provider-consistency] [OK   ] compaction:");
   });
 
   it("empty-string and whitespace ids are treated as unset", () => {
