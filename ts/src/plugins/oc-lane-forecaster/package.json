@@ -2,11 +2,13 @@
   "name": "@flowfeel/oc-lane-forecaster",
   "version": "0.1.0",
   "description": "Pre-dispatch run-duration prediction & shape classification for OpenClaw lane caps",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "type": "module",
-  "scripts": {
-    "build": "tsc",
-    "test": "vitest run"
+  "main": "./dist/index.js",
+  "openclaw": {
+    "extensions": ["./dist/index.js"],
+    "compat": {
+      "pluginApi": ">=2026.6.8",
+      "minGatewayVersion": "2026.6.8"
+    }
   }
 }
