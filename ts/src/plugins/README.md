@@ -26,9 +26,11 @@ The gateway gates dispatch on `hasHooks()`. If the hook isn't visible, it's neve
 | `oc-session-guard` | 2 | 2 | 16 | Session bloat management (direct file I/O) |
 | `oc-event-loop-monitor` | 3 | 1 | 13 | Live telemetry (perf_hooks + v8 heap) |
 | `oc-topic-manager` | 1 | 2 | 31 | Telegram forum topic recovery, orphan detection, idempotent registration |
+| `oc-task-plane` | 2 | 4 | 52 | Lock-free task plane, supervisor cap enforcement, post-kill teachback with shipped-state |
+| `oc-lane-forecaster` | 3 | 1 | 17 | Pre-dispatch run-duration prediction, shape classification (work-loop, slow ops), lane telemetry |
 | `oc-e2e-trace-test` | 1 | 0 | 5 | Test plugin for Level 2 E2E hook trace |
 
-**Totals:** 12 plugins, 37 hooks, 21 tools. All plugins pass `validate:foundry` (six DFT axioms). Plugin tests run in CI (`vitest.config.ci.ts`).
+**Totals:** 14 plugins, 42 hooks, 26 tools. All plugins pass `validate:foundry` (six DFT axioms). Plugin tests run in CI (`vitest.config.ci.ts`).
 
 ## Hook inventory by plugin
 
@@ -113,6 +115,22 @@ Uses real `perf_hooks` (monitorEventLoopDelay, eventLoopUtilization) + `v8.getHe
 **Tools:** `topic_audit`, `topic_recover`
 
 Detects orphaned Telegram forum topics, evaluates compaction and idle archival policies, and generates deterministic, idempotent recovery plans.
+
+### `oc-task-plane` (2 hooks, 4 tools)
+
+**Hooks:** `gateway_start`, `gateway_stop`
+
+**Tools:** `task_dispatch`, `task_status`, `task_output`, `task_cancel`
+
+Lock-free task plane: auto-background execution, durable output handles, restart reconciliation, and post-kill teachback diagnostics with observable git shipped-state.
+
+### `oc-lane-forecaster` (3 hooks, 1 tool)
+
+**Hooks:** `before_dispatch`, `before_agent_run`, `agent_end`
+
+**Tools:** `lane_forecast`
+
+Pre-dispatch run duration prediction, shape classification (work-loop, slow ops), lane cap early warnings, and lane event telemetry.
 
 ### `oc-e2e-trace-test` (1 hook, 0 tools)
 
