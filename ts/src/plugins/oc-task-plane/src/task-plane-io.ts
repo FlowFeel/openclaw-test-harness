@@ -26,8 +26,9 @@ import {
   mkdirSync,
 } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import type { TaskPlaneRegistry } from "../../shared/types.js";
+import type { ShippedState } from "./teachback-logic.js";
 
 /** Default path for tasks.json */
 export function getDefaultRegistryPath(): string {
@@ -50,6 +51,7 @@ export type TaskRegistryWriter = (data: TaskPlaneRegistry, path?: string) => voi
 export type OutputAppender = (handlePath: string, chunk: string) => void;
 export type OutputReader = (handlePath: string, options?: { tailLines?: number; maxBytes?: number }) => string;
 export type PidChecker = (pid: number) => boolean;
+export type ShippedStateReader = (cwd?: string) => ShippedState;
 
 export interface SpawnedProcess {
   pid?: number;
@@ -204,10 +206,69 @@ export function defaultProcessSpawner(
     options.onError?.(err);
   });
 
-  return {
-    pid: child.pid,
-    kill: (sig) => {
-      child.kill(sig);
-    },
-  };
-}
+    return {
+      pid: child.pid,
+      kill: (sig) => {
+        child.kill(sig);
+      },
+    };
+  }
+
+  /**
+   * Safe reader of repository shipped-state (last commit, branch, dirty status).
+   * Used for post-kill teachback diagnostics.
+   */
+  export function readRepoShippedState(cwd?: string): ShippedState {
+    const targetDir = cwd || process.cwd();
+    try {
+      // 1. Get last commit info
+      const lastCommitRaw = execSync("git log -1 --pretty=format:'%H%x09%s%x09%at'", {
+        cwd: targetDir,
+        timeout: 3000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).toString().trim();
+
+      const [sha, message, atStr] = lastCommitRaw.split("\t");
+      const commitAt = atStr ? parseInt(atStr, 10) * 1000 : undefined;
+
+      // 2. Get current branch
+      let branch: string | undefined;
+      try {
+        branch = execSync("git branch --show-current", {
+          cwd: targetDir,
+          timeout: 2000,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).toString().trim() || undefined;
+      } catch {}
+
+      // 3. Check for uncommitted changes
+      let hasUncommitted = false;
+      try {
+        const statusOut = execSync("git status --porcelain", {
+          cwd: targetDir,
+          timeout: 2000,
+          stdio: ["ignore", "pipe", "ignore"],
+        }).toString().trim();
+        hasUncommitted = statusOut.length > 0;
+      } catch {}
+
+      const status = sha
+        ? hasUncommitted
+          ? "uncommitted_changes"
+          : "shipped_clean"
+        : "unknown";
+
+      return {
+        lastCommitSha: sha || undefined,
+        lastCommitMessage: message || undefined,
+        lastPushedBranch: branch,
+        hasUncommittedChanges: hasUncommitted,
+        shippedAt: commitAt,
+        status,
+      };
+    } catch {
+      return {
+        status: "unknown",
+      };
+    }
+  }

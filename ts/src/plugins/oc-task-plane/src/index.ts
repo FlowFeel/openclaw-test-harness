@@ -55,6 +55,7 @@ import {
   defaultProcessSpawner,
   getDefaultRegistryPath,
   getDefaultOutputDir,
+  readRepoShippedState,
   type TaskRegistryReader,
   type TaskRegistryWriter,
   type OutputAppender,
@@ -62,6 +63,7 @@ import {
   type PidChecker,
   type ProcessSpawner,
   type SpawnedProcess,
+  type ShippedStateReader,
 } from "./task-plane-io.js";
 
 export interface OcTaskPlaneConfig {
@@ -78,6 +80,7 @@ export interface TaskPlaneIoDependencies {
   outputReader?: OutputReader;
   pidChecker?: PidChecker;
   spawner?: ProcessSpawner;
+  shippedStateReader?: ShippedStateReader;
   now?: () => number;
 }
 
@@ -89,6 +92,7 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
   const outputReader = deps.outputReader ?? readTaskOutput;
   const pidChecker = deps.pidChecker ?? isPidAlive;
   const spawner = deps.spawner ?? defaultProcessSpawner;
+  const shippedStateReader = deps.shippedStateReader ?? readRepoShippedState;
   const getNow = deps.now ?? (() => Date.now());
 
   let taskCounter = 0;
@@ -169,8 +173,17 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
                 }
 
                 // Record teach-back and append to output handle
-                const { teachback } = formatPostKillTeachback(task, { nowMs: now });
-                appender(task.output_handle, `\n\n[TASK_SUPERVISOR] ${teachback.summary}\n${teachback.suggestedAction}\n`);
+                const cwd = typeof task.payload?.cwd === "string" ? (task.payload.cwd as string) : undefined;
+                const shippedState = shippedStateReader(cwd);
+                const { teachback } = formatPostKillTeachback(task, {
+                  nowMs: now,
+                  shippedState,
+                  durationMs: task.timestamps.startedAt ? now - task.timestamps.startedAt : task.timeoutMs,
+                });
+                appender(
+                  task.output_handle,
+                  `\n\n[TASK_SUPERVISOR] ${teachback.summary}\n${teachback.detail}\n${teachback.suggestedAction}\n`
+                );
 
                 // Record in history for pre-dispatch recall
                 const cmd = typeof task.payload?.command === "string" ? task.payload.command : "";

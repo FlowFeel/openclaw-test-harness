@@ -282,4 +282,71 @@ describe("oc-task-plane integration", () => {
 
     expect(logs.some((l) => l.includes("Restart reconciliation complete"))).toBe(true);
   });
+
+  it("supervisor kills task at timeout cap and appends teach-back with shipped-state", async () => {
+    const store = new InMemoryTaskStore();
+    let simTime = 1000;
+
+    const fakeShippedState = {
+      lastCommitSha: "deadbeefcafe1234",
+      lastCommitMessage: "feat: work loop progress before cap",
+      lastPushedBranch: "topic/73239-rescue",
+      lastPrNumber: 367,
+      hasUncommittedChanges: false,
+      shippedAt: 600000,
+      status: "shipped_clean" as const,
+    };
+
+    const asyncSpawner: ProcessSpawner = (_cmd, opts) => {
+      return {
+        pid: 888,
+        kill: (sig) => {
+          opts.onExit?.(null, String(sig));
+        },
+      };
+    };
+
+    const plugin = createTaskPlanePlugin({
+      reader: store.reader,
+      writer: store.writer,
+      appender: store.appender,
+      outputReader: store.outputReader,
+      spawner: asyncSpawner,
+      shippedStateReader: () => fakeShippedState,
+      now: () => simTime,
+    });
+
+    const { api, hooks, tools } = createMockPluginApi();
+    plugin.register(api);
+
+    // Boot gateway to start supervisor
+    const startHook = hooks.get("gateway_start")!;
+    await startHook({});
+
+    // Dispatch a task with 10s timeout
+    const dispatchTool = tools.get("task_dispatch")!;
+    const res = await dispatchTool.execute("c-1", {
+      command: "long-running-work-loop",
+      timeoutMs: 10000,
+    });
+    const { taskId } = JSON.parse(res.content[0].text);
+
+    // Advance time past timeout
+    simTime += 15000;
+
+    // Fast-forward interval timer
+    await new Promise((r) => setTimeout(r, 1100));
+
+    // Check that task output received enriched post-kill teachback
+    const output = store.outputs.get(store.registry.tasks[taskId].output_handle) ?? "";
+    expect(output).toContain("[TASK_SUPERVISOR]");
+    expect(output).toContain("Killed at 10s lane cap");
+    expect(output).toContain("Note: this is a lane timeout, not an LLM provider outage.");
+    expect(output).toContain("Observable shipped-state: commit deadbee on branch 'topic/73239-rescue' (PR #367).");
+    expect(output).toContain("Work survived by policy — resume checkpoint from this commit.");
+
+    // Clean up
+    const stopHook = hooks.get("gateway_stop")!;
+    await stopHook({});
+  });
 });
