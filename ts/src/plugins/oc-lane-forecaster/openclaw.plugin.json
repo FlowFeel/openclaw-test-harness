@@ -1,0 +1,39 @@
+{
+  "id": "oc-lane-forecaster",
+  "name": "OcLaneForecaster",
+  "description": "Pre-dispatch run-duration prediction, shape classification (work-loop, slow ops), lane cap early warnings, and lane event telemetry",
+  "contracts": {
+    "tools": [
+      "lane_forecast"
+    ],
+    "hooks": [
+      "before_dispatch",
+      "before_agent_run",
+      "agent_end"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "laneCapMs": {
+        "type": "number",
+        "default": 600000,
+        "description": "Embedded-run lane cap in milliseconds (default: 600s = 600,000ms)"
+      },
+      "warningThresholdRatio": {
+        "type": "number",
+        "default": 0.85,
+        "description": "Threshold ratio of lane cap at which to warn (e.g. 0.85 * 600s = 510s)"
+      },
+      "enableTelemetry": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to emit lane event forecast telemetry"
+      }
+    }
+  }
+}

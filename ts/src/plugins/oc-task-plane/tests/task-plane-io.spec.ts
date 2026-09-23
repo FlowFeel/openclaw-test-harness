@@ -101,4 +101,20 @@ describe("task-plane-io (crash-safe persistence & output handles)", () => {
     const maxBytes = readTaskOutput(outputPath, { maxBytes: 7 });
     expect(maxBytes).toBe("Line 4\n");
   });
+
+  it("reads repo shipped-state in current git repository", async () => {
+    const { readRepoShippedState } = await import("../src/task-plane-io.js");
+    const state = readRepoShippedState(process.cwd());
+    expect(state.status).not.toBe("unknown");
+    expect(state.lastCommitSha).toBeDefined();
+    expect(typeof state.lastCommitSha).toBe("string");
+    expect(state.lastCommitSha!.length).toBeGreaterThan(0);
+  });
+
+  it("handles non-git directory gracefully returning status unknown", async () => {
+    const { readRepoShippedState } = await import("../src/task-plane-io.js");
+    const state = readRepoShippedState(tempDir);
+    expect(state.status).toBe("unknown");
+    expect(state.lastCommitSha).toBeUndefined();
+  });
 });
