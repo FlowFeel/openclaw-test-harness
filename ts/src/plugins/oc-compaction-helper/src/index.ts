@@ -169,12 +169,12 @@ export default definePluginEntry({
       selectedOcProviderId,
       registeredProviderIds
     );
-    if (providerSelection.warning) {
-      api.logger?.warn?.(`[oc-compaction-helper] ${providerSelection.warning}`);
+    if (providerSelection.assertion.verdict === "error") {
+      api.logger?.error?.(`[oc-compaction-helper] ${providerSelection.doctorLine}`);
+    } else if (providerSelection.assertion.verdict === "warn") {
+      api.logger?.warn?.(`[oc-compaction-helper] ${providerSelection.doctorLine}`);
     } else {
-      api.logger?.info?.(
-        `[oc-compaction-helper] Compaction provider selection OK: ${providerSelection.consequence}`
-      );
+      api.logger?.info?.(`[oc-compaction-helper] ${providerSelection.doctorLine}`);
     }
 
     // Sidecar from the cross-plugin registry (registered by oc-sidecar on gateway_start)
@@ -510,6 +510,8 @@ export default definePluginEntry({
                       unsetDespiteRegistered: providerSelection.unsetDespiteRegistered,
                       warning: providerSelection.warning ?? null,
                       consequence: providerSelection.consequence,
+                      assertion: providerSelection.assertion,
+                      doctorLine: providerSelection.doctorLine,
                     },
                     compactionHealth: {
                       lastBeforeMs: compactionHealth.lastBeforeMs,

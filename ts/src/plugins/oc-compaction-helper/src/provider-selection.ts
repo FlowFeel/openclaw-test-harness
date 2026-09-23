@@ -18,6 +18,13 @@
  *   output, consequence text naming the fallback behavior.
  */
 
+import {
+  evaluateProviderConsistency,
+  formatDoctorAssertionLine,
+  type ProviderConsistencyAssertion,
+  type DoctorAssertionSeverity,
+} from "../../shared/provider-consistency.js";
+
 export interface ProviderSelectionReport {
   /** The id OC will select for compaction (null = unset config). */
   selected: string | null;
@@ -31,10 +38,14 @@ export interface ProviderSelectionReport {
   warning?: string;
   /** What actually runs compaction. */
   consequence: string;
+  /** Full standardized doctor assertion (Issue #38). */
+  assertion: ProviderConsistencyAssertion;
+  /** Formatted doctor CLI/summary line. */
+  doctorLine: string;
 }
 
 /**
- * Build the selection-consistency report.
+ * Build the selection-consistency report delegating to generic doctor assertion logic.
  *
  * @param selectedId Value of agents.defaults.compaction.provider (null if unset).
  * @param registeredIds Ids registered by plugins on this gateway.
@@ -43,46 +54,28 @@ export function providerSelectionReport(
   selectedId: string | null | undefined,
   registeredIds: string[]
 ): ProviderSelectionReport {
-  const selected = typeof selectedId === "string" && selectedId.trim() ? selectedId.trim() : null;
-  const registered = [...registeredIds];
+  const assertion = evaluateProviderConsistency({
+    capability: "compaction",
+    configPath: "agents.defaults.compaction.provider",
+    selectedId,
+    registeredIds,
+    fallbackDescription: "built-in LLM summarizer",
+    hazardNote: "wedges transcripts above ~5.2 MB (issue #35, topic 70660)",
+  });
+
+  const selected = assertion.selectedId;
+  const registered = assertion.registeredIds;
   const selectedRegistered = selected !== null && registered.includes(selected);
   const unsetDespiteRegistered = selected === null && registered.length > 0;
 
-  if (selected !== null && !selectedRegistered) {
-    return {
-      selected,
-      registered,
-      selectedRegistered: false,
-      unsetDespiteRegistered: false,
-      warning:
-        `compaction.provider "${selected}" is configured but NOT registered — ` +
-        "OC falls back to the built-in LLM summarizer, which wedges transcripts " +
-        "above ~5.2 MB (issue #35). Register it or fix the id.",
-      consequence: "built-in LLM summarizer (fallback — unbounded single model call)",
-    };
-  }
-  if (unsetDespiteRegistered) {
-    return {
-      selected: null,
-      registered,
-      selectedRegistered: false,
-      unsetDespiteRegistered: true,
-      warning:
-        `compaction.provider is UNSET although ${registered.length} provider(s) ` +
-        `are registered (${registered.join(", ")}) — the built-in LLM summarizer ` +
-        "runs unconditionally and wedges transcripts above ~5.2 MB (issue #35, " +
-        "the dead-provider class). Set agents.defaults.compaction.provider.",
-      consequence: "built-in LLM summarizer (unselected provider is dead code)",
-    };
-  }
   return {
     selected,
     registered,
-    selectedRegistered: selected !== null ? true : false,
-    unsetDespiteRegistered: false,
-    consequence:
-      selected === null
-        ? "built-in LLM summarizer (no providers registered either — consistent)"
-        : `plugin provider "${selected}" (registered)`,
+    selectedRegistered,
+    unsetDespiteRegistered,
+    warning: assertion.verdict !== "ok" ? assertion.message : undefined,
+    consequence: assertion.consequence,
+    assertion,
+    doctorLine: formatDoctorAssertionLine(assertion),
   };
 }
