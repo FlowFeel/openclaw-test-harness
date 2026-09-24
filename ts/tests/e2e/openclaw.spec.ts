@@ -13,7 +13,7 @@ describe("OpenClaw Container Integration (Testcontainers)", () => {
     if (env && env.container) {
       await env.container.stop();
     }
-  });
+  }, 60000);
 
   it("should compile and admit spawn when metrics are healthy in container", async () => {
     const result = await env.executeAdmissionCheck({

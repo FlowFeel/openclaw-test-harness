@@ -252,7 +252,7 @@ describe("Level 2 E2E: patched gateway hook trace", { timeout: 180_000 }, () => 
 
   afterAll(async () => {
     await container?.stop();
-  });
+  }, 60_000);
 
   // ── Lifecycle: gateway_start dispatch + swallowed error ──────────────
 
@@ -318,7 +318,7 @@ describe("Level 2 E2E: patched gateway hook trace", { timeout: 180_000 }, () => 
     beforeAll(async () => {
       noHandlersResult = await runNoHandlersTest(container);
       console.log("[e2e] no-handlers result:\n" + noHandlersResult);
-    });
+    }, 60_000);
 
     it("the direct import succeeds (createHookRunner is accessible)", () => {
       expect(noHandlersResult).not.toContain("ERROR:");
