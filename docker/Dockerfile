@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     patch \
     python3 \
+    make \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # TypeScript runner (handles .js→.ts ESM resolution)
