@@ -6,14 +6,18 @@
  * implement a hook-based worker pool for concurrent Telegram topic sessions.
  *
  * The pool uses a counting semaphore: before_agent_run acquires a slot
- * (awaiting if full = backpressure), agent_end releases it. Subagents get
- * their own pool via subagent_spawning/subagent_ended. before_dispatch
- * routes by topic and short-circuits duplicates.
+ * (awaiting if full = backpressure, bounded by acquireTimeoutMs), agent_end
+ * releases it. Subagents get their own pool via subagent_spawning/subagent_ended.
+ * before_dispatch routes by topic and short-circuits duplicates.
+ *
+ * Includes an autonomous dead-slot watchdog to detect and force-release
+ * stale or orphaned leases across unhandled hook terminations and aborts.
  *
  * @invariants
  * - No logic here — only wiring (read state → pure call → act on result).
  * - No direct node:fs imports — I/O goes through the Protocol wrapper.
  * - Hooks catch errors and log (never block agent runs unexpectedly).
+ * - All exit paths (hook failure, abort, timeout, finish) guarantee slot release.
  * - The semaphore state is created once in register() and shared across
  *   all hook invocations via closure.
  *
@@ -27,10 +31,16 @@ import {
   createSemaphore,
   acquire,
   release,
+  forceRelease,
   getStats,
   isFull,
+  recordLease,
+  releaseLease,
+  reapStaleLeases,
+  reconcilePool,
   type SemaphoreState,
   type SemaphoreReport,
+  type PoolLease,
 } from "./topic-worker-pool-logic.js";
 import {
   parseTopicSessionKey,
@@ -53,55 +63,179 @@ export interface OcTopicWorkerPoolConfig {
   dedupWindowMs?: number;
   /** Routing config for pool assignment. */
   routing?: TopicRoutingConfig;
+  /** Maximum queue wait time before before_agent_run returns a block (default: 10_000ms, strictly < 15s OpenClaw budget). */
+  acquireTimeoutMs?: number;
+  /** Maximum lease duration before watchdog force-releases a leaked slot (default: 300_000ms = 5 minutes). */
+  maxLeaseDurationMs?: number;
+  /** Watchdog sweep interval in ms (default: 30_000ms). <= 0 disables periodic timer. */
+  watchdogIntervalMs?: number;
 }
 
 // ── Async semaphore (the wiring around the pure state) ──────────────────
+
+export interface AcquireOptions {
+  /** Optional timeout in ms. If the slot cannot be acquired in this time, returns action: "timeout". */
+  timeoutMs?: number;
+  /** Optional abort signal to cancel waiting. */
+  signal?: AbortSignal;
+}
+
+export interface Waiter {
+  readonly waiterId: number;
+  resolve: (report: SemaphoreReport) => void;
+  cancelled: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+}
 
 /**
  * An async wrapper around the pure SemaphoreState.
  *
  * The pure logic (acquire/release) only updates counters. This wrapper
  * adds the Promise/resolve plumbing that makes acquire() actually await
- * when the pool is full. This is the ONLY impure part, and it lives in
- * the wiring layer — the logic layer stays pure and testable.
+ * when the pool is full.
  */
-interface AsyncSemaphore {
+export interface AsyncSemaphore {
   state: SemaphoreState;
-  waiters: Array<{ resolve: () => void; waiterId: number }>;
-  acquire(): Promise<SemaphoreReport>;
+  waiters: Waiter[];
+  acquire(options?: AcquireOptions): Promise<SemaphoreReport>;
   release(): SemaphoreReport;
+  forceRelease(count?: number, reason?: string): SemaphoreReport;
   getStats(): ReturnType<typeof getStats>;
   isFull(): boolean;
+  purgeCancelledWaiters(): number;
 }
 
 export function createAsyncSemaphore(max: number): AsyncSemaphore {
   const state = createSemaphore(max);
-  const waiters: AsyncSemaphore["waiters"] = [];
+  const waiters: Waiter[] = [];
+
+  function purgeCancelledWaiters(): number {
+    let purged = 0;
+    while (waiters.length > 0 && waiters[0].cancelled) {
+      waiters.shift();
+      purged += 1;
+    }
+    return purged;
+  }
 
   return {
     state,
     waiters,
 
-    async acquire(): Promise<SemaphoreReport> {
+    async acquire(options?: AcquireOptions): Promise<SemaphoreReport> {
+      if (options?.signal?.aborted) {
+        return {
+          action: "rejected",
+          active: state.active,
+          max: state.max,
+          reason: "acquire aborted by signal",
+        };
+      }
+
+      purgeCancelledWaiters();
       const report = acquire(state);
       if (report.action === "acquired") {
         return report;
       }
-      // Queued — create a Promise that resolves when a slot frees.
+
+      // Queued — create a Promise that resolves when a slot frees or when timed out/aborted.
       return new Promise<SemaphoreReport>((resolve) => {
-        waiters.push({ resolve: resolve as () => void, waiterId: report.waiterId! });
+        const waiter: Waiter = {
+          waiterId: report.waiterId!,
+          resolve: () => {},
+          cancelled: false,
+        };
+
+        const cleanup = () => {
+          if (waiter.timer) {
+            clearTimeout(waiter.timer);
+            waiter.timer = undefined;
+          }
+          if (options?.signal && onAbort) {
+            options.signal.removeEventListener("abort", onAbort);
+          }
+        };
+
+        let onAbort: (() => void) | undefined;
+        if (options?.signal) {
+          onAbort = () => {
+            if (!waiter.cancelled) {
+              waiter.cancelled = true;
+              cleanup();
+              const idx = waiters.indexOf(waiter);
+              if (idx !== -1) waiters.splice(idx, 1);
+              resolve({
+                action: "rejected",
+                active: state.active,
+                max: state.max,
+                waiterId: waiter.waiterId,
+                reason: "acquire aborted by signal",
+              });
+            }
+          };
+          options.signal.addEventListener("abort", onAbort, { once: true });
+        }
+
+        if (
+          options?.timeoutMs !== undefined &&
+          options.timeoutMs > 0 &&
+          options.timeoutMs < Infinity
+        ) {
+          waiter.timer = setTimeout(() => {
+            if (!waiter.cancelled) {
+              waiter.cancelled = true;
+              cleanup();
+              const idx = waiters.indexOf(waiter);
+              if (idx !== -1) waiters.splice(idx, 1);
+              resolve({
+                action: "timeout",
+                active: state.active,
+                max: state.max,
+                waiterId: waiter.waiterId,
+                reason: `acquire timed out after ${options.timeoutMs}ms`,
+              });
+            }
+          }, options.timeoutMs);
+        }
+
+        waiter.resolve = (rep: SemaphoreReport) => {
+          if (!waiter.cancelled) {
+            cleanup();
+            resolve(rep);
+          }
+        };
+
+        waiters.push(waiter);
       });
     },
 
     release(): SemaphoreReport {
+      purgeCancelledWaiters();
       const report = release(state);
-      if (report.action === "released" && waiters.length > 0) {
-        // Hand the freed slot to the next waiter.
-        const waiter = waiters.shift()!;
-        // Re-acquire on behalf of the waiter (updates state counters).
-        const reacquire = acquire(state);
-        waiter.resolve();
-        return reacquire;
+      if (report.action === "released") {
+        while (waiters.length > 0) {
+          const next = waiters.shift()!;
+          if (!next.cancelled) {
+            const reacquire = acquire(state);
+            next.resolve(reacquire);
+            return reacquire;
+          }
+        }
+      }
+      return report;
+    },
+
+    forceRelease(count = 1, reason = "force released"): SemaphoreReport {
+      purgeCancelledWaiters();
+      const report = forceRelease(state, count, reason);
+      if (report.action === "force_released") {
+        while (waiters.length > 0 && state.active < state.max) {
+          const next = waiters.shift()!;
+          if (!next.cancelled) {
+            const reacquire = acquire(state);
+            next.resolve(reacquire);
+          }
+        }
       }
       return report;
     },
@@ -113,7 +247,25 @@ export function createAsyncSemaphore(max: number): AsyncSemaphore {
     isFull() {
       return isFull(state);
     },
+
+    purgeCancelledWaiters,
   };
+}
+
+/** Extract correlation identifier from event or context payload. */
+export function extractRunId(event: unknown, ctx?: unknown): string {
+  const ev = (event && typeof event === "object" ? event : {}) as Record<string, unknown>;
+  const cx = (ctx && typeof ctx === "object" ? ctx : {}) as Record<string, unknown>;
+  const candidate =
+    ev.runId ??
+    cx.runId ??
+    ev.sessionId ??
+    cx.sessionId ??
+    ev.conversationId ??
+    cx.conversationId ??
+    ev.sessionKey ??
+    cx.sessionKey;
+  return candidate !== undefined && candidate !== null ? String(candidate) : "";
 }
 
 // ── Plugin ──────────────────────────────────────────────────────────────
@@ -128,6 +280,9 @@ export default definePluginEntry({
     const mainPoolMax = cfg.mainPoolMax ?? 3;
     const subPoolMax = cfg.subPoolMax ?? 2;
     const dedupWindowMs = cfg.dedupWindowMs ?? 5_000;
+    const acquireTimeoutMs = cfg.acquireTimeoutMs ?? 10_000;
+    const maxLeaseDurationMs = cfg.maxLeaseDurationMs ?? 300_000;
+    const watchdogIntervalMs = cfg.watchdogIntervalMs ?? 30_000;
 
     // The shared pools — created once, used by all hook invocations.
     const mainPool = createAsyncSemaphore(mainPoolMax);
@@ -143,6 +298,62 @@ export default definePluginEntry({
 
     // Track which pool a run is using (for agent_end to release the right one).
     const runPoolMap = new Map<string, "main" | "sub">();
+
+    // Active leases tracked with timestamps for watchdog leak detection
+    const activeLeases = new Map<string, PoolLease>();
+
+    // ── Watchdog Sweep ───────────────────────────────────────────────
+    const runWatchdogSweep = (nowMs = Date.now()) => {
+      // 1. Reap leases exceeding maxLeaseDurationMs
+      const reapedReport = reapStaleLeases(activeLeases, nowMs, maxLeaseDurationMs);
+      for (const reaped of reapedReport.reaped) {
+        runPoolMap.delete(reaped.runId);
+        if (reaped.pool === "main") {
+          mainPool.release();
+          api.logger?.warn?.(
+            `[oc-topic-worker-pool] watchdog: force-released stale main slot for runId=${reaped.runId} (held > ${maxLeaseDurationMs}ms)`,
+          );
+        } else {
+          subPool.release();
+          api.logger?.warn?.(
+            `[oc-topic-worker-pool] watchdog: force-released stale sub slot for runId=${reaped.runId} (held > ${maxLeaseDurationMs}ms)`,
+          );
+        }
+      }
+
+      // 2. Pool reconciliation: if active > live leases, force-reconcile excess
+      const mainLiveCount = Array.from(activeLeases.values()).filter((l) => l.pool === "main").length;
+      const mainReconcile = reconcilePool(mainPool.state, mainLiveCount);
+      if (mainReconcile.action === "reconciled") {
+        api.logger?.warn?.(
+          `[oc-topic-worker-pool] watchdog: reconciled ${mainReconcile.forceReleasedCount} orphaned main slots (active was ${mainReconcile.previousActive} -> now ${mainReconcile.currentActive})`,
+        );
+      }
+
+      const subLiveCount = Array.from(activeLeases.values()).filter((l) => l.pool === "sub").length;
+      const subReconcile = reconcilePool(subPool.state, subLiveCount);
+      if (subReconcile.action === "reconciled") {
+        api.logger?.warn?.(
+          `[oc-topic-worker-pool] watchdog: reconciled ${subReconcile.forceReleasedCount} orphaned sub slots (active was ${subReconcile.previousActive} -> now ${subReconcile.currentActive})`,
+        );
+      }
+    };
+
+    let watchdogTimer: NodeJS.Timeout | undefined;
+    if (watchdogIntervalMs > 0) {
+      watchdogTimer = setInterval(() => {
+        try {
+          runWatchdogSweep();
+        } catch (err) {
+          api.logger?.error?.(
+            `[oc-topic-worker-pool] watchdog sweep error: ${String(err)}`,
+          );
+        }
+      }, watchdogIntervalMs);
+      if (typeof watchdogTimer.unref === "function") {
+        watchdogTimer.unref();
+      }
+    }
 
     // ── Hook: before_dispatch ────────────────────────────────────────
     // Routes by topic, short-circuits duplicates, assigns pool.
@@ -188,7 +399,6 @@ export default definePluginEntry({
               `[oc-topic-worker-pool] short-circuit: ${decision.reason}`,
             );
             // Return handled=true with empty text to skip the agent.
-            // The OC hook system will see { handled: true } and skip.
           }
 
           if (decision.action === "skip") {
@@ -208,17 +418,40 @@ export default definePluginEntry({
     );
 
     // ── Hook: before_agent_run ───────────────────────────────────────
-    // Admission gate — acquires a main pool slot. The await IS the queue.
+    // Admission gate — acquires a main pool slot with bounded queue wait.
     api.on(
       "before_agent_run",
-      async (event) => {
+      async (event: unknown, ctx?: unknown) => {
+        let acquired = false;
+        let runId = "";
         try {
-          const runId = String(event.runId ?? event.sessionId ?? "unknown");
+          runId =
+            extractRunId(event, ctx) ||
+            `main-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           api.logger?.info?.(
             `[oc-topic-worker-pool] before_agent_run: acquiring main pool slot (runId=${runId})`,
           );
 
-          const report = await mainPool.acquire();
+          // Acquire with timeout strictly below OpenClaw's 15s fail-closed gate
+          const report = await mainPool.acquire({ timeoutMs: acquireTimeoutMs });
+
+          if (report.action !== "acquired") {
+            api.logger?.warn?.(
+              `[oc-topic-worker-pool] before_agent_run: pool saturated (runId=${runId}, action=${report.action}, reason=${report.reason ?? "none"})`,
+            );
+            // Gracefully block with a user-facing reason rather than crashing the hook on 15s timeout
+            return {
+              outcome: "block",
+              reason: `Topic worker pool saturated (${report.reason ?? "queue timeout"})`,
+            };
+          }
+
+          acquired = true;
+          recordLease(activeLeases, {
+            runId,
+            pool: "main",
+            acquiredAt: Date.now(),
+          });
           runPoolMap.set(runId, "main");
 
           api.logger?.info?.(
@@ -226,13 +459,18 @@ export default definePluginEntry({
           );
 
           // Return pass — the agent should proceed.
-          // (OC's before_agent_run expects { outcome: "pass" } or { outcome: "block", reason })
           return { outcome: "pass" };
         } catch (err) {
           api.logger?.error?.(
             `[oc-topic-worker-pool] before_agent_run failed: ${String(err)}`,
           );
-          // On error, don't block the agent — let it proceed.
+          // If we acquired the slot but failed afterwards, release immediately to prevent leaks
+          if (acquired && runId) {
+            mainPool.release();
+            releaseLease(activeLeases, runId);
+            runPoolMap.delete(runId);
+          }
+          // On unhandled error, don't block the agent
           return { outcome: "pass" };
         }
       }
@@ -242,16 +480,32 @@ export default definePluginEntry({
     // Releases the main pool slot.
     api.on(
       "agent_end",
-      async (event) => {
+      async (event: unknown, ctx?: unknown) => {
         try {
-          const runId = String(event.runId ?? event.sessionId ?? "unknown");
-          const poolType = runPoolMap.get(runId);
+          const runId = extractRunId(event, ctx);
+          const lease = runId ? activeLeases.get(runId) : undefined;
+          const poolType =
+            (runId ? runPoolMap.get(runId) : undefined) ??
+            lease?.pool ??
+            (mainPool.state.active > 0 ? "main" : undefined);
 
           if (poolType === "main") {
             const report = mainPool.release();
-            runPoolMap.delete(runId);
+            if (runId) {
+              runPoolMap.delete(runId);
+              releaseLease(activeLeases, runId);
+            } else if (activeLeases.size > 0) {
+              // If runId missing, release oldest main lease
+              for (const [id, l] of activeLeases) {
+                if (l.pool === "main") {
+                  activeLeases.delete(id);
+                  runPoolMap.delete(id);
+                  break;
+                }
+              }
+            }
             api.logger?.info?.(
-              `[oc-topic-worker-pool] agent_end: released main pool slot (active=${report.active}/${report.max})`,
+              `[oc-topic-worker-pool] agent_end: released main pool slot (runId=${runId || "unknown"}, active=${report.active}/${report.max})`,
             );
           }
         } catch (err) {
@@ -263,28 +517,49 @@ export default definePluginEntry({
     );
 
     // ── Hook: subagent_spawning ──────────────────────────────────────
-    // Acquires a sub-pool slot for the subagent.
+    // Acquires a sub-pool slot for the subagent with bounded queue wait.
     api.on(
       "subagent_spawning",
-      async (event) => {
+      async (event: unknown, ctx?: unknown) => {
+        let acquired = false;
+        let runId = "";
         try {
-          const runId = String(event.runId ?? "unknown");
+          runId =
+            extractRunId(event, ctx) ||
+            `sub-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
           api.logger?.info?.(
             `[oc-topic-worker-pool] subagent_spawning: acquiring sub pool slot (runId=${runId})`,
           );
 
-          const report = await subPool.acquire();
+          const report = await subPool.acquire({ timeoutMs: acquireTimeoutMs });
+
+          if (report.action !== "acquired") {
+            api.logger?.warn?.(
+              `[oc-topic-worker-pool] subagent_spawning: sub pool saturated (runId=${runId}, action=${report.action})`,
+            );
+            return;
+          }
+
+          acquired = true;
+          recordLease(activeLeases, {
+            runId,
+            pool: "sub",
+            acquiredAt: Date.now(),
+          });
           runPoolMap.set(runId, "sub");
 
           api.logger?.info?.(
             `[oc-topic-worker-pool] sub pool: active=${report.active}/${report.max} (waited=${subPool.state.totalWaited})`,
           );
-
-          // Return undefined (pass-through) — let the subagent proceed.
         } catch (err) {
           api.logger?.error?.(
             `[oc-topic-worker-pool] subagent_spawning failed: ${String(err)}`,
           );
+          if (acquired && runId) {
+            subPool.release();
+            releaseLease(activeLeases, runId);
+            runPoolMap.delete(runId);
+          }
         }
       }
     );
@@ -293,16 +568,31 @@ export default definePluginEntry({
     // Releases the sub-pool slot.
     api.on(
       "subagent_ended",
-      async (event) => {
+      async (event: unknown, ctx?: unknown) => {
         try {
-          const runId = String(event.runId ?? "unknown");
-          const poolType = runPoolMap.get(runId);
+          const runId = extractRunId(event, ctx);
+          const lease = runId ? activeLeases.get(runId) : undefined;
+          const poolType =
+            (runId ? runPoolMap.get(runId) : undefined) ??
+            lease?.pool ??
+            (subPool.state.active > 0 ? "sub" : undefined);
 
           if (poolType === "sub") {
             const report = subPool.release();
-            runPoolMap.delete(runId);
+            if (runId) {
+              runPoolMap.delete(runId);
+              releaseLease(activeLeases, runId);
+            } else if (activeLeases.size > 0) {
+              for (const [id, l] of activeLeases) {
+                if (l.pool === "sub") {
+                  activeLeases.delete(id);
+                  runPoolMap.delete(id);
+                  break;
+                }
+              }
+            }
             api.logger?.info?.(
-              `[oc-topic-worker-pool] subagent_ended: released sub pool slot (active=${report.active}/${report.max})`,
+              `[oc-topic-worker-pool] subagent_ended: released sub pool slot (runId=${runId || "unknown"}, active=${report.active}/${report.max})`,
             );
           }
         } catch (err) {
@@ -314,13 +604,12 @@ export default definePluginEntry({
     );
 
     // ── Hook: before_agent_reply ─────────────────────────────────────
-    // Egress — can be used for rate-limiting replies per topic.
+    // Egress — can be used for rate-limiting replies per topic + opportunistic watchdog sweep.
     api.on(
       "before_agent_reply",
       async (event) => {
         try {
-          // For now, just log the pool stats (passive observation).
-          // Future: per-topic rate limiting, reply merging.
+          runWatchdogSweep();
           const stats = mainPool.getStats();
           api.logger?.info?.(
             `[oc-topic-worker-pool] before_agent_reply: pool stats active=${stats.active}/${stats.max} peak=${stats.peakActive} waited=${stats.totalWaited}`,
@@ -333,9 +622,9 @@ export default definePluginEntry({
       }
     );
 
-    // Expose pool stats for health checks (via a tool if needed).
+    // Expose pool stats for health checks
     api.logger?.info?.(
-      `[oc-topic-worker-pool] initialized: mainPool=${mainPoolMax}, subPool=${subPoolMax}, dedupWindow=${dedupWindowMs}ms`,
+      `[oc-topic-worker-pool] initialized: mainPool=${mainPoolMax}, subPool=${subPoolMax}, dedupWindow=${dedupWindowMs}ms, acquireTimeout=${acquireTimeoutMs}ms`,
     );
   },
 });
