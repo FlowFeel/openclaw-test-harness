@@ -46,7 +46,13 @@ export interface SemaphoreState {
 
 /** A report returned by mutating operations (CheckResult pattern). */
 export interface SemaphoreReport {
-  readonly action: "acquired" | "queued" | "released" | "rejected";
+  readonly action:
+    | "acquired"
+    | "queued"
+    | "released"
+    | "rejected"
+    | "timeout"
+    | "force_released";
   readonly active: number;
   readonly max: number;
   readonly waiterId?: number;
@@ -123,6 +129,34 @@ export function release(state: SemaphoreState): SemaphoreReport {
     action: "released",
     active: state.active,
     max: state.max,
+  };
+}
+
+/**
+ * Force release slots (e.g. when watchdog detects leaked slots or during pool reconciliation).
+ * Clamps active to at least 0 and increments totalReleased by the number of released slots.
+ */
+export function forceRelease(
+  state: SemaphoreState,
+  count = 1,
+  reason = "force released",
+): SemaphoreReport {
+  const toRelease = Math.min(Math.max(1, count), state.active);
+  if (toRelease <= 0) {
+    return {
+      action: "rejected",
+      active: state.active,
+      max: state.max,
+      reason: "no active slots to force-release",
+    };
+  }
+  state.active -= toRelease;
+  state.totalReleased += toRelease;
+  return {
+    action: "force_released",
+    active: state.active,
+    max: state.max,
+    reason,
   };
 }
 
@@ -395,4 +429,130 @@ export function hashContent(content: string): string {
     hash = ((hash << 5) + hash + content.charCodeAt(i)) | 0;
   }
   return (hash >>> 0).toString(36);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Part 4: Lease Tracking & Dead-Slot Watchdog (Pure Logic)
+// ════════════════════════════════════════════════════════════════════════
+
+/** An active slot lease held by a run. */
+export interface PoolLease {
+  readonly runId: string;
+  readonly pool: "main" | "sub";
+  readonly acquiredAt: number;
+  readonly topicId?: string;
+}
+
+/** Result of a lease recording or release operation. */
+export interface LeaseOperationReport {
+  readonly action: "recorded" | "released" | "not_found";
+  readonly runId: string;
+  readonly pool?: "main" | "sub";
+  readonly lease?: PoolLease;
+}
+
+/**
+ * Record a lease in the active leases map.
+ * Pure logic — returns a report.
+ */
+export function recordLease(
+  leases: Map<string, PoolLease>,
+  lease: PoolLease,
+): LeaseOperationReport {
+  leases.set(lease.runId, lease);
+  return {
+    action: "recorded",
+    runId: lease.runId,
+    pool: lease.pool,
+    lease,
+  };
+}
+
+/**
+ * Release a lease from the active leases map.
+ * Pure logic — returns a report.
+ */
+export function releaseLease(
+  leases: Map<string, PoolLease>,
+  runId: string,
+): LeaseOperationReport {
+  const lease = leases.get(runId);
+  if (!lease) {
+    return {
+      action: "not_found",
+      runId,
+    };
+  }
+  leases.delete(runId);
+  return {
+    action: "released",
+    runId,
+    pool: lease.pool,
+    lease,
+  };
+}
+
+/** Report of stale leases reaped by the watchdog. */
+export interface ReapedLeasesReport {
+  readonly reaped: PoolLease[];
+  readonly remainingCount: number;
+}
+
+/**
+ * Reaps any leases whose duration exceeds maxLeaseDurationMs.
+ * Pure logic — uses injected nowMs (deterministic, no Date.now()).
+ */
+export function reapStaleLeases(
+  leases: Map<string, PoolLease>,
+  nowMs: number,
+  maxLeaseDurationMs: number,
+): ReapedLeasesReport {
+  const reaped: PoolLease[] = [];
+  for (const [runId, lease] of leases) {
+    if (nowMs - lease.acquiredAt > maxLeaseDurationMs) {
+      reaped.push(lease);
+      leases.delete(runId);
+    }
+  }
+  return {
+    reaped,
+    remainingCount: leases.size,
+  };
+}
+
+/** Report of pool reconciliation against live leases. */
+export interface ReconcilePoolReport {
+  readonly action: "reconciled" | "unchanged";
+  readonly previousActive: number;
+  readonly currentActive: number;
+  readonly forceReleasedCount: number;
+}
+
+/**
+ * Reconciles semaphore active count with the number of live tracked leases.
+ * If active > liveLeaseCount, force-releases the excess slots so ghost counters don't starve the pool.
+ * Pure logic — returns a report.
+ */
+export function reconcilePool(
+  state: SemaphoreState,
+  liveLeaseCount: number,
+): ReconcilePoolReport {
+  const previousActive = state.active;
+  if (state.active > liveLeaseCount) {
+    const excess = state.active - liveLeaseCount;
+    state.active = liveLeaseCount;
+    state.totalReleased += excess;
+    return {
+      action: "reconciled",
+      previousActive,
+      currentActive: state.active,
+      forceReleasedCount: excess,
+    };
+  }
+  return {
+    action: "unchanged",
+    previousActive,
+    currentActive: state.active,
+    forceReleasedCount: 0,
+  };
 }

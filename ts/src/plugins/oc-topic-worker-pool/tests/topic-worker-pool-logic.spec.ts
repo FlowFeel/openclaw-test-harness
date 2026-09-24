@@ -11,10 +11,16 @@ import {
   createSemaphore,
   acquire,
   release,
+  forceRelease,
   getStats,
   isFull,
   hasCapacity,
+  recordLease,
+  releaseLease,
+  reapStaleLeases,
+  reconcilePool,
   type SemaphoreState,
+  type PoolLease,
 } from "../src/topic-worker-pool-logic.js";
 import {
   parseTopicSessionKey,
@@ -328,3 +334,117 @@ describe("decideDispatch (pure logic)", () => {
     expect(report.action).toBe("route");
   });
 });
+
+// ── Force release & watchdog tests (pure logic) ─────────────────────────
+
+describe("forceRelease (pure logic)", () => {
+  it("force-releases active slots and updates totalReleased", () => {
+    const state = createSemaphore(3);
+    acquire(state);
+    acquire(state);
+    expect(state.active).toBe(2);
+
+    const report = forceRelease(state, 1, "watchdog reap");
+    expect(report.action).toBe("force_released");
+    expect(state.active).toBe(1);
+    expect(state.totalReleased).toBe(1);
+    expect(report.reason).toBe("watchdog reap");
+  });
+
+  it("clamps release count to available active slots", () => {
+    const state = createSemaphore(3);
+    acquire(state);
+    expect(state.active).toBe(1);
+
+    const report = forceRelease(state, 5, "full reset");
+    expect(report.action).toBe("force_released");
+    expect(state.active).toBe(0);
+    expect(state.totalReleased).toBe(1);
+  });
+
+  it("rejects forceRelease when active is already 0", () => {
+    const state = createSemaphore(3);
+    const report = forceRelease(state, 1);
+    expect(report.action).toBe("rejected");
+    expect(report.reason).toContain("no active slots");
+    expect(state.active).toBe(0);
+  });
+});
+
+describe("lease tracking (pure logic)", () => {
+  it("records and releases leases cleanly", () => {
+    const leases = new Map<string, PoolLease>();
+    const lease1: PoolLease = {
+      runId: "run-1",
+      pool: "main",
+      acquiredAt: 1000,
+      topicId: "topic-1",
+    };
+
+    const rec = recordLease(leases, lease1);
+    expect(rec.action).toBe("recorded");
+    expect(leases.size).toBe(1);
+    expect(leases.get("run-1")).toEqual(lease1);
+
+    const rel = releaseLease(leases, "run-1");
+    expect(rel.action).toBe("released");
+    expect(rel.lease).toEqual(lease1);
+    expect(leases.size).toBe(0);
+
+    const relNotFound = releaseLease(leases, "run-1");
+    expect(relNotFound.action).toBe("not_found");
+  });
+
+  it("reaps stale leases exceeding maxLeaseDurationMs", () => {
+    const leases = new Map<string, PoolLease>();
+    leases.set("run-fresh", {
+      runId: "run-fresh",
+      pool: "main",
+      acquiredAt: 95_000,
+    });
+    leases.set("run-stale-1", {
+      runId: "run-stale-1",
+      pool: "main",
+      acquiredAt: 10_000,
+    });
+    leases.set("run-stale-2", {
+      runId: "run-stale-2",
+      pool: "sub",
+      acquiredAt: 20_000,
+    });
+
+    const nowMs = 100_000;
+    const maxDurationMs = 50_000; // Anything before 50_000 is stale
+
+    const report = reapStaleLeases(leases, nowMs, maxDurationMs);
+    expect(report.reaped.length).toBe(2);
+    expect(report.reaped.map((l) => l.runId)).toEqual(["run-stale-1", "run-stale-2"]);
+    expect(report.remainingCount).toBe(1);
+    expect(leases.has("run-fresh")).toBe(true);
+    expect(leases.has("run-stale-1")).toBe(false);
+  });
+
+  it("reconciles pool when active slots exceed live leases", () => {
+    const state = createSemaphore(3);
+    acquire(state);
+    acquire(state);
+    acquire(state);
+    expect(state.active).toBe(3);
+
+    // Only 1 live lease exists, but semaphore active count is 3 (2 leaked slots)
+    const report = reconcilePool(state, 1);
+    expect(report.action).toBe("reconciled");
+    expect(report.previousActive).toBe(3);
+    expect(report.currentActive).toBe(1);
+    expect(report.forceReleasedCount).toBe(2);
+    expect(state.active).toBe(1);
+    expect(state.totalReleased).toBe(2);
+
+    // When active matches live leases, no action taken
+    const report2 = reconcilePool(state, 1);
+    expect(report2.action).toBe("unchanged");
+    expect(report2.forceReleasedCount).toBe(0);
+    expect(state.active).toBe(1);
+  });
+});
+
