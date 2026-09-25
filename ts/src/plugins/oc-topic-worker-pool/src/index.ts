@@ -55,6 +55,8 @@ import {
 // ── Config ──────────────────────────────────────────────────────────────
 
 export interface OcTopicWorkerPoolConfig {
+  /** Explicitly enable the plugin (default: false). Admission control is disabled by default unless enabled: true or env OPENCLAW_ENABLE_TOPIC_WORKER_POOL=1. */
+  enabled?: boolean;
   /** Max concurrent main agent runs (default: 3). */
   mainPoolMax?: number;
   /** Max concurrent subagent runs (default: 2). */
@@ -74,8 +76,10 @@ export interface OcTopicWorkerPoolConfig {
 // ── Async semaphore (the wiring around the pure state) ──────────────────
 
 export interface AcquireOptions {
-  /** Optional timeout in ms. If the slot cannot be acquired in this time, returns action: "timeout". */
+  /** Optional timeout in ms. If the slot cannot be acquired in this time, returns action: "timeout" or rejects if rejectOnTimeout is true. */
   timeoutMs?: number;
+  /** If true, rejects the promise on timeout instead of resolving with action: "timeout". */
+  rejectOnTimeout?: boolean;
   /** Optional abort signal to cancel waiting. */
   signal?: AbortSignal;
 }
@@ -139,7 +143,7 @@ export function createAsyncSemaphore(max: number): AsyncSemaphore {
       }
 
       // Queued — create a Promise that resolves when a slot frees or when timed out/aborted.
-      return new Promise<SemaphoreReport>((resolve) => {
+      return new Promise<SemaphoreReport>((resolve, reject) => {
         const waiter: Waiter = {
           waiterId: report.waiterId!,
           resolve: () => {},
@@ -187,13 +191,17 @@ export function createAsyncSemaphore(max: number): AsyncSemaphore {
               cleanup();
               const idx = waiters.indexOf(waiter);
               if (idx !== -1) waiters.splice(idx, 1);
-              resolve({
-                action: "timeout",
-                active: state.active,
-                max: state.max,
-                waiterId: waiter.waiterId,
-                reason: `acquire timed out after ${options.timeoutMs}ms`,
-              });
+              if (options.rejectOnTimeout) {
+                reject(new Error(`acquire timed out after ${options.timeoutMs}ms`));
+              } else {
+                resolve({
+                  action: "timeout",
+                  active: state.active,
+                  max: state.max,
+                  waiterId: waiter.waiterId,
+                  reason: `acquire timed out after ${options.timeoutMs}ms`,
+                });
+              }
             }
           }, options.timeoutMs);
         }
@@ -277,6 +285,25 @@ export default definePluginEntry({
     "Hook-based worker pool with semaphore admission control for concurrent Telegram topic sessions",
   register(api: PluginApi, config?: Record<string, unknown>) {
     const cfg = (config as OcTopicWorkerPoolConfig) ?? {};
+
+    // Safety gate (Issue #45): Disabled by default unless explicitly enabled in config or env
+    const isEnvEnabled =
+      typeof process !== "undefined" &&
+      process.env &&
+      (process.env.OPENCLAW_ENABLE_TOPIC_WORKER_POOL === "1" ||
+        process.env.OPENCLAW_ENABLE_TOPIC_WORKER_POOL === "true" ||
+        process.env.OPENCLAW_TOPIC_WORKER_POOL === "1" ||
+        process.env.OPENCLAW_TOPIC_WORKER_POOL === "true");
+
+    const isEnabled = cfg.enabled === true || (cfg.enabled !== false && Boolean(isEnvEnabled));
+
+    if (!isEnabled) {
+      api.logger?.info?.(
+        "[oc-topic-worker-pool] plugin disabled by default (enable via config { enabled: true } or env OPENCLAW_ENABLE_TOPIC_WORKER_POOL=1)",
+      );
+      return;
+    }
+
     const mainPoolMax = cfg.mainPoolMax ?? 3;
     const subPoolMax = cfg.subPoolMax ?? 2;
     const dedupWindowMs = cfg.dedupWindowMs ?? 5_000;
@@ -432,18 +459,27 @@ export default definePluginEntry({
             `[oc-topic-worker-pool] before_agent_run: acquiring main pool slot (runId=${runId})`,
           );
 
+          // Real-time run abort binding (Issue #45): release immediately if lane-killed or cancelled
+          const runSignal =
+            (ctx && typeof ctx === "object" && "signal" in ctx && (ctx.signal as unknown) instanceof AbortSignal
+              ? (ctx.signal as AbortSignal)
+              : undefined) ??
+            (event && typeof event === "object" && "signal" in event && (event.signal as unknown) instanceof AbortSignal
+              ? (event.signal as AbortSignal)
+              : undefined);
+
           // Acquire with timeout strictly below OpenClaw's 15s fail-closed gate
-          const report = await mainPool.acquire({ timeoutMs: acquireTimeoutMs });
+          const report = await mainPool.acquire({
+            timeoutMs: acquireTimeoutMs,
+            signal: runSignal,
+          });
 
           if (report.action !== "acquired") {
             api.logger?.warn?.(
-              `[oc-topic-worker-pool] before_agent_run: pool saturated (runId=${runId}, action=${report.action}, reason=${report.reason ?? "none"})`,
+              `[oc-topic-worker-pool] before_agent_run: pool saturated (runId=${runId}, action=${report.action}, reason=${report.reason ?? "none"}), failing open to avoid blocking gateway`,
             );
-            // Gracefully block with a user-facing reason rather than crashing the hook on 15s timeout
-            return {
-              outcome: "block",
-              reason: `Topic worker pool saturated (${report.reason ?? "queue timeout"})`,
-            };
+            // FAIL OPEN (Issue #45): Admission control must never block the gateway
+            return { outcome: "pass" };
           }
 
           acquired = true;
@@ -453,6 +489,20 @@ export default definePluginEntry({
             acquiredAt: Date.now(),
           });
           runPoolMap.set(runId, "main");
+
+          if (runSignal) {
+            const onRunAbort = () => {
+              if (acquired && runId && activeLeases.has(runId)) {
+                api.logger?.warn?.(
+                  `[oc-topic-worker-pool] abort signal received for runId=${runId}: releasing main pool slot immediately`,
+                );
+                mainPool.release();
+                releaseLease(activeLeases, runId);
+                runPoolMap.delete(runId);
+              }
+            };
+            runSignal.addEventListener("abort", onRunAbort, { once: true });
+          }
 
           api.logger?.info?.(
             `[oc-topic-worker-pool] main pool: active=${report.active}/${report.max} (waited=${mainPool.state.totalWaited})`,
@@ -470,7 +520,7 @@ export default definePluginEntry({
             releaseLease(activeLeases, runId);
             runPoolMap.delete(runId);
           }
-          // On unhandled error, don't block the agent
+          // On unhandled error or rejected acquire, fail open (never block the agent)
           return { outcome: "pass" };
         }
       }
@@ -531,11 +581,22 @@ export default definePluginEntry({
             `[oc-topic-worker-pool] subagent_spawning: acquiring sub pool slot (runId=${runId})`,
           );
 
-          const report = await subPool.acquire({ timeoutMs: acquireTimeoutMs });
+          const subSignal =
+            (ctx && typeof ctx === "object" && "signal" in ctx && (ctx.signal as unknown) instanceof AbortSignal
+              ? (ctx.signal as AbortSignal)
+              : undefined) ??
+            (event && typeof event === "object" && "signal" in event && (event.signal as unknown) instanceof AbortSignal
+              ? (event.signal as AbortSignal)
+              : undefined);
+
+          const report = await subPool.acquire({
+            timeoutMs: acquireTimeoutMs,
+            signal: subSignal,
+          });
 
           if (report.action !== "acquired") {
             api.logger?.warn?.(
-              `[oc-topic-worker-pool] subagent_spawning: sub pool saturated (runId=${runId}, action=${report.action})`,
+              `[oc-topic-worker-pool] subagent_spawning: sub pool saturated (runId=${runId}, action=${report.action}), passing through`,
             );
             return;
           }
@@ -547,6 +608,20 @@ export default definePluginEntry({
             acquiredAt: Date.now(),
           });
           runPoolMap.set(runId, "sub");
+
+          if (subSignal) {
+            const onSubAbort = () => {
+              if (acquired && runId && activeLeases.has(runId)) {
+                api.logger?.warn?.(
+                  `[oc-topic-worker-pool] abort signal received for subagent runId=${runId}: releasing sub pool slot immediately`,
+                );
+                subPool.release();
+                releaseLease(activeLeases, runId);
+                runPoolMap.delete(runId);
+              }
+            };
+            subSignal.addEventListener("abort", onSubAbort, { once: true });
+          }
 
           api.logger?.info?.(
             `[oc-topic-worker-pool] sub pool: active=${report.active}/${report.max} (waited=${subPool.state.totalWaited})`,
@@ -617,6 +692,34 @@ export default definePluginEntry({
         } catch (err) {
           api.logger?.error?.(
             `[oc-topic-worker-pool] before_agent_reply failed: ${String(err)}`,
+          );
+        }
+      }
+    );
+
+    // ── Hook: session_end ────────────────────────────────────────────
+    // Clean up any surviving lease if an agent run was terminated/aborted
+    api.on(
+      "session_end",
+      async (event: unknown, ctx?: unknown) => {
+        try {
+          const runId = extractRunId(event, ctx);
+          if (runId && activeLeases.has(runId)) {
+            const lease = activeLeases.get(runId)!;
+            if (lease.pool === "main") {
+              mainPool.release();
+            } else {
+              subPool.release();
+            }
+            releaseLease(activeLeases, runId);
+            runPoolMap.delete(runId);
+            api.logger?.info?.(
+              `[oc-topic-worker-pool] session_end: cleaned up orphaned ${lease.pool} lease for runId=${runId}`,
+            );
+          }
+        } catch (err) {
+          api.logger?.error?.(
+            `[oc-topic-worker-pool] session_end cleanup error: ${String(err)}`,
           );
         }
       }
