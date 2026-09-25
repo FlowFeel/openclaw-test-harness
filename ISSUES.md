@@ -137,3 +137,13 @@ Mock implementation + a test before any OC patch.
   5. ✅ Watchdog reconciliation: orphan leases past TTL or `active > 0` with 0 active runs are detected and force-released to 0.
   6. ✅ Conforms to all six DFT axioms and passes foundry validation.
 - **Status**: ✅ Completed & Verified (`ts/src/plugins/oc-topic-worker-pool/tests/topic-worker-pool-logic.spec.ts`, 34 pure specs + `ts/src/plugins/oc-topic-worker-pool/tests/leak-resilience.spec.ts`, 9 integration/replay specs; passes all six DFT axioms).
+
+## #45: Fail-open admission on pool saturation, env-gating, real-time abort slot release & session_end cleanup
+- **Problem**: When `oc-topic-worker-pool` was saturated, `before_agent_run` returned `{ outcome: "block" }` after queue timeout. In OpenClaw, `{ outcome: "block" }` rejects the incoming user turn with `"Your message could not be sent: blocked by before_agent_run"`, turning a concurrency limit into a hard outage across all Telegram topics for 80 minutes. In addition, runs aborted by the 600s lane cap never fire `agent_end`, and the plugin had shipped enabled by default despite admission control having high blast radius.
+- **Solution**:
+  1. **Fail-Open Admission**: `before_agent_run` now fails open on queue saturation/timeout: logs a warning and returns `{ outcome: "pass" }` so messages are never blocked when the pool is full. `createAsyncSemaphore` supports `rejectOnTimeout`.
+  2. **Real-Time Abort Signal Release**: Inspects `signal` on `ctx` / `event` and attaches an `abort` listener that immediately force-releases the pool slot as soon as a run is aborted or killed by lane cap, without waiting for watchdog sweeps.
+  3. **Session-End Cleanup**: Registers `session_end` hook in `openclaw.plugin.json` and `index.ts` to release any lingering lease when a session terminates.
+  4. **Disabled-by-Default / Env-Gated**: Plugin is disabled by default unless explicitly enabled via config `{ enabled: true }` or environment variable `OPENCLAW_ENABLE_TOPIC_WORKER_POOL=1`.
+- **Status**: ✅ Completed & Verified (`ts/src/plugins/oc-topic-worker-pool/tests/integration.spec.ts`, 4 specs + `ts/src/plugins/oc-topic-worker-pool/tests/leak-resilience.spec.ts`, 12 specs).
+
