@@ -14,7 +14,8 @@
     "properties": {
       "p99ThresholdMs": { "type": "number", "default": 15000 },
       "errorRateThreshold": { "type": "number", "default": 0.1 },
-      "minSamples": { "type": "number", "default": 5 }
+      "minSamples": { "type": "number", "default": 5 },
+      "maxSamples": { "type": "number", "default": 100 }
     }
   }
 }
