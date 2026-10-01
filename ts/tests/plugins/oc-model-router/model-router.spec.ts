@@ -13,6 +13,10 @@ import {
   computeErrorRate,
   shouldFallback,
   getFastestModel,
+  extractModelIdentifier,
+  extractProviderIdentifier,
+  extractLatencyMs,
+  extractCallOutcome,
   type ModelStatsMap,
   type ModelStats,
 } from "../../../src/plugins/oc-model-router/src/index.js";
@@ -184,5 +188,115 @@ describe("getFastestModel", () => {
     const snapshot = new Map(stats);
     getFastestModel(stats);
     expect(stats).toEqual(snapshot);
+  });
+
+  it("prioritizes healthy models over degraded/critical ones when thresholds are provided", () => {
+    const stats: ModelStatsMap = new Map([
+      // model-fast has lower average latency (150ms) but high error rate (40% > 10% threshold)
+      ["model-fast-degraded", { latencies: [100, 150, 200, 150, 150], errors: 2, total: 5 }],
+      // model-slow has higher average latency (300ms) but zero errors and healthy P99
+      ["model-slow-healthy", { latencies: [250, 300, 350, 280, 320], errors: 0, total: 5 }],
+    ]);
+    expect(getFastestModel(stats, THRESHOLDS)).toBe("model-slow-healthy");
+  });
+
+  it("falls back to fastest overall when all models are degraded/critical", () => {
+    const stats: ModelStatsMap = new Map([
+      ["model-bad-1", { latencies: [100, 150, 200, 150, 150], errors: 5, total: 5 }], // avg 150
+      ["model-bad-2", { latencies: [400, 500, 600, 450, 500], errors: 5, total: 5 }], // avg 490
+    ]);
+    expect(getFastestModel(stats, THRESHOLDS)).toBe("model-bad-1");
+  });
+});
+
+// ── Extraction Helpers ────────────────────────────────────────
+
+describe("extractModelIdentifier", () => {
+  it("extracts model from event.model (upstream OpenClaw)", () => {
+    expect(extractModelIdentifier({ model: "anthropic/claude-3-5-sonnet" })).toBe("anthropic/claude-3-5-sonnet");
+  });
+
+  it("extracts model from event.modelId (harness)", () => {
+    expect(extractModelIdentifier({ modelId: "gpt-4" })).toBe("gpt-4");
+  });
+
+  it("extracts model from ctx.modelId", () => {
+    expect(extractModelIdentifier({}, { modelId: "glm-5.2" })).toBe("glm-5.2");
+  });
+
+  it("trims whitespace and handles undefined", () => {
+    expect(extractModelIdentifier({ model: "  qwen-3.6  " })).toBe("qwen-3.6");
+    expect(extractModelIdentifier(undefined, undefined)).toBe("");
+  });
+});
+
+describe("extractProviderIdentifier", () => {
+  it("extracts provider from event.provider", () => {
+    expect(extractProviderIdentifier({ provider: "openrouter" })).toBe("openrouter");
+  });
+
+  it("extracts provider from ctx.modelProviderId", () => {
+    expect(extractProviderIdentifier({}, { modelProviderId: "google" })).toBe("google");
+  });
+
+  it("returns undefined when missing", () => {
+    expect(extractProviderIdentifier({})).toBeUndefined();
+  });
+});
+
+describe("extractLatencyMs", () => {
+  it("extracts durationMs (upstream OpenClaw)", () => {
+    expect(extractLatencyMs({ durationMs: 450 })).toBe(450);
+  });
+
+  it("extracts latencyMs (harness)", () => {
+    expect(extractLatencyMs({ latencyMs: 250 })).toBe(250);
+  });
+
+  it("returns 0 for missing, negative, or NaN values", () => {
+    expect(extractLatencyMs({})).toBe(0);
+    expect(extractLatencyMs({ durationMs: -10 })).toBe(0);
+    expect(extractLatencyMs({ durationMs: NaN })).toBe(0);
+  });
+});
+
+describe("extractCallOutcome", () => {
+  it("detects clean completion", () => {
+    const outcome = extractCallOutcome({ outcome: "completed", durationMs: 200 });
+    expect(outcome.isError).toBe(false);
+    expect(outcome.isTimeout).toBe(false);
+  });
+
+  it("detects timeout via failureKind (upstream OpenClaw)", () => {
+    const outcome = extractCallOutcome({
+      outcome: "error",
+      failureKind: "timeout",
+      durationMs: 900000,
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.isTimeout).toBe(true);
+  });
+
+  it("detects timeout via errorCategory", () => {
+    const outcome = extractCallOutcome({
+      outcome: "error",
+      errorCategory: "request_timeout",
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.isTimeout).toBe(true);
+  });
+
+  it("detects timeout via error message string", () => {
+    const outcome = extractCallOutcome({
+      error: "gateway timeout after 900s",
+    });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.isTimeout).toBe(true);
+  });
+
+  it("detects generic errors (boolean, failureKind, or error object)", () => {
+    expect(extractCallOutcome({ error: true }).isError).toBe(true);
+    expect(extractCallOutcome({ failureKind: "connection_reset" }).isError).toBe(true);
+    expect(extractCallOutcome({ success: false }).isError).toBe(true);
   });
 });

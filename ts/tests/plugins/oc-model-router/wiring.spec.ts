@@ -10,7 +10,7 @@ import plugin from "../../../src/plugins/oc-model-router/src/index.js";
 
 interface CapturedHook {
   event: string;
-  handler: (event: Record<string, unknown>) => Promise<unknown>;
+  handler: (event: Record<string, unknown>, ctx?: Record<string, unknown>) => Promise<unknown>;
 }
 
 interface CapturedTool {
@@ -22,7 +22,7 @@ function createMockApi() {
   const hooks: CapturedHook[] = [];
   const tools: CapturedTool[] = [];
   const api = {
-    on: (event: string, handler: (event: Record<string, unknown>) => Promise<unknown>) => {
+    on: (event: string, handler: (event: Record<string, unknown>, ctx?: Record<string, unknown>) => Promise<unknown>) => {
       hooks.push({ event, handler });
     },
     registerHook: () => {},
@@ -174,5 +174,124 @@ describe("oc-model-router wiring", () => {
     plugin.register(api as never, {});
     // Pass malformed event — should not throw
     await expect(getHook(hooks, "model_call_started").handler({ modelId: 123 } as never)).resolves.not.toThrow();
+  });
+
+  it("handles upstream OpenClaw event formats (model, provider, durationMs, outcome)", async () => {
+    const { api, hooks, tools } = createMockApi();
+    plugin.register(api as never, {});
+
+    // Upstream OpenClaw emits event.model (not modelId) and event.provider, with context
+    await getHook(hooks, "model_call_started").handler(
+      { model: "glm-5.2", provider: "openrouter" },
+      { modelId: "glm-5.2", modelProviderId: "openrouter" },
+    );
+    await getHook(hooks, "model_call_ended").handler(
+      { model: "glm-5.2", provider: "openrouter", durationMs: 1200, outcome: "completed" },
+      { modelId: "glm-5.2", modelProviderId: "openrouter" },
+    );
+
+    const result = await getTool(tools, "model_health").execute("id", {});
+    const parsed = JSON.parse((result as { content: Array<{ text: string }> }).content[0].text);
+
+    expect(parsed.models).toHaveLength(1);
+    expect(parsed.models[0]).toMatchObject({
+      model: "glm-5.2",
+      provider: "openrouter",
+      totalCalls: 1,
+      p99Ms: 1200,
+      errorRate: 0,
+      timeouts: 0,
+      status: "healthy",
+    });
+  });
+
+  it("detects timeout storm and switches fastestModel to healthy fallback", async () => {
+    const { api, hooks, tools } = createMockApi();
+    plugin.register(api as never, { p99ThresholdMs: 15000, errorRateThreshold: 0.1, minSamples: 5 });
+
+    // Simulate primary model (glm-5.2) hitting 900s timeouts during a storm
+    for (let i = 0; i < 6; i++) {
+      await getHook(hooks, "model_call_started").handler({ model: "glm-5.2", provider: "openrouter" });
+      await getHook(hooks, "model_call_ended").handler({
+        model: "glm-5.2",
+        provider: "openrouter",
+        durationMs: 900_000,
+        outcome: "error",
+        failureKind: "timeout",
+      });
+    }
+
+    // Simulate fallback model (deepseek-v4-flash) responding swiftly
+    for (let i = 0; i < 6; i++) {
+      await getHook(hooks, "model_call_started").handler({ model: "deepseek-v4-flash", provider: "openrouter" });
+      await getHook(hooks, "model_call_ended").handler({
+        model: "deepseek-v4-flash",
+        provider: "openrouter",
+        durationMs: 850,
+        outcome: "completed",
+      });
+    }
+
+    const result = await getTool(tools, "model_health").execute("id", {});
+    const parsed = JSON.parse((result as { content: Array<{ text: string }> }).content[0].text);
+
+    const glm = parsed.models.find((m: { model: string }) => m.model === "glm-5.2");
+    const deepseek = parsed.models.find((m: { model: string }) => m.model === "deepseek-v4-flash");
+
+    expect(glm).toBeDefined();
+    expect(glm.status).toBe("critical");
+    expect(glm.timeouts).toBe(6);
+    expect(glm.errorRate).toBe(1.0);
+    expect(glm.p99Ms).toBe(900_000);
+
+    expect(deepseek).toBeDefined();
+    expect(deepseek.status).toBe("healthy");
+    expect(deepseek.timeouts).toBe(0);
+    expect(deepseek.errorRate).toBe(0);
+    expect(deepseek.p99Ms).toBe(850);
+
+    // Automatic routing chooses the healthy fallback model
+    expect(parsed.fastestModel).toBe("deepseek-v4-flash");
+  });
+
+  it("bounds memory and recovers P99 when fast samples roll off old timeouts", async () => {
+    const { api, hooks, tools } = createMockApi();
+    plugin.register(api as never, { maxSamples: 5, minSamples: 5 });
+
+    // 5 slow calls (10,000ms)
+    for (let i = 0; i < 5; i++) {
+      await getHook(hooks, "model_call_started").handler({ modelId: "gpt-4" });
+      await getHook(hooks, "model_call_ended").handler({ modelId: "gpt-4", durationMs: 10000 });
+    }
+
+    let result = await getTool(tools, "model_health").execute("id", {});
+    let parsed = JSON.parse((result as { content: Array<{ text: string }> }).content[0].text);
+    expect(parsed.models[0].p99Ms).toBe(10000);
+
+    // 5 new fast calls (150ms) push out the slow calls due to rolling window (maxSamples=5)
+    for (let i = 0; i < 5; i++) {
+      await getHook(hooks, "model_call_started").handler({ modelId: "gpt-4" });
+      await getHook(hooks, "model_call_ended").handler({ modelId: "gpt-4", durationMs: 150 });
+    }
+
+    result = await getTool(tools, "model_health").execute("id", {});
+    parsed = JSON.parse((result as { content: Array<{ text: string }> }).content[0].text);
+    expect(parsed.models[0].p99Ms).toBe(150);
+  });
+
+  it("records totalCalls when model_call_ended arrives without model_call_started", async () => {
+    const { api, hooks, tools } = createMockApi();
+    plugin.register(api as never, {});
+
+    await getHook(hooks, "model_call_ended").handler({
+      model: "orphaned-call",
+      durationMs: 300,
+      outcome: "error",
+    });
+
+    const result = await getTool(tools, "model_health").execute("id", {});
+    const parsed = JSON.parse((result as { content: Array<{ text: string }> }).content[0].text);
+    expect(parsed.models[0].totalCalls).toBe(1);
+    expect(parsed.models[0].errorRate).toBe(1);
   });
 });

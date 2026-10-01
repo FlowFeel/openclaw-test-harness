@@ -147,3 +147,18 @@ Mock implementation + a test before any OC patch.
   4. **Disabled-by-Default / Env-Gated**: Plugin is disabled by default unless explicitly enabled via config `{ enabled: true }` or environment variable `OPENCLAW_ENABLE_TOPIC_WORKER_POOL=1`.
 - **Status**: ✅ Completed & Verified (`ts/src/plugins/oc-topic-worker-pool/tests/integration.spec.ts`, 4 specs + `ts/src/plugins/oc-topic-worker-pool/tests/leak-resilience.spec.ts`, 12 specs).
 
+## #47: Wire model-router sampling & timeout storm mitigation
+- **Problem**: In production, `model_health` had 0 samples because `oc-model-router` looked only for `event.modelId`, `event.latencyMs`, and `event.error`, whereas upstream OpenClaw emits `event.model`, `ctx.modelId`, `event.durationMs`, `event.outcome` ("completed" | "error"), and `event.failureKind` ("timeout", "aborted", etc.). During the Sep 28 model-fetch storm (dozens of requests hitting 900s proxy timeouts and embedded-run timeouts), the gateway was completely blind with no P99 or error data. Additionally, memory was unbounded with no sliding window, and `getFastestModel` did not prioritize healthy models when thresholds were supplied.
+- **Solution**:
+  1. **Upstream Event Extraction**: Pure extraction helpers `extractModelIdentifier`, `extractProviderIdentifier`, `extractLatencyMs`, and `extractCallOutcome` normalize both upstream OpenClaw conventions (`event.model`, `ctx.modelId`, `durationMs`, `outcome: "error"`, `failureKind: "timeout"`) and test harness mocks.
+  2. **Timeout & Storm Mitigation**: Explicitly track timeout counts and error outcomes. 900s timeouts feed into latency arrays and error rates, pushing status to `"critical"`.
+  3. **Health-Aware Fallback Routing**: `getFastestModel(stats, thresholds)` filters for healthy models first so routing automatically avoids degraded or critical models during saturation storms.
+  4. **Bounded Memory & Recovery**: Rolling sample window (`maxSamples: 100`, configurable) bounds memory and allows P99 recovery once models stabilize.
+  5. **Orphaned Ended Calls Recovery**: If `model_call_ended` arrives without a prior `model_call_started`, `totalCalls` is ensured to be at least 1 and >= errors.
+- **Acceptance**:
+  1. ✅ Live upstream OpenClaw events with `model`, `provider`, `durationMs`, and `outcome` are captured; `model_health` reports non-zero sample sizes, accurate P99, error rates, and provider attribution.
+  2. ✅ Timeout storm scenario: 900s timeout calls drive status to `"critical"` and switch `fastestModel` to a healthy fallback.
+  3. ✅ Rolling window bounds memory and recovers P99 when healthy calls succeed.
+  4. ✅ Conforms to all six DFT axioms and passes foundry validation across all 14 plugins.
+- **Status**: ✅ Completed & Verified (`ts/tests/plugins/oc-model-router/model-router.spec.ts`, 43 specs + `ts/tests/plugins/oc-model-router/wiring.spec.ts`, 16 specs).
+

@@ -49,6 +49,8 @@ export interface HookContext {
   messageId?: string;
   channelId?: string;
   conversationId?: string;
+  modelId?: string;
+  modelProviderId?: string;
   [key: string]: unknown;
 }
 
