@@ -50,6 +50,61 @@ export interface ModelHealthReport {
 
 export type ModelStatsMap = Map<string, ModelStats>;
 
+// ── Shared live state (reload-split fix, 2026-10-02) ─────────
+
+/**
+ * Production evidence (2026-10-02): config-sync hot reloads re-instantiate
+ * the plugin ("loading oc-model-router" 5× in one process) while the tool
+ * catalog keeps serving an earlier instance — hook writes landed in the
+ * newest instance's Map, tool reads read an abandoned one (119 calls,
+ * empty model_health). The state anchor MUST live outside the register()
+ * closure so every instance converges on the same live telemetry.
+ *
+ * Trade-off: process-global (documented @dft deviation). It is the
+ * convergence point that makes reload semantics irrelevant to correctness.
+ */
+const STATE_KEY = "__oc_model_router_state__";
+
+export interface SharedModelState {
+  modelStats: ModelStatsMap;
+  /** callIds whose call has already been counted (bounded, FIFO). */
+  seenCallIds: Set<string>;
+  /** Number of register() calls in this process (reload cycles). */
+  reloadCount: number;
+}
+
+const SEEN_CALL_IDS_CAP = 4096;
+
+export function resolveSharedModelState(): SharedModelState {
+  const g = globalThis as Record<string, unknown>;
+  if (!g[STATE_KEY]) {
+    g[STATE_KEY] = {
+      modelStats: new Map(),
+      seenCallIds: new Set(),
+      reloadCount: 0,
+    } as SharedModelState;
+  }
+  return g[STATE_KEY] as SharedModelState;
+}
+
+/**
+ * Test-only: clear the shared process-global state between test cases.
+ * NOT for production use — production state must survive reloads.
+ */
+export function resetSharedModelStateForTests(): void {
+  const g = globalThis as Record<string, unknown>;
+  delete g[STATE_KEY];
+}
+
+/** Bounded FIFO add — evicts the oldest id when the cap is hit. */
+function addBounded(set: Set<string>, id: string): void {
+  if (set.size >= SEEN_CALL_IDS_CAP) {
+    const oldest = set.values().next().value;
+    if (oldest !== undefined) set.delete(oldest);
+  }
+  set.add(id);
+}
+
 // ── Pure Logic ────────────────────────────────────────────────
 
 /**
@@ -232,8 +287,11 @@ export default definePluginEntry({
     const minSamples = cfg.minSamples ?? 5;
     const maxSamples = cfg.maxSamples ?? 100;
 
-    // ── In-memory per-model tracking ──────────────────────────
-    const modelStats: ModelStatsMap = new Map();
+    // ── In-memory per-model tracking (shared across reload cycles) ──
+    const shared = resolveSharedModelState();
+    shared.reloadCount++;
+    const modelStats = shared.modelStats;
+    const seenCallIds = shared.seenCallIds;
 
     function getOrCreate(model: string, provider?: string): ModelStats {
       let stats = modelStats.get(model);
@@ -253,7 +311,12 @@ export default definePluginEntry({
         if (!model) return;
         const provider = extractProviderIdentifier(event, ctx);
         const stats = getOrCreate(model, provider);
+        const callId = typeof event?.callId === "string" ? event.callId : "";
+        // Count once per call: skip duplicate started for an already-counted
+        // callId (retries/failover re-dispatch).
+        if (callId && seenCallIds.has(callId)) return;
         stats.total++;
+        if (callId) addBounded(seenCallIds, callId);
       } catch {
         // Non-fatal
       }
@@ -270,7 +333,19 @@ export default definePluginEntry({
         const latencyMs = extractLatencyMs(event);
         const { isError, isTimeout } = extractCallOutcome(event);
 
-        if (stats.total <= 0) {
+        // Count once per call (see started handler): if this callId was
+        // never counted (started-only convention missed it, or the gateway
+        // fires ended-only), count it here. Duplicate ended for a counted
+        // callId never double-counts.
+        const callId = typeof event?.callId === "string" ? event.callId : "";
+        if (callId) {
+          if (!seenCallIds.has(callId)) {
+            stats.total++;
+            addBounded(seenCallIds, callId);
+          }
+        } else if (stats.total <= 0) {
+          // Legacy no-callId convention: an ended with no correlation id
+          // guarantees at least one call is represented.
           stats.total = 1;
         }
 
@@ -336,6 +411,7 @@ export default definePluginEntry({
                 ok: true,
                 models: reports,
                 fastestModel: fastest,
+                reloadCount: shared.reloadCount,
                 thresholds: {
                   p99ThresholdMs,
                   errorRateThreshold,

@@ -5,8 +5,8 @@
  * - Uses a mock PluginApi that captures hooks + tools.
  * - Tests hook handlers update per-model stats + tool reports health.
  */
-import { describe, it, expect } from "vitest";
-import plugin from "../../../src/plugins/oc-model-router/src/index.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import plugin, { resetSharedModelStateForTests } from "../../../src/plugins/oc-model-router/src/index.js";
 
 interface CapturedHook {
   event: string;
@@ -49,6 +49,10 @@ function getTool(tools: CapturedTool[], name: string): CapturedTool {
 }
 
 describe("oc-model-router wiring", () => {
+  beforeEach(() => {
+    resetSharedModelStateForTests();
+  });
+
   it("registers 2 hooks (model_call_started, model_call_ended) and 1 tool", () => {
     const { api, hooks, tools } = createMockApi();
     plugin.register(api as never, {});
