@@ -19,6 +19,7 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py312"
+exclude = ["oc-source", ".venv"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ANN", "RUF"]
