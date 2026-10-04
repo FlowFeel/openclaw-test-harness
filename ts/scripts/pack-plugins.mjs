@@ -83,6 +83,11 @@ async function main() {
     const archivePath = join(outDir, packDetails.filename);
     const archiveSha256 = sha256File(archivePath);
 
+    let distIndexSha256 = null;
+    if (existsSync(distIndexPath)) {
+      distIndexSha256 = sha256File(distIndexPath);
+    }
+
     const entry = {
       id: pluginManifest.id ?? pkgJson.name,
       name: pkgJson.name,
@@ -90,6 +95,7 @@ async function main() {
       filename: packDetails.filename,
       sizeBytes: packDetails.size,
       sha256: archiveSha256,
+      distIndexSha256,
       shasum: packDetails.shasum,
       integrity: packDetails.integrity,
       description: pluginManifest.description ?? pkgJson.description ?? "",
