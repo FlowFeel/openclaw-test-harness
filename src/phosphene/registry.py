@@ -115,9 +115,7 @@ def run_plugin_drift_check(
         "~/.openclaw/state/drift-check-state.json",
     )
     st_file = (
-        Path(state_file).expanduser()
-        if state_file
-        else Path(state_env).expanduser()
+        Path(state_file).expanduser() if state_file else Path(state_env).expanduser()
     )
 
     # 3. Load Manifest

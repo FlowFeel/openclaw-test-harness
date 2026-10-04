@@ -77,10 +77,10 @@ def extract_bundle_sha256(tgz_bytes: bytes) -> str:
         target_member = None
         for member in tar.getmembers():
             normalized = member.name.lstrip("./")
-            is_dist_index = (
-                normalized in ("package/dist/index.js", "dist/index.js")
-                or normalized.endswith("/dist/index.js")
-            )
+            is_dist_index = normalized in (
+                "package/dist/index.js",
+                "dist/index.js",
+            ) or normalized.endswith("/dist/index.js")
             if is_dist_index:
                 target_member = member
                 break

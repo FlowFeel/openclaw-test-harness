@@ -154,20 +154,24 @@ class TestTarballExtraction:
         bundle_content = b"console.log('openclaw plugin runtime bundle');"
         expected_sha = hashlib.sha256(bundle_content).hexdigest()
 
-        tgz_bytes = _create_synthetic_tgz({
-            "package/package.json": b'{"name": "@flowfeel/test-plugin"}',
-            "package/dist/index.js": bundle_content,
-        })
+        tgz_bytes = _create_synthetic_tgz(
+            {
+                "package/package.json": b'{"name": "@flowfeel/test-plugin"}',
+                "package/dist/index.js": bundle_content,
+            }
+        )
 
         extracted_sha = extract_bundle_sha256(tgz_bytes)
         assert extracted_sha == expected_sha
 
     def test_extract_bundle_sha256_missing_file(self) -> None:
         """Raises FileNotFoundError if archive does not contain dist/index.js."""
-        tgz_bytes = _create_synthetic_tgz({
-            "package/package.json": b'{"name": "@flowfeel/test-plugin"}',
-            "package/src/index.ts": b"export {};",
-        })
+        tgz_bytes = _create_synthetic_tgz(
+            {
+                "package/package.json": b'{"name": "@flowfeel/test-plugin"}',
+                "package/src/index.ts": b"export {};",
+            }
+        )
 
         with pytest.raises(FileNotFoundError, match=r"dist/index\.js not found"):
             extract_bundle_sha256(tgz_bytes)
