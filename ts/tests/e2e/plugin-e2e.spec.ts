@@ -73,10 +73,12 @@ describe("OC Session Guard Plugin E2E (Testcontainers)", () => {
     const pluginFiles = getPluginFiles();
     const pluginSha = fileSha256(path.join(PLUGIN_DIR, "openclaw.plugin.json"));
 
-    const builder = await GenericContainer.fromDockerfile(
-      path.resolve(__dirname, "../../.."),
-      "docker/Dockerfile"
-    ).withCache(true).build();
+    const builder = process.env.OC_TEST_IMAGE
+      ? new GenericContainer(process.env.OC_TEST_IMAGE)
+      : await GenericContainer.fromDockerfile(
+          path.resolve(__dirname, "../../.."),
+          "docker/Dockerfile"
+        ).withCache(true).build();
 
     container = await builder
       .withWorkingDir("/app")
