@@ -133,9 +133,11 @@ export async function startOpenClaw(
   // metadata). The CI pre-build step warms the layer cache, so classic builds
   // are fast. Dockerfile has no buildkit-only syntax (verified: no RUN
   // --mount, no heredocs).
-  const containerBuilder = await GenericContainer.fromDockerfile(REPO_ROOT, "docker/Dockerfile")
-    .withCache(true)
-    .build();
+  const containerBuilder = process.env.OC_TEST_IMAGE
+    ? new GenericContainer(process.env.OC_TEST_IMAGE)
+    : await GenericContainer.fromDockerfile(REPO_ROOT, "docker/Dockerfile")
+        .withCache(true)
+        .build();
 
   containerBuilder
     .withWorkingDir("/app")

@@ -1,0 +1,36 @@
+{
+  "id": "oc-durable-sidecar",
+  "name": "OcDurableSidecar",
+  "description": "Durable sidecar proxy tools — spawn/status/result/wait/retry over the prime-durable sidecar HTTP API (loopback 18950)",
+  "contracts": {
+    "tools": [
+      "durable_spawn",
+      "durable_status",
+      "durable_result",
+      "durable_wait",
+      "durable_retry"
+    ],
+    "hooks": [
+      "gateway_start"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:18950",
+        "description": "Loopback base URL of the prime-durable sidecar"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "default": 180000,
+        "description": "Default HTTP timeout in ms"
+      }
+    }
+  }
+}

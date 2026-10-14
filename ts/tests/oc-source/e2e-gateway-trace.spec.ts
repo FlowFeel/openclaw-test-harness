@@ -49,10 +49,12 @@ let lifecycleTrace: string;
 async function setupContainer() {
   // build() returns a GenericContainer we can configure directly
   // (must await the build, THEN chain withWorkingDir/withCommand).
-  const builder = await GenericContainer.fromDockerfile(
-      path.resolve(REPO_ROOT),
-      "docker/Dockerfile"
-    ).withCache(true).build();
+  const builder = process.env.OC_TEST_IMAGE
+    ? new GenericContainer(process.env.OC_TEST_IMAGE)
+    : await GenericContainer.fromDockerfile(
+        path.resolve(REPO_ROOT),
+        "docker/Dockerfile"
+      ).withCache(true).build();
 
   builder
     .withWorkingDir("/app")
