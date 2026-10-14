@@ -20,6 +20,17 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:18950",
+        "description": "Loopback base URL of the prime-durable sidecar"
+      },
+      "timeoutMs": {
+        "type": "number",
+        "default": 180000,
+        "description": "Default HTTP timeout in ms"
+      }
+    }
   }
 }

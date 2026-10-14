@@ -23,7 +23,6 @@
 import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
 import {
   SIDECAR_BASE_URL,
-  buildEventRequest,
   buildResultRequest,
   buildRetryRequest,
   buildSpawnRequest,
@@ -62,9 +61,9 @@ export default definePluginEntry({
     const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const fetchJson: FetchJson = makeHttpFetchJson(baseUrl);
 
-    async function execute(request: SidecarRequest) {
+    async function execute(request: SidecarRequest, overrideTimeoutMs?: number) {
       try {
-        const response = await fetchJson(request, timeoutMs);
+        const response = await fetchJson(request, overrideTimeoutMs ?? timeoutMs);
         return text(interpret(response));
       } catch (err) {
         return text(interpretTransportFailure(err));
@@ -144,7 +143,8 @@ export default definePluginEntry({
         const timeout = typeof params.timeout_seconds === "number"
           ? params.timeout_seconds
           : 120;
-        return execute(buildWaitRequest(String(params.task_id), timeout));
+        const callTimeoutMs = (timeout + 15) * 1000;
+        return execute(buildWaitRequest(String(params.task_id), timeout), callTimeoutMs);
       },
     });
 

@@ -1,7 +1,14 @@
 {
-  "name": "oc-durable-sidecar",
+  "name": "@flowfeel/oc-durable-sidecar",
   "version": "0.1.0",
+  "description": "Durable sidecar proxy tools for OpenClaw — spawn/status/result/wait/retry over prime-durable sidecar",
   "type": "module",
-  "main": "src/index.ts",
-  "dependencies": {}
+  "main": "./dist/index.js",
+  "openclaw": {
+    "extensions": ["./dist/index.js"],
+    "compat": {
+      "pluginApi": ">=2026.6.8",
+      "minGatewayVersion": "2026.6.8"
+    }
+  }
 }

@@ -61,6 +61,17 @@ describe("interpret", () => {
     expect(out.summary).toContain("completed");
   });
 
+  it("failed, error, or cancelled task -> failed verdict", () => {
+    for (const state of ["failed", "error", "cancelled"]) {
+      const out = interpret({
+        status: 200,
+        body: { task_id: "t", state, result: { error: "fatal" } },
+      });
+      expect(out.verdict).toBe("failed");
+      expect(out.summary).toContain(state);
+    }
+  });
+
   it("400 -> rejected with sidecar error", () => {
     const out = interpret({ status: 400, body: { error: "unknown task 'typo'" } });
     expect(out.verdict).toBe("rejected");

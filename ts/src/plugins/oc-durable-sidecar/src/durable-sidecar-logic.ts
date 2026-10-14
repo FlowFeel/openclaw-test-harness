@@ -86,10 +86,12 @@ export interface ToolOutcome {
 export function interpret(response: SidecarResponse): ToolOutcome {
   if (response.status === 200 || response.status === 202) {
     const state = typeof response.body.state === "string" ? response.body.state : undefined;
-    const verdict: ToolVerdict =
-      state === "pending" || state === "running" || state === "sleeping"
-        ? "pending"
-        : "ok";
+    let verdict: ToolVerdict = "ok";
+    if (state === "pending" || state === "running" || state === "sleeping") {
+      verdict = "pending";
+    } else if (state === "failed" || state === "error" || state === "cancelled") {
+      verdict = "failed";
+    }
     return { verdict, summary: summarize(response.body), detail: response.body };
   }
   if (response.status === 400) {
