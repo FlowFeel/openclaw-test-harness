@@ -26,6 +26,14 @@ describe("oc-durable-sidecar plugin", () => {
   );
 
   it("declares expected tools", () => {
-    expect(manifest.contracts.tools).toEqual(["durable_spawn","durable_status","durable_result","durable_wait","durable_retry"]);
+    expect(manifest.contracts.tools).toEqual([
+      "durable_spawn",
+      "durable_status",
+      "durable_result",
+      "durable_wait",
+      "durable_retry",
+      "durable_tasks",
+      "durable_list",
+    ]);
   });
 });

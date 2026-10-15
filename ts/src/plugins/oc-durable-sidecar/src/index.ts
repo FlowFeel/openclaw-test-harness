@@ -2,7 +2,7 @@
  * OcDurableSidecar — plugin entry point (wiring layer).
  *
  * @behavior
- * Registers five durable proxy tools that talk to the prime-durable sidecar
+ * Registers seven durable proxy tools that talk to the prime-durable sidecar
  * HTTP API on loopback. Every tool: build request (pure seam) → execute
  * (I/O wrapper) → interpret (pure seam) → render as text content.
  * gateway_start fires a sidecar health probe and logs the verdict.
@@ -23,13 +23,17 @@
 import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
 import {
   SIDECAR_BASE_URL,
+  buildListRequest,
   buildResultRequest,
   buildRetryRequest,
   buildSpawnRequest,
   buildStatusRequest,
+  buildTasksRequest,
   buildWaitRequest,
   interpret,
   interpretTransportFailure,
+  type InterpretOptions,
+  type ListFilters,
   type SidecarRequest,
 } from "./durable-sidecar-logic.js";
 import { makeHttpFetchJson, type FetchJson } from "./durable-sidecar-io.js";
@@ -54,17 +58,21 @@ export default definePluginEntry({
   id: "oc-durable-sidecar",
   name: "OcDurableSidecar",
   description:
-    "Durable sidecar proxy tools — spawn/status/result/wait/retry over the prime-durable sidecar HTTP API (loopback 18950)",
+    "Durable sidecar proxy tools — spawn/status/result/wait/retry/tasks/list over the prime-durable sidecar HTTP API (loopback 18950)",
   register(api: PluginApi, config?: Record<string, unknown>) {
     const cfg = (config as OcDurableSidecarConfig) ?? {};
     const baseUrl = cfg.baseUrl ?? SIDECAR_BASE_URL;
     const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const fetchJson: FetchJson = makeHttpFetchJson(baseUrl);
 
-    async function execute(request: SidecarRequest, overrideTimeoutMs?: number) {
+    async function execute(
+      request: SidecarRequest,
+      overrideTimeoutMs?: number,
+      options?: InterpretOptions,
+    ) {
       try {
         const response = await fetchJson(request, overrideTimeoutMs ?? timeoutMs);
-        return text(interpret(response));
+        return text(interpret(response, options));
       } catch (err) {
         return text(interpretTransportFailure(err));
       }
@@ -85,6 +93,20 @@ export default definePluginEntry({
           `(check systemd unit prime-durable-sidecar): ${String(err)}`,
         );
       }
+    });
+
+    // ── Tool: durable_tasks ──────────────────────────────────────────
+    api.registerTool({
+      name: "durable_tasks",
+      description:
+        "List registered durable task types, their parameter schemas, and subscribed queues. " + SIDECAR_DOC,
+      parameters: Type.Object({
+        task_name: Type.Optional(Type.String({ description: "Optional specific task name to inspect" })),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        const p = params as { task_name?: string };
+        return execute(buildTasksRequest(p.task_name), undefined, { mode: "tasks" });
+      },
     });
 
     // ── Tool: durable_spawn ──────────────────────────────────────────
@@ -118,12 +140,21 @@ export default definePluginEntry({
     // ── Tool: durable_result ──────────────────────────────────────────
     api.registerTool({
       name: "durable_result",
-      description: "Fetch the current state/result of a durable task by id.",
+      description:
+        "Fetch the current state/result, progress heartbeat, and artifact pointers of a durable task by id.",
       parameters: Type.Object({
         task_id: Type.String({ description: "Task id returned by durable_spawn" }),
+        max_bytes: Type.Optional(Type.Number({ description: "Max payload bytes to display (default 8192)" })),
+        tail_lines: Type.Optional(Type.Number({ description: "Optional line limit for output_tail" })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
-        return execute(buildResultRequest(String(params.task_id)));
+        const p = params as { task_id: string; max_bytes?: number; tail_lines?: number };
+        const maxBytes = typeof p.max_bytes === "number" ? p.max_bytes : 8192;
+        return execute(
+          buildResultRequest(String(p.task_id), { maxBytes: p.max_bytes, tailLines: p.tail_lines }),
+          undefined,
+          { mode: "result", maxBytes },
+        );
       },
     });
 
@@ -151,12 +182,34 @@ export default definePluginEntry({
     // ── Tool: durable_retry ──────────────────────────────────────────
     api.registerTool({
       name: "durable_retry",
-      description: "Re-dispatch a failed durable task by id.",
+      description: "Re-dispatch a failed durable task by id with checkpoint resume or clean restart.",
       parameters: Type.Object({
         task_id: Type.String({ description: "Task id returned by durable_spawn" }),
+        resume: Type.Optional(Type.Boolean({
+          description: "If true (default), resume from last checkpoint; if false, re-run from scratch",
+        })),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
-        return execute(buildRetryRequest(String(params.task_id)));
+        const p = params as { task_id: string; resume?: boolean };
+        const resume = p.resume !== false;
+        return execute(buildRetryRequest(String(p.task_id), resume));
+      },
+    });
+
+    // ── Tool: durable_list ──────────────────────────────────────────
+    api.registerTool({
+      name: "durable_list",
+      description:
+        "List recent durable task executions across all queues for crash recovery and audit. " + SIDECAR_DOC,
+      parameters: Type.Object({
+        task_name: Type.Optional(Type.String({ description: "Filter by task name (e.g. agent_step)" })),
+        state: Type.Optional(Type.String({ description: "Filter by pending, running, completed, or failed" })),
+        since: Type.Optional(Type.String({ description: "Filter by ISO timestamp or relative duration (e.g. 1h, 24h)" })),
+        limit: Type.Optional(Type.Number({ description: "Max tasks to list (default 20, max 100)" })),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        const p = params as ListFilters;
+        return execute(buildListRequest(p), undefined, { mode: "list" });
       },
     });
   },

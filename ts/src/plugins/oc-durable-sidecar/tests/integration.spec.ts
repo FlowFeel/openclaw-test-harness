@@ -97,8 +97,13 @@ describe("http fetch wrapper", () => {
     const plugin = (await import("../src/index.js")).default;
     plugin.register(api as unknown as PluginApi);
 
-    expect(api.tools.has("durable_wait")).toBe(true);
+    expect(api.tools.has("durable_spawn")).toBe(true);
+    expect(api.tools.has("durable_status")).toBe(true);
     expect(api.tools.has("durable_result")).toBe(true);
+    expect(api.tools.has("durable_wait")).toBe(true);
+    expect(api.tools.has("durable_retry")).toBe(true);
+    expect(api.tools.has("durable_tasks")).toBe(true);
+    expect(api.tools.has("durable_list")).toBe(true);
 
     const client = new FakeSidecarClient();
     client.mockResponses.set("/task/fail-task", {
@@ -109,6 +114,26 @@ describe("http fetch wrapper", () => {
       status: 200,
       body: { task_id: "wait-task", state: "completed", result: { ok: true } },
     });
+    client.mockResponses.set("/tasks/runs", {
+      status: 200,
+      body: {
+        runs: [
+          { task_id: "run-101", task_name: "agent_step", state: "completed", summary: "rebuild done" },
+        ],
+      },
+    });
+    client.mockResponses.set("/tasks", {
+      status: 200,
+      body: {
+        tasks: [
+          { name: "agent_step", description: "step description", queue: "default" },
+        ],
+      },
+    });
+    client.mockResponses.set("/task/retry-1/retry", {
+      status: 200,
+      body: { task_id: "retry-1", state: "pending" },
+    });
     vi.stubGlobal("fetch", (url: string | URL, init?: RequestInit) => client.fetch(url, init));
 
     const resultExec = api.tools.get("durable_result")!.execute;
@@ -118,5 +143,25 @@ describe("http fetch wrapper", () => {
     const waitExec = api.tools.get("durable_wait")!.execute;
     const waitOutcome = await waitExec("call-2", { task_id: "wait-task", timeout_seconds: 300 });
     expect(waitOutcome.content[0].text).toMatch(/^ok: state=completed/);
+
+    // Test durable_tasks
+    const tasksExec = api.tools.get("durable_tasks")!.execute;
+    const tasksOutcome = await tasksExec("call-3", {});
+    expect(tasksOutcome.content[0].text).toContain("tasks registered (1):");
+    expect(tasksOutcome.content[0].text).toContain("agent_step [queue: default]");
+
+    // Test durable_list
+    const listExec = api.tools.get("durable_list")!.execute;
+    const listOutcome = await listExec("call-4", { task_name: "agent_step" });
+    expect(listOutcome.content[0].text).toContain("recent runs (1):");
+    expect(listOutcome.content[0].text).toContain("run-101 (agent_step) [completed]: rebuild done");
+
+    // Test durable_retry with resume: false
+    const retryExec = api.tools.get("durable_retry")!.execute;
+    const retryOutcome = await retryExec("call-5", { task_id: "retry-1", resume: false });
+    expect(retryOutcome.content[0].text).toMatch(/^pending: state=pending/);
+    const retryCall = client.calls.find((c) => c.url.includes("/retry-1/retry"));
+    expect(retryCall).toBeDefined();
+    expect(JSON.parse(String(retryCall?.init?.body))).toEqual({ resume: false });
   });
 });

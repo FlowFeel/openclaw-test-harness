@@ -28,10 +28,10 @@ The gateway gates dispatch on `hasHooks()`. If the hook isn't visible, it's neve
 | `oc-topic-manager` | 1 | 2 | 31 | Telegram forum topic recovery, orphan detection, idempotent registration |
 | `oc-task-plane` | 2 | 4 | 52 | Lock-free task plane, supervisor cap enforcement, post-kill teachback with shipped-state |
 | `oc-lane-forecaster` | 3 | 1 | 17 | Pre-dispatch run-duration prediction, shape classification (work-loop, slow ops), lane telemetry |
-| `oc-durable-sidecar` | 1 | 5 | 16 | Durable proxy tools (spawn/status/result/wait/retry) over prime-durable HTTP API |
+| `oc-durable-sidecar` | 1 | 7 | 22 | Durable proxy tools (spawn/status/result/wait/retry/tasks/list) over prime-durable HTTP API |
 | `oc-e2e-trace-test` | 1 | 0 | 5 | Test plugin for Level 2 E2E hook trace |
 
-**Totals:** 15 plugins, 43 hooks, 31 tools. All plugins pass `validate:foundry` (six DFT axioms). Plugin tests run in CI (`vitest.config.ci.ts`).
+**Totals:** 15 plugins, 43 hooks, 33 tools. All plugins pass `validate:foundry` (six DFT axioms). Plugin tests run in CI (`vitest.config.ci.ts`).
 
 ## Hook inventory by plugin
 
@@ -133,13 +133,13 @@ Lock-free task plane: auto-background execution, durable output handles, restart
 
 Pre-dispatch run duration prediction, shape classification (work-loop, slow ops), lane cap early warnings, and lane event telemetry.
 
-### `oc-durable-sidecar` (1 hook, 5 tools)
+### `oc-durable-sidecar` (1 hook, 7 tools)
 
 **Hooks:** `gateway_start` (loopback health check probe)
 
-**Tools:** `durable_spawn`, `durable_status`, `durable_result`, `durable_wait`, `durable_retry`
+**Tools:** `durable_spawn`, `durable_status`, `durable_result`, `durable_wait`, `durable_retry`, `durable_tasks`, `durable_list`
 
-Durable task delegation layer connecting OpenClaw agents to the `prime-durable` sidecar on loopback (`http://127.0.0.1:18950`). Checkpointed, crash-recoverable execution over absurd/SQLite with dynamic server-side wait.
+Durable task delegation layer connecting OpenClaw agents to the `prime-durable` sidecar on loopback (`http://127.0.0.1:18950`). Checkpointed, crash-recoverable execution over absurd/SQLite with dynamic server-side wait, task schema introspection, and crash recovery history.
 
 ### `oc-e2e-trace-test` (1 hook, 0 tools)
 

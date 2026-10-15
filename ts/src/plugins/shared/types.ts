@@ -14,6 +14,9 @@ export const Type = {
   Number(opts?: { description?: string }) {
     return { type: "number", ...opts };
   },
+  Boolean(opts?: { description?: string }) {
+    return { type: "boolean", ...opts };
+  },
   Array(items: unknown, opts?: { description?: string }) {
     return { type: "array", items, ...opts };
   },
