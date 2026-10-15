@@ -1,3 +1,30 @@
+# Release Notes: OpenClaw Plugin Suite v0.1.16 — Durable Sidecar v2 & Dynamic Introspection
+
+**Release Date:** October 15, 2026  
+**Scope:** OpenClaw Plugin Suite (`ts/src/plugins/`)  
+**Tracking Issue:** [FlowFeel/openclaw-test-harness#50](https://github.com/FlowFeel/openclaw-test-harness/issues/50)  
+**Target OpenClaw Compatibility:** `>=2026.6.8` (Tested on `2026.7.1`)
+
+---
+
+## Highlights
+
+1. **`oc-durable-sidecar` v2 (Issue #50 Alignment):**
+   - **Task Registry Introspection (`durable_tasks`):** Adds `durable_tasks` tool (`GET /tasks`) to dynamically discover registered durable tasks, their schemas, and assigned queues without requiring manual inspection of worker source code.
+   - **Rich Allowlist Rejection Feedback:** When `durable_spawn` encounters an unregistered task, the error verdict now includes the list of allowed tasks, schema requirements, and fuzzy matching suggestions.
+   - **Untruncated Results (`durable_result`):** Fixed the 200-character truncation in `summarize()` mid-sentence. `durable_result` now returns the complete output tail (default up to 8,192 bytes, customizable via `max_bytes` and `tail_lines`), preserving compact 200-char summaries only for `durable_wait` and `durable_status`.
+   - **Artifact Pointer Support:** First-class parsing and rendering of `artifacts: [path...]` returned by workers (e.g. `ingest_verification.json`), allowing large output verification without blowing prompt token budgets.
+   - **Crash Recovery & Run History (`durable_list`):** Adds `durable_list` tool (`GET /tasks/runs`) with filtering by `task_name`, `state`, `since`, and `limit` to reconstruct active/past runs after gateway reboots or severed turns.
+   - **Execution Heartbeats & Liveness:** Captures Absurd step checkpoint heartbeats (`last_progress_at`, `progress_message`) in status and result outputs, distinguishing active workloads from stalled workers.
+   - **Checkpoint Resume Semantics:** Added `resume?: boolean` parameter to `durable_retry` (`POST /task/:id/retry`) to explicitly choose between resuming from the last checkpoint (`resume: true`, default) or restarting from scratch (`resume: false`).
+
+2. **Full Test Suite & Foundry Conformance:**
+   - 22 vitest specs passing across logic, integration, and manifest test suites.
+   - 100% compliance with all six DFT axioms (`npm run validate:foundry`).
+   - Clean TypeScript typecheck (`tsc --noEmit -p tsconfig.ci.json`).
+
+---
+
 # Release Notes: OpenClaw Plugin Suite v0.1.15 — Durable Execution & Sidecar Delegation
 
 **Release Date:** October 14, 2026  
