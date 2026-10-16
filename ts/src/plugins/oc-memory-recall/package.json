@@ -1,0 +1,14 @@
+{
+  "name": "@flowfeel/oc-memory-recall",
+  "version": "0.1.0",
+  "description": "Memory-recall delivery arms — note registry, telemetry, and M6 marker-on-file-read signposts",
+  "type": "module",
+  "main": "./dist/index.js",
+  "openclaw": {
+    "extensions": ["./dist/index.js"],
+    "compat": {
+      "pluginApi": ">=2026.6.8",
+      "minGatewayVersion": "2026.6.8"
+    }
+  }
+}

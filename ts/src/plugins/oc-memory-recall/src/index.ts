@@ -1,0 +1,206 @@
+/**
+ * OcMemoryRecall — plugin entry point (wiring layer).
+ *
+ * @behavior
+ * Wires the note registry and M6 marker-on-file-read signposts to OpenClaw.
+ * - gateway_start: indexes memory notes from notesDir into in-memory registry.
+ * - tool_result_persist: intercepts file-read tools and prepends signposts.
+ * - recall_status: reports registry size, kinds, and fire/hit/follow telemetry.
+ * - recall_verify: validates note frontmatter schemas.
+ *
+ * @invariants
+ * - No logic here — wiring only (load → pure seam → update state).
+ * - No direct node:fs imports — I/O goes through injectable MemoryNotesLoader.
+ * - Zero auxiliary model calls: 100% deterministic local compute.
+ *
+ * @dft
+ * - Tested via integration tests with an in-memory double.
+ */
+
+import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
+import {
+  DEFAULT_MARKER_PREFIX,
+  buildRecallStatusReport,
+  createInitialTelemetry,
+  createRegistry,
+  parseNoteFrontmatter,
+  processToolResultForFileRead,
+  recordFire,
+  recordHit,
+  verifyNotes,
+  type MemoryNote,
+  type NoteRegistry,
+  type RecallTelemetryState,
+} from "./memory-recall-logic.js";
+import {
+  readNotesFromDisk,
+  type MemoryNotesLoader,
+} from "./memory-recall-io.js";
+
+export interface OcMemoryRecallConfig {
+  /** Directory containing memory note markdown files (default: "memory"). */
+  notesDir?: string;
+  /** Custom signpost prefix string for M6 file-read markers. */
+  markerPrefix?: string;
+  /** Whether telemetry tracking is active (default: true). */
+  telemetryEnabled?: boolean;
+  /** Optional injectable loader for testing (DFT Axiom 5). */
+  notesLoader?: MemoryNotesLoader;
+}
+
+export default definePluginEntry({
+  id: "oc-memory-recall",
+  name: "OcMemoryRecall",
+  description:
+    "Memory-recall delivery arms — note registry, telemetry, and M6 marker-on-file-read signposts",
+  register(api: PluginApi, config?: Record<string, unknown>) {
+    const cfg = (config as OcMemoryRecallConfig) ?? {};
+    const notesDir = cfg.notesDir ?? "memory";
+    const markerPrefix = cfg.markerPrefix ?? DEFAULT_MARKER_PREFIX;
+    const notesLoader: MemoryNotesLoader = cfg.notesLoader ?? readNotesFromDisk;
+
+    let registry: NoteRegistry = createRegistry([]);
+    let telemetry: RecallTelemetryState = createInitialTelemetry();
+
+    function reloadRegistry(): NoteRegistry {
+      const rawNotes = notesLoader(notesDir);
+      const parsedNotes: MemoryNote[] = rawNotes.map((n) =>
+        parseNoteFrontmatter(n.rawContent, n.id),
+      );
+      registry = createRegistry(parsedNotes);
+      return registry;
+    }
+
+    // ── Hook: gateway_start ──────────────────────────────────────────
+    api.on("gateway_start", async () => {
+      try {
+        const reg = reloadRegistry();
+        const validCount = Array.from(reg.notes.values()).filter((n) => n.valid).length;
+        api.logger?.info?.(
+          `[oc-memory-recall] indexed ${reg.notes.size} notes (${validCount} valid) across ${reg.kindToNotes.size} kinds`,
+        );
+      } catch (err) {
+        api.logger?.error?.(
+          `[oc-memory-recall] gateway_start failed: ${String(err)}`,
+        );
+      }
+    });
+
+    // ── Hook: tool_result_persist ────────────────────────────────────
+    api.on("tool_result_persist", (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+      try {
+        const msg = (event.message as Record<string, unknown>) ?? {};
+        const toolName = String(event.toolName ?? ctx?.toolName ?? "");
+        const params = (event.params as Record<string, unknown>) ?? (ctx?.params as Record<string, unknown>) ?? {};
+
+        // Extract content to modify
+        let originalContent = "";
+        let isStringContent = true;
+
+        if (typeof msg.content === "string") {
+          originalContent = msg.content;
+        } else if (Array.isArray(msg.content)) {
+          isStringContent = false;
+          const textBlock = (msg.content as Array<Record<string, unknown>>).find((b) => b.type === "text");
+          if (textBlock && typeof textBlock.text === "string") {
+            originalContent = textBlock.text;
+          }
+        }
+
+        if (!originalContent) {
+          return undefined;
+        }
+
+        const res = processToolResultForFileRead(
+          toolName,
+          params,
+          originalContent,
+          registry,
+          markerPrefix,
+        );
+
+        if (!res.modified) {
+          return undefined;
+        }
+
+        // Record M6 telemetry for each matching note
+        for (const note of res.notesApplied) {
+          telemetry = recordHit(telemetry, note.frontmatter.kind, "M6");
+          telemetry = recordFire(telemetry, note.frontmatter.kind, "M6");
+        }
+
+        // Return updated message
+        if (isStringContent) {
+          return { message: { ...msg, content: res.output } };
+        } else {
+          const newContent = (msg.content as Array<Record<string, unknown>>).map((b) => {
+            if (b.type === "text") {
+              return { ...b, text: res.output };
+            }
+            return b;
+          });
+          return { message: { ...msg, content: newContent } };
+        }
+      } catch (err) {
+        api.logger?.warn?.(
+          `[oc-memory-recall] tool_result_persist error: ${String(err)}`,
+        );
+        return undefined;
+      }
+    });
+
+    // ── Tool: recall_status ──────────────────────────────────────────
+    api.registerTool({
+      name: "recall_status",
+      description:
+        "Memory-recall registry and telemetry snapshot — notes indexed, kind breakdown, and fire/hit/follow metrics.",
+      parameters: Type.Object({}),
+      async execute(_id: string, _params: Record<string, unknown>) {
+        try {
+          const report = buildRecallStatusReport(registry, telemetry);
+          return {
+            content: [{ type: "text" as const, text: `${report.verdict}: ${report.summary}` }],
+          };
+        } catch (err) {
+          return {
+            content: [{ type: "text" as const, text: `failed: ${String(err)}` }],
+          };
+        }
+      },
+    });
+
+    // ── Tool: recall_verify ──────────────────────────────────────────
+    api.registerTool({
+      name: "recall_verify",
+      description:
+        "Validate memory note frontmatter schemas and resolve watched file paths.",
+      parameters: Type.Object({
+        reload: Type.Optional(Type.Boolean({
+          description: "If true, reloads notes from disk before verifying (default: true)",
+        })),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        try {
+          const reload = params.reload !== false;
+          if (reload) {
+            reloadRegistry();
+          }
+          const notes = Array.from(registry.notes.values());
+          const verification = verifyNotes(notes);
+          const verdict = verification.invalidCount > 0 ? "failed" : "ok";
+          const summary = `verified ${notes.length} notes: ${verification.validCount} valid, ${verification.invalidCount} invalid`;
+          const details = verification.issues.length > 0
+            ? `\nissues:\n${verification.issues.map((i) => `  - ${i.id}: ${i.errors.join(", ")}`).join("\n")}`
+            : "";
+          return {
+            content: [{ type: "text" as const, text: `${verdict}: ${summary}${details}` }],
+          };
+        } catch (err) {
+          return {
+            content: [{ type: "text" as const, text: `failed: ${String(err)}` }],
+          };
+        }
+      },
+    });
+  },
+});

@@ -29,9 +29,10 @@ The gateway gates dispatch on `hasHooks()`. If the hook isn't visible, it's neve
 | `oc-task-plane` | 2 | 4 | 52 | Lock-free task plane, supervisor cap enforcement, post-kill teachback with shipped-state |
 | `oc-lane-forecaster` | 3 | 1 | 17 | Pre-dispatch run-duration prediction, shape classification (work-loop, slow ops), lane telemetry |
 | `oc-durable-sidecar` | 1 | 7 | 22 | Durable proxy tools (spawn/status/result/wait/retry/tasks/list) over prime-durable HTTP API |
+| `oc-memory-recall` | 2 | 2 | 23 | Memory-recall delivery arms — note registry, telemetry, and M6 marker on file read |
 | `oc-e2e-trace-test` | 1 | 0 | 5 | Test plugin for Level 2 E2E hook trace |
 
-**Totals:** 15 plugins, 43 hooks, 33 tools. All plugins pass `validate:foundry` (six DFT axioms). Plugin tests run in CI (`vitest.config.ci.ts`).
+**Totals:** 16 plugins, 45 hooks, 35 tools. All plugins pass `validate:foundry` (six DFT axioms). Plugin tests run in CI (`vitest.config.ci.ts`).
 
 ## Hook inventory by plugin
 
@@ -139,7 +140,13 @@ Pre-dispatch run duration prediction, shape classification (work-loop, slow ops)
 
 **Tools:** `durable_spawn`, `durable_status`, `durable_result`, `durable_wait`, `durable_retry`, `durable_tasks`, `durable_list`
 
-Durable task delegation layer connecting OpenClaw agents to the `prime-durable` sidecar on loopback (`http://127.0.0.1:18950`). Checkpointed, crash-recoverable execution over absurd/SQLite with dynamic server-side wait, task schema introspection, and crash recovery history.
+### `oc-memory-recall` (2 hooks, 2 tools)
+
+**Hooks:** `gateway_start` (load & index notes), `tool_result_persist` (M6 marker injection)
+
+**Tools:** `recall_status`, `recall_verify`
+
+Deterministic memory-recall delivery arms for OpenClaw. Parses frontmatter note schemas at startup, indexes target watched paths, and injects M6 markers on file reads in `tool_result_persist` without auxiliary model calls.
 
 ### `oc-e2e-trace-test` (1 hook, 0 tools)
 

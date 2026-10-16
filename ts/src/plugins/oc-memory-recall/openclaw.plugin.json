@@ -1,0 +1,39 @@
+{
+  "id": "oc-memory-recall",
+  "name": "OcMemoryRecall",
+  "description": "Memory-recall delivery arms — note registry, telemetry, and M6 marker-on-file-read signposts",
+  "contracts": {
+    "tools": [
+      "recall_status",
+      "recall_verify"
+    ],
+    "hooks": [
+      "gateway_start",
+      "tool_result_persist"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "notesDir": {
+        "type": "string",
+        "default": "memory",
+        "description": "Root directory containing memory note markdown files"
+      },
+      "markerPrefix": {
+        "type": "string",
+        "default": "# [SIGNPOST] May be out of date; the current version is kept in memory:",
+        "description": "Prefix text for M6 marker-on-file-read injection"
+      },
+      "telemetryEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable fire/hit/follow telemetry tracking"
+      }
+    }
+  }
+}
