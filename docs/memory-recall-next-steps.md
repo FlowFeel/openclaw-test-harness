@@ -44,12 +44,23 @@ Every note carries frontmatter: `kind:` (14-kind catalogue), `use_when:`, `does_
 
 **Trial discipline after each delivery:** one arm at a time per kind; predeclared adopt rule (follow-rate gain ≥ 0.10 over ≥ 20 sessions, no out-of-scope acting); expect ~0.10 winner's-curse shrinkage on picked arms; report effects with intervals across weight settings.
 
-## 3. Open design questions (Ed)
+## 3. Resolved design decisions (Ed)
 
-1. **M1 channel semantics** — source result used a separate user-role message after the tool result. Can OC inject a user-role turn post-tool-call, or is systemEvent the only unattended channel? (Fallback recorded, carries the 0.14-vs-0.96 channel discount.)
-2. **Hold-once state** — where does "held" live (per-session? persisted?) and what clears it: model ack, owner ack, or expiry?
-3. **Registry source of truth** — frontmatter-in-place (notes travel with their own scope conditions; lean yes — it *is* the misapplication mechanism) vs a central registry (`registry.py` heartbeat precedent)?
-4. **Hook surface** — does the current api.on set expose post-tool-call and pre-reply hooks? M1 and M4 hang off exactly those two.
-5. **PR train** — does build step 3 ride the #33/#35 compaction provider series or go separate?
+1. **M1 channel semantics** — **Use `api.session.workflow.enqueueNextTurnInjection(...)`** (invoked from `after_tool_call` or `tool_result_persist`). In OpenClaw, this is the first-class seam for durable, exactly-once context injected into the subsequent turn: it deduplicates via `idempotencyKey`, drops expired entries, drains automatically before prompt hooks, and avoids turning transient cues into permanent prompt bloat or taking the 0.14 channel discount.
+2. **Hold-once state** — Lives in **session extension state** (`api.session.state` / `pluginExtensions`) backed by an in-memory Map during runtime. Cleared upon turn consumption (model acts on or bypasses the cue) or TTL expiration (30–60 min safety ceiling to prevent permanent suppression).
+3. **Registry source of truth** — **Frontmatter-in-place.** Scope conditions (`use_when`, `does_not_apply_when`, `provenance`, `source`) must travel directly inside note Markdown files so applicability is self-judged at read time (enabling the $\lambda_{\text{mis}} = 0.25$ residual risk pricing). A central registry is an *in-memory index / scan cache* built at boot, never a diverging source of truth.
+4. **Hook surface** — 
+   - Pre-reply (M4): `api.on("before_agent_reply", ...)` is live and fully verified in `oc-topic-worker-pool` and `hook-dispatch-proof.spec.ts`.
+   - Post-tool-call (M1): `after_tool_call` (void async hook) and `tool_result_persist` (synchronous message transformer) exist upstream. Coupling `after_tool_call` $\rightarrow$ `enqueueNextTurnInjection` provides exact post-tool-call injection semantics.
+5. **PR train** — **Ride the `oc-compaction-helper` series.** Deliverable 3 (M8) integrates directly into `summarizationInstructions` (`identifierPolicy`, `identifierInstructions`) of literate compaction, preventing duplicate compaction hooks or competing prompt policies.
 
-Answers to 1, 3, 4 unblock deliverables 0–2; the rest can trail.
+## 4. Standing efficiency & compute constraint (Zero auxiliary model calls)
+
+To protect runtime efficiency, token budgets, and latency:
+
+1. **Zero auxiliary model calls invariant:** No delivery arm, filter, router, or verification step may invoke an auxiliary model call (no LLM-as-a-judge, no LLM classifier, no secondary routing hops).
+2. **Host-compute intelligence:** All intelligence that can be computed deterministically must execute in the plugin host runtime (Node.js/TypeScript):
+   - Fast $O(1)$ trie/path lookups against the in-memory registry.
+   - Synchronous string/marker prepends in `tool_result_persist`.
+   - Lexical regex matching and state machine transitions.
+3. **M4 (Review Gate) strict scope:** M4 is strictly constrained to a **deterministic host linter** in `before_agent_reply` (e.g. checking missing citations, forbidden stale references, or required signposts via regex/AST). If a check cannot be computed deterministically in TypeScript, it is out of scope and must not be delegated to an LLM judge.
