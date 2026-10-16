@@ -111,10 +111,24 @@ export interface PluginApi {
   /** Plugin-scoped config (the entry for this plugin id). */
   pluginConfig?: unknown;
   /** Register a custom compaction provider (e.g. literate compaction). */
-  registerCompactionProvider?: (
+    registerCompactionProvider?: (
     provider: CompactionProvider,
     opts?: { ownerPluginId?: string }
   ) => void;
+  session?: {
+    workflow?: {
+      enqueueNextTurnInjection?: (params: {
+        sessionKey?: string;
+        text: string;
+        idempotencyKey?: string;
+      }) => Promise<{ enqueued: boolean; id?: string }>;
+    };
+  };
+  enqueueNextTurnInjection?: (params: {
+    sessionKey?: string;
+    text: string;
+    idempotencyKey?: string;
+  }) => Promise<{ enqueued: boolean; id?: string }>;
 }
 
 export interface CompactionProviderSummarizationInstructions {

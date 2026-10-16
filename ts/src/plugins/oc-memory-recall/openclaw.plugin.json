@@ -1,0 +1,57 @@
+{
+  "id": "oc-memory-recall",
+  "name": "OcMemoryRecall",
+  "description": "Memory-recall delivery arms — note registry, telemetry, M6 file signposts, M1 event push, M2 tool notes, M4 review gate, M7 catalogue, and M5 resume refresh",
+  "contracts": {
+    "tools": [
+      "recall_status",
+      "recall_verify",
+      "recall_catalogue"
+    ],
+    "hooks": [
+      "gateway_start",
+      "tool_result_persist",
+      "after_tool_call",
+      "before_agent_reply"
+    ]
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "notesDir": {
+        "type": "string",
+        "default": "memory",
+        "description": "Root directory containing memory note markdown files"
+      },
+      "markerPrefix": {
+        "type": "string",
+        "default": "# [SIGNPOST] May be out of date; the current version is kept in memory:",
+        "description": "Prefix text for M6 marker-on-file-read injection"
+      },
+      "telemetryEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable fire/hit/follow telemetry tracking"
+      },
+      "eventPushEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable M1 user-channel event push into subsequent turn"
+      },
+      "defaultPolicy": {
+        "type": "string",
+        "default": "hold-once",
+        "description": "Default delivery policy for event push (hold-once or let-run)"
+      },
+      "holdOnceTtlMs": {
+        "type": "number",
+        "default": 1800000,
+        "description": "Hold-once safety ceiling TTL in milliseconds (default: 30 minutes)"
+      }
+    }
+  }
+}
