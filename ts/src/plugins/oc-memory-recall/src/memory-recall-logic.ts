@@ -82,6 +82,24 @@ export const DEFAULT_MARKER_PREFIX =
 // ── 1. Frontmatter Parsing (Pure) ──────────────────────────────────────────
 
 /**
+ * Cheap frontmatter gate: true only when the raw content starts with a
+ * closed `---` frontmatter block that contains a `kind:` key.
+ *
+ * Episodic session logs carry `date:`-style frontmatter (or none at all) and
+ * must never reach the parser — this predicate is the boot-flood guard that
+ * keeps registry loading O(authoritative notes), not O(all markdown).
+ */
+export function hasKindFrontmatter(raw: string): boolean {
+  const trimmed = raw.trimStart();
+  if (!trimmed.startsWith("---")) return false;
+  const rest = trimmed.slice(3);
+  const endIdx = rest.indexOf("\n---");
+  if (endIdx === -1) return false;
+  const block = rest.slice(0, endIdx);
+  return /^kind\s*:/m.test(block);
+}
+
+/**
  * Parses markdown note content containing YAML frontmatter.
  * Requires: kind, use_when, does_not_apply_when, provenance, source.
  */
@@ -243,6 +261,11 @@ export function createRegistry(notes: MemoryNote[]): NoteRegistry {
   const kindToNotes = new Map<string, MemoryNote[]>();
 
   for (const note of notes) {
+    // Registry holds authoritative notes only. Parse-failure notes (missing
+    // frontmatter, unclosed blocks, missing required fields) must never be
+    // indexed — they would flood kind tables with `unknown` entries.
+    if (!note.valid) continue;
+
     noteMap.set(note.id, note);
 
     // Index by kind

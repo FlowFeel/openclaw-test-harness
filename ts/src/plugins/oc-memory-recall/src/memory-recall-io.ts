@@ -25,10 +25,19 @@ export interface RawNoteFile {
 }
 
 export interface MemoryNotesLoader {
-  (notesDir: string): RawNoteFile[];
+  (notesDir: string, subdirs?: string[]): RawNoteFile[];
 }
 
-export function readNotesFromDisk(notesDir: string): RawNoteFile[] {
+/**
+ * Scans `notesDir` (flat, non-recursive) plus each explicitly enumerated
+ * subdirectory in `subdirs` (also flat). Files are returned regardless of
+ * content; callers gate on frontmatter before parsing (see
+ * `hasKindFrontmatter` in memory-recall-logic.ts).
+ *
+ * `id` is the path relative to `notesDir` so same-named files across
+ * subdirectories cannot collide in the registry.
+ */
+export function readNotesFromDisk(notesDir: string, subdirs: string[] = []): RawNoteFile[] {
   if (!existsSync(notesDir)) {
     return [];
   }
@@ -49,8 +58,10 @@ export function readNotesFromDisk(notesDir: string): RawNoteFile[] {
       try {
         if (entry.endsWith(".md")) {
           const rawContent = readFileSync(fullPath, "utf8");
+          // id is notesDir-relative and POSIX-normalized so registry keys are stable
+          const relId = fullPath.slice(notesDir.length).replace(/^[/\\]/, "").replace(/\\/g, "/");
           results.push({
-            id: entry,
+            id: relId.length > 0 ? relId : entry,
             rawContent,
             filePath: fullPath,
           });
@@ -62,5 +73,12 @@ export function readNotesFromDisk(notesDir: string): RawNoteFile[] {
   }
 
   scan(notesDir);
+  for (const sub of subdirs) {
+    // Flat scan of each explicitly enumerated subdirectory — never recursive,
+    // so an unexpected tree cannot flood the boot scan.
+    const clean = String(sub ?? "").replace(/^[/\\]+|[/\\]+$/g, "");
+    if (clean.length === 0 || clean.includes("..") || clean.includes("/")) continue;
+    scan(join(notesDir, clean));
+  }
   return results;
 }

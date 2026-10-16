@@ -52,6 +52,18 @@ paths:
 
 ---
 
+## Registry Boot Flood Guard
+
+Boot indexing is **authoritative-only by construction**:
+
+1. **Frontmatter gate** — a file reaches the parser only if its raw content starts with a closed `---` block containing a `kind:` key (`hasKindFrontmatter`). Episodic session logs (`date:`-style frontmatter or none) are skipped at O(1) each and never parsed or indexed. Gate-skipped files stay visible to `recall_verify` as diagnostics, so malformed note files still surface — they just never enter the delivery registry.
+2. **Valid-only registry** — `createRegistry` indexes valid notes only; parse failures can no longer land as `unknown`-kind entries in the kind tables.
+3. **Enumerated subdirs** — the scan is flat (non-recursive) over `notesDir` plus the explicitly configured `subdirs` list. A growing `memory/` tree cannot flood boot by existing; authoritative notes opt in by location + frontmatter.
+
+`recall_status` surfaces the accounting line (`scan: N md files seen, M skipped (no kind frontmatter), K candidates`) so an empty-looking registry is distinguishable from a mis-pointed `notesDir`.
+
+---
+
 ## Delivery Arm M6: Marker on File Read
 
 When an agent reads an on-disk file using any file tool (`view_file`, `read_file`, `readFile`, `cat`), `oc-memory-recall` matches the path against the registry. If an authoritative note tracks that file, the plugin synchronously prepends a signpost in `tool_result_persist`:

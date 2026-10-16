@@ -23,6 +23,7 @@ import {
   buildRecallStatusReport,
   createInitialTelemetry,
   createRegistry,
+  hasKindFrontmatter,
   parseNoteFrontmatter,
   processToolResultForFileRead,
   recordFire,
@@ -40,6 +41,7 @@ import {
 import {
   readNotesFromDisk,
   type MemoryNotesLoader,
+  type RawNoteFile,
 } from "./memory-recall-io.js";
 import {
   createInitialSessionHoldState,
@@ -52,6 +54,8 @@ import {
 export interface OcMemoryRecallConfig {
   /** Directory containing memory note markdown files (default: "memory"). */
   notesDir?: string;
+  /** Explicitly enumerated subdirectories of notesDir to scan (flat, non-recursive). Episodic logs elsewhere are never indexed. */
+  subdirs?: string[];
   /** Custom signpost prefix string for M6 file-read markers. */
   markerPrefix?: string;
   /** Whether telemetry tracking is active (default: true). */
@@ -74,6 +78,7 @@ export default definePluginEntry({
   register(api: PluginApi, config?: Record<string, unknown>) {
     const cfg = (config as OcMemoryRecallConfig) ?? {};
     const notesDir = cfg.notesDir ?? "memory";
+    const subdirs = Array.isArray(cfg.subdirs) ? cfg.subdirs.map(String) : [];
     const markerPrefix = cfg.markerPrefix ?? DEFAULT_MARKER_PREFIX;
     const notesLoader: MemoryNotesLoader = cfg.notesLoader ?? readNotesFromDisk;
     const eventPushEnabled = cfg.eventPushEnabled ?? true;
@@ -83,23 +88,41 @@ export default definePluginEntry({
     let registry: NoteRegistry = createRegistry([]);
     let telemetry: RecallTelemetryState = createInitialTelemetry();
     let sessionHolds: SessionHoldState = createInitialSessionHoldState();
+    // Last boot-scan accounting. Skipped files (no kind frontmatter) are kept
+    // raw so recall_verify can still diagnose them on demand — the registry
+    // itself never holds them.
+    let lastScan: { scanned: number; candidates: number; skipped: RawNoteFile[] } = {
+      scanned: 0,
+      candidates: 0,
+      skipped: [],
+    };
 
-    function reloadRegistry(): NoteRegistry {
-      const rawNotes = notesLoader(notesDir);
-      const parsedNotes: MemoryNote[] = rawNotes.map((n) =>
+    function reloadRegistry(): { registry: NoteRegistry; scanned: number; candidates: number } {
+      const rawNotes = notesLoader(notesDir, subdirs);
+      // Boot-flood guard: only files whose frontmatter block carries a `kind:`
+      // key reach the parser. Episodic session logs are skipped at O(1) each
+      // and never enter the registry (see hasKindFrontmatter).
+      const candidates = rawNotes.filter((n) => hasKindFrontmatter(n.rawContent));
+      const parsedNotes: MemoryNote[] = candidates.map((n) =>
         parseNoteFrontmatter(n.rawContent, n.id),
       );
       registry = createRegistry(parsedNotes);
-      return registry;
+      const candidateIds = new Set(candidates.map((n) => n.id));
+      lastScan = {
+        scanned: rawNotes.length,
+        candidates: candidates.length,
+        skipped: rawNotes.filter((n) => !candidateIds.has(n.id)),
+      };
+      return { registry, scanned: rawNotes.length, candidates: candidates.length };
     }
 
     // ── Hook: gateway_start ──────────────────────────────────────────
     api.on("gateway_start", async () => {
       try {
-        const reg = reloadRegistry();
+        const { registry: reg, scanned, candidates } = reloadRegistry();
         const validCount = Array.from(reg.notes.values()).filter((n) => n.valid).length;
         api.logger?.info?.(
-          `[oc-memory-recall] indexed ${reg.notes.size} notes (${validCount} valid) across ${reg.kindToNotes.size} kinds`,
+          `[oc-memory-recall] scanned ${scanned} md files, ${candidates} kind-frontmatter candidates, indexed ${reg.notes.size} notes (${validCount} valid) across ${reg.kindToNotes.size} kinds`,
         );
 
         // ── Resume Refresh (Deliverable 6 - M5) ────────────────────────
@@ -295,8 +318,9 @@ export default definePluginEntry({
       async execute(_id: string, _params: Record<string, unknown>) {
         try {
           const report = buildRecallStatusReport(registry, telemetry);
+          const scanLine = `scan: ${lastScan.scanned} md files seen, ${lastScan.skipped.length} skipped (no kind frontmatter), ${lastScan.candidates} candidates`;
           return {
-            content: [{ type: "text" as const, text: `${report.verdict}: ${report.summary}` }],
+            content: [{ type: "text" as const, text: `${report.verdict}: ${report.summary}\n${scanLine}` }],
           };
         } catch (err) {
           return {
@@ -322,7 +346,12 @@ export default definePluginEntry({
           if (reload) {
             reloadRegistry();
           }
-          const notes = Array.from(registry.notes.values());
+          // Delivery registry (valid notes only) + on-demand diagnostics for
+          // gate-skipped files, so malformed note files still surface here.
+          const skippedParsed = lastScan.skipped.map((f) =>
+            parseNoteFrontmatter(f.rawContent, f.id),
+          );
+          const notes = [...Array.from(registry.notes.values()), ...skippedParsed];
           const verification = verifyNotes(notes);
           const verdict = verification.invalidCount > 0 ? "failed" : "ok";
           const summary = `verified ${notes.length} notes: ${verification.validCount} valid, ${verification.invalidCount} invalid`;

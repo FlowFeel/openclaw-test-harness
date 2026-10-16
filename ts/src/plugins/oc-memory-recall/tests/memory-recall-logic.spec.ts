@@ -13,6 +13,7 @@ import {
   findNotesForPath,
   formatFileMarker,
   formatTelemetryReport,
+  hasKindFrontmatter,
   normalizePath,
   parseNoteFrontmatter,
   processToolResultForFileRead,
@@ -354,5 +355,51 @@ source: "docs/arch.md"
     expect(refresh.refreshedNotes).toHaveLength(1);
     expect(refresh.summary).toContain("# [MEMORY RESUME REFRESH]");
     expect(refresh.summary).toContain("docs/arch.md");
+  });
+});
+
+describe("hasKindFrontmatter (boot-flood guard)", () => {
+  it("accepts a note with a closed kind-bearing frontmatter block", () => {
+    expect(hasKindFrontmatter(VALID_NOTE_RAW)).toBe(true);
+  });
+
+  it("rejects episodic daily-log frontmatter without a kind key", () => {
+    const daily = `---
+date: 2026-06-12
+sessions: 1
+users: [edphos]
+---
+# Daily log
+Content.
+`;
+    expect(hasKindFrontmatter(daily)).toBe(false);
+  });
+
+  it("rejects content with no frontmatter at all", () => {
+    expect(hasKindFrontmatter("# Just a heading\nBody text.\n")).toBe(false);
+  });
+
+  it("rejects an unclosed frontmatter block", () => {
+    expect(hasKindFrontmatter("---\nkind: house_style\nuse_when: x\n")).toBe(false);
+  });
+
+  it("rejects kind mentioned only in the body, outside frontmatter", () => {
+    const body = `# Notes\nkind: house_style\nmore text\n`;
+    expect(hasKindFrontmatter(body)).toBe(false);
+  });
+});
+
+describe("createRegistry (valid-only indexing)", () => {
+  it("never indexes invalid notes, even when handed them directly", () => {
+    const valid = parseNoteFrontmatter(VALID_NOTE_RAW, "style-note.md");
+    const invalid = parseNoteFrontmatter("# no frontmatter here\n", "daily.md");
+    const invalidFrontmatter = parseNoteFrontmatter(
+      "---\ndate: 2026-06-12\nsessions: 1\n---\nlog\n",
+      "dated.md",
+    );
+    const registry = createRegistry([valid, invalid, invalidFrontmatter]);
+    expect(registry.notes.size).toBe(1);
+    expect(registry.kindToNotes.has("unknown")).toBe(false);
+    expect(registry.kindToNotes.get("house_style")?.length).toBe(1);
   });
 });
