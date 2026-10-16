@@ -16,7 +16,7 @@ The failure being solved: **models do not pull information they already have in 
 - **Direct** — user asks; cue present in context; model fails to act on the cue. Easier class: pointer descriptions fixed direct recall 0.81→0.94 on held-out scenarios (source-study E5).
 - **Indirect** — model doing its own thinking/research; cue/signpost present; model walks past it. The troublesome class, and the bench's weakest region (9/14 kinds with no clear leader).
 
-**Priority amendment:** self-directed-case arms (M6 marker, M1 event push, M8 stale wording) build before direct-case arms (M7 catalogue, M4 review gate, M5 resume refresh).
+**Priority amendment:** self-directed-case arms (M6 marker, M1 event push, M8 resume delta tracking) build before direct-case arms (M7 catalogue, M4 review gate, M5 resume refresh).
 
 ### 1.2 Standing weight set (owner: WaltonC, recorded before any estimate is read)
 
@@ -37,7 +37,7 @@ Every note carries frontmatter: `kind:` (14-kind catalogue), `use_when:`, `does_
 | 0 | Note registry + frontmatter schema + migration pass over existing notes | foundation | everything downstream reads it; delivers the workspace (c) logging schema |
 | 1 | Fire/hit/follow telemetry per kind per arm | P3, P4 | measurement backbone; unfired must be distinguishable from failed (18/28 push triggers never fired in the source grid) |
 | 2 | Marker-on-file-read injection: `# may be out of date; the current version is kept in memory: <path>` | M6 | manager-honest, smallest surface, +0.10 [0.065, 0.136]; keys on the file itself |
-| 3 | Compaction/resume wording standard: no confident current values in summaries; "changed since last summary" list on resume | M8 | rides the #33/#35 compaction series; 69% stale-copy rate is the strongest single datum |
+| 3 | Deterministic delta tracking on resume: host-computed "changed since last compaction" file/state diffs; zero negative prompt guardrails | M8 | rides the #33/#35 compaction series; 69% stale-copy rate is the strongest single datum |
 | 4 | User-channel event push with hold-once / let-run variants | M1 | headline arm (+0.9 in-grid; sealed −0.56 discount recorded); biggest design surface |
 | 5 | Tool-description note injection | M2 | cheap; runner-up for authority (0.346 vs 0.351) |
 | 6 | Direct-case arms: catalogue, review gate pre-reply, resume refresh | M7, M4, M5 | easier class; build last per priority amendment |
@@ -52,7 +52,7 @@ Every note carries frontmatter: `kind:` (14-kind catalogue), `use_when:`, `does_
 4. **Hook surface** — 
    - Pre-reply (M4): `api.on("before_agent_reply", ...)` is live and fully verified in `oc-topic-worker-pool` and `hook-dispatch-proof.spec.ts`.
    - Post-tool-call (M1): `after_tool_call` (void async hook) and `tool_result_persist` (synchronous message transformer) exist upstream. Coupling `after_tool_call` $\rightarrow$ `enqueueNextTurnInjection` provides exact post-tool-call injection semantics.
-5. **PR train** — **Ride the `oc-compaction-helper` series.** Deliverable 3 (M8) integrates directly into `summarizationInstructions` (`identifierPolicy`, `identifierInstructions`) of literate compaction, preventing duplicate compaction hooks or competing prompt policies.
+5. **PR train** — **Ride the `oc-compaction-helper` series.** Deliverable 3 (M8) integrates directly into `oc-compaction-helper`: records snapshot tokens at compaction time, and computes deterministic file/note modifications on resume. No prompt-based negative guardrails ("forbid hallucinated values") — state validity is computed deterministically by host runtime.
 
 ## 4. Standing efficiency & compute constraint (Zero auxiliary model calls)
 
@@ -64,3 +64,4 @@ To protect runtime efficiency, token budgets, and latency:
    - Synchronous string/marker prepends in `tool_result_persist`.
    - Lexical regex matching and state machine transitions.
 3. **M4 (Review Gate) strict scope:** M4 is strictly constrained to a **deterministic host linter** in `before_agent_reply` (e.g. checking missing citations, forbidden stale references, or required signposts via regex/AST). If a check cannot be computed deterministically in TypeScript, it is out of scope and must not be delegated to an LLM judge.
+4. **M8 (Resume Delta Tracking) anti-guardrail invariant:** Compaction prompts must not be burdened with negative instructions ("never assume current values", "forbid hallucinated static values"). The host environment deterministically tracks file modifications and git/state deltas between compaction and resume, prepending an objective machine notice into the prompt context.

@@ -3,7 +3,7 @@
   "name": "OC Compaction Helper",
   "description": "Transcript compaction helper — warns on large transcripts before compaction, strips bloat fields after compaction, and reports transcript size estimates.",
   "contracts": {
-    "tools": ["compact_check"]
+    "tools": ["compact_check", "compact_delta"]
   },
   "activation": {
     "onStartup": true
@@ -31,6 +31,17 @@
       "cooldownMs": {
         "type": "number",
         "default": 120000
+      },
+      "trackResumeDeltas": {
+        "type": "boolean",
+        "default": true
+      },
+      "watchPaths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
       },
       "bloatFields": {
         "type": "array",

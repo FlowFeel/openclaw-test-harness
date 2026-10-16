@@ -57,6 +57,19 @@ import {
   providerSelectionReport,
   type ProviderSelectionReport,
 } from "./provider-selection.js";
+import {
+  createCompactionSnapshot,
+  computeFileDeltas,
+  formatResumeDeltaNotice,
+  computeDeltaHash,
+  shouldEmitDeltaNotice,
+  type CompactionSnapshot,
+  type FileDeltaReport,
+} from "./resume-delta-logic.js";
+import {
+  readPathMtimes,
+  type PathMtimeReader,
+} from "./resume-delta-io.js";
 
 export interface CompactionHelperConfig {
   maxTranscriptMb?: number;
@@ -78,6 +91,12 @@ export interface CompactionHelperConfig {
   streamingMaxRollingChars?: number;
   /** Wedge signature: ms without after_compaction before "wedge suspected". Default: 600000. */
   wedgeSuspectMs?: number;
+  /** M8: Enable deterministic resume delta tracking. Default: true. */
+  trackResumeDeltas?: boolean;
+  /** M8: Files or directories to watch for modifications. */
+  watchPaths?: string[];
+  /** Injectable file stat reader for DFT conformance. */
+  statReader?: PathMtimeReader;
 }
 
 const DEFAULT_BLOAT_FIELDS = [
@@ -113,6 +132,12 @@ export default definePluginEntry({
     const sessionsPath = cfg.sessionsPath;
     const throttleMs = cfg.throttleMs ?? DEFAULT_THROTTLE_MS;
     const bloatThresholdBytes = cfg.bloatThresholdBytes ?? DEFAULT_BLOAT_THRESHOLD;
+    const trackResumeDeltas = cfg.trackResumeDeltas ?? true;
+    const watchPaths = cfg.watchPaths ?? [];
+    const statReader: PathMtimeReader = cfg.statReader ?? readPathMtimes;
+
+    let latestCompactionSnapshot: CompactionSnapshot | null = null;
+    let lastEmittedDeltaHash: string | undefined = undefined;
 
     // ── Pluggable Compaction Provider: Literate ──────────────────────
     if (typeof api.registerCompactionProvider === "function") {
@@ -237,6 +262,43 @@ export default definePluginEntry({
       async () => {
         try {
           const now = Date.now();
+
+          // ── Resume Delta Tracking (M8) ──
+          if (trackResumeDeltas && latestCompactionSnapshot && watchPaths.length > 0) {
+            try {
+              const currentStats = statReader(watchPaths);
+              const deltaReport = computeFileDeltas(latestCompactionSnapshot, currentStats, now);
+              const deltaHash = computeDeltaHash(deltaReport);
+
+              if (shouldEmitDeltaNotice(lastEmittedDeltaHash, deltaHash, deltaReport.hasChanges)) {
+                lastEmittedDeltaHash = deltaHash;
+                const noticeText = formatResumeDeltaNotice(deltaReport);
+                const idempotencyKey = `m8-delta-${deltaReport.checkpointId}-${deltaHash}`;
+
+                if (typeof api.session?.workflow?.enqueueNextTurnInjection === "function") {
+                  await api.session.workflow.enqueueNextTurnInjection({
+                    text: noticeText,
+                    idempotencyKey,
+                  });
+                } else if (typeof api.enqueueNextTurnInjection === "function") {
+                  await api.enqueueNextTurnInjection({
+                    text: noticeText,
+                    idempotencyKey,
+                  });
+                }
+
+                api.logger?.info?.(
+                  `[oc-compaction-helper] Emitted resume delta notice for ${deltaReport.checkpointId}: ` +
+                    `${deltaReport.modified.length} modified, ${deltaReport.added.length} added, ${deltaReport.removed.length} removed`
+                );
+              }
+            } catch (deltaErr) {
+              api.logger?.warn?.(
+                `[oc-compaction-helper] Resume delta tracking failed: ${String(deltaErr)}`
+              );
+            }
+          }
+
           if (now - lastCleanupMs < throttleMs) return;
 
           const raw = reader(sessionsPath);
@@ -413,6 +475,24 @@ export default definePluginEntry({
             compactionHealth.lastAfterMs = nowMs;
             compactionHealth.lastDurationMs = nowMs - compactionHealth.lastBeforeMs;
           }
+
+          // ── Capture Compaction Snapshot for Resume Delta Tracking (M8) ──
+          if (trackResumeDeltas && watchPaths.length > 0) {
+            try {
+              const currentStats = statReader(watchPaths);
+              latestCompactionSnapshot = createCompactionSnapshot(
+                `ckpt-${nowMs}`,
+                nowMs,
+                currentStats
+              );
+              lastEmittedDeltaHash = undefined;
+            } catch (snapErr) {
+              api.logger?.warn?.(
+                `[oc-compaction-helper] Snapshot capture failed: ${String(snapErr)}`
+              );
+            }
+          }
+
           const raw = reader(sessionsPath);
           if (!raw) return;
           const { cleaned, report } = cleanupSessions(raw, {
@@ -422,6 +502,7 @@ export default definePluginEntry({
           });
           await sidecarWriter(cleaned, sessionsPath);
           lastCleanupMs = Date.now();
+
           api.logger?.info?.(
             `[oc-compaction-helper] after_compaction cleanup: ` +
               `${report.strippedFieldCount} fields stripped, ` +
@@ -545,6 +626,72 @@ export default definePluginEntry({
           return {
             content: [
               { type: "text" as const, text: `compact_check failed: ${String(err)}` },
+            ],
+          };
+        }
+      },
+    });
+
+    // ── Tool: compact_delta (M8) ──────────────────────────────
+    api.registerTool({
+      name: "compact_delta",
+      description:
+        "Query file and state modifications detected since the last compaction checkpoint (M8). " +
+        "Reports modified, added, and removed files tracked across compaction turns.",
+      parameters: Type.Object({}),
+      async execute(_id: string, _params: Record<string, unknown>) {
+        try {
+          if (!latestCompactionSnapshot) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify(
+                    {
+                      ok: true,
+                      tracked: trackResumeDeltas,
+                      hasSnapshot: false,
+                      message: "No compaction snapshot recorded yet.",
+                    },
+                    null,
+                    2
+                  ),
+                },
+              ],
+            };
+          }
+
+          const currentStats = statReader(watchPaths);
+          const delta = computeFileDeltas(latestCompactionSnapshot, currentStats, Date.now());
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    tracked: trackResumeDeltas,
+                    hasSnapshot: true,
+                    checkpointId: delta.checkpointId,
+                    compactionTimestampMs: delta.compactionTimestampMs,
+                    elapsedMs: delta.elapsedMs,
+                    hasChanges: delta.hasChanges,
+                    modified: delta.modified,
+                    added: delta.added,
+                    removed: delta.removed,
+                    unchangedCount: delta.unchangedCount,
+                    notice: formatResumeDeltaNotice(delta),
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        } catch (err) {
+          return {
+            content: [
+              { type: "text" as const, text: `compact_delta failed: ${String(err)}` },
             ],
           };
         }
