@@ -36,6 +36,13 @@ import {
   readNotesFromDisk,
   type MemoryNotesLoader,
 } from "./memory-recall-io.js";
+import {
+  createInitialSessionHoldState,
+  evaluateEventPush,
+  cleanExpiredSessionHolds,
+  type SessionHoldState,
+  type DeliveryPolicy,
+} from "./event-push-logic.js";
 
 export interface OcMemoryRecallConfig {
   /** Directory containing memory note markdown files (default: "memory"). */
@@ -46,6 +53,12 @@ export interface OcMemoryRecallConfig {
   telemetryEnabled?: boolean;
   /** Optional injectable loader for testing (DFT Axiom 5). */
   notesLoader?: MemoryNotesLoader;
+  /** Whether M1 user-channel event push is active (default: true). */
+  eventPushEnabled?: boolean;
+  /** Default delivery policy for event push ("hold-once" | "let-run", default: "hold-once"). */
+  defaultPolicy?: DeliveryPolicy;
+  /** Safety ceiling TTL in milliseconds for hold-once records (default: 30 minutes). */
+  holdOnceTtlMs?: number;
 }
 
 export default definePluginEntry({
@@ -58,9 +71,13 @@ export default definePluginEntry({
     const notesDir = cfg.notesDir ?? "memory";
     const markerPrefix = cfg.markerPrefix ?? DEFAULT_MARKER_PREFIX;
     const notesLoader: MemoryNotesLoader = cfg.notesLoader ?? readNotesFromDisk;
+    const eventPushEnabled = cfg.eventPushEnabled ?? true;
+    const defaultPolicy: DeliveryPolicy = cfg.defaultPolicy ?? "hold-once";
+    const holdOnceTtlMs = cfg.holdOnceTtlMs ?? 1_800_000;
 
     let registry: NoteRegistry = createRegistry([]);
     let telemetry: RecallTelemetryState = createInitialTelemetry();
+    let sessionHolds: SessionHoldState = createInitialSessionHoldState();
 
     function reloadRegistry(): NoteRegistry {
       const rawNotes = notesLoader(notesDir);
@@ -146,6 +163,73 @@ export default definePluginEntry({
           `[oc-memory-recall] tool_result_persist error: ${String(err)}`,
         );
         return undefined;
+      }
+    });
+
+    // ── Hook: after_tool_call (Deliverable 4 - M1) ───────────────────
+    api.on("after_tool_call", async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+      try {
+        if (!eventPushEnabled) return;
+
+        const nowMs = Date.now();
+        const toolName = String(event.toolName ?? ctx?.toolName ?? "");
+        const sessionKey = String(ctx?.sessionKey ?? event.sessionKey ?? "default-session");
+        const params = (event.params as Record<string, unknown>) ?? {};
+        const result = event.result;
+        const error = typeof event.error === "string" ? event.error : undefined;
+
+        // Clean expired holds opportunistically
+        sessionHolds = cleanExpiredSessionHolds(sessionHolds, nowMs, holdOnceTtlMs);
+
+        const decision = evaluateEventPush(
+          registry,
+          {
+            toolName,
+            params,
+            result,
+            error,
+            sessionKey,
+          },
+          sessionHolds,
+          nowMs,
+          {
+            defaultPolicy,
+            holdOnceTtlMs,
+          },
+        );
+
+        sessionHolds = decision.newHoldState;
+
+        if (!decision.shouldPush) return;
+
+        for (const item of decision.notesToPush) {
+          if (typeof api.session?.workflow?.enqueueNextTurnInjection === "function") {
+            await api.session.workflow.enqueueNextTurnInjection({
+              sessionKey,
+              text: item.cueText,
+              idempotencyKey: item.idempotencyKey,
+            });
+          } else if (typeof api.enqueueNextTurnInjection === "function") {
+            await api.enqueueNextTurnInjection({
+              sessionKey,
+              text: item.cueText,
+              idempotencyKey: item.idempotencyKey,
+            });
+          }
+
+          // Record M1 telemetry: fired and hit into subsequent turn context
+          telemetry = recordFire(telemetry, item.note.frontmatter.kind, "M1");
+          telemetry = recordHit(telemetry, item.note.frontmatter.kind, "M1");
+
+          api.logger?.info?.(
+            `[oc-memory-recall] M1 event push enqueued for ${item.note.id} ` +
+              `into session ${sessionKey} (policy: ${item.policy})`,
+          );
+        }
+      } catch (err) {
+        api.logger?.warn?.(
+          `[oc-memory-recall] after_tool_call event push error: ${String(err)}`,
+        );
       }
     });
 

@@ -9,7 +9,8 @@
     ],
     "hooks": [
       "gateway_start",
-      "tool_result_persist"
+      "tool_result_persist",
+      "after_tool_call"
     ]
   },
   "activation": {
@@ -33,6 +34,21 @@
         "type": "boolean",
         "default": true,
         "description": "Enable fire/hit/follow telemetry tracking"
+      },
+      "eventPushEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable M1 user-channel event push into subsequent turn"
+      },
+      "defaultPolicy": {
+        "type": "string",
+        "default": "hold-once",
+        "description": "Default delivery policy for event push (hold-once or let-run)"
+      },
+      "holdOnceTtlMs": {
+        "type": "number",
+        "default": 1800000,
+        "description": "Hold-once safety ceiling TTL in milliseconds (default: 30 minutes)"
       }
     }
   }

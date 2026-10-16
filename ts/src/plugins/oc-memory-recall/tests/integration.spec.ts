@@ -10,6 +10,16 @@ import type { PluginApi, ToolDefinition } from "../../shared/types.js";
 class FakePluginApiClient {
   public tools = new Map<string, ToolDefinition>();
   public hooks = new Map<string, (event: unknown, ctx?: unknown) => unknown>();
+  public enqueuedInjections: Array<{ sessionKey?: string; text: string; idempotencyKey?: string }> = [];
+
+  public session = {
+    workflow: {
+      enqueueNextTurnInjection: async (params: { sessionKey?: string; text: string; idempotencyKey?: string }) => {
+        this.enqueuedInjections.push(params);
+        return { enqueued: true, id: `inj-${this.enqueuedInjections.length}` };
+      },
+    },
+  };
 
   registerTool(def: ToolDefinition): void {
     this.tools.set(def.name, def);
@@ -55,6 +65,7 @@ describe("oc-memory-recall integration", () => {
     expect(Array.from(api.hooks.keys())).toEqual([
       "gateway_start",
       "tool_result_persist",
+      "after_tool_call",
     ]);
     expect(Array.from(api.tools.keys())).toEqual([
       "recall_status",
@@ -169,5 +180,53 @@ describe("oc-memory-recall integration", () => {
     const verifyResult = await verifyTool.execute("call-3", { reload: false });
     expect(verifyResult.content[0].text).toContain("failed: verified 2 notes: 1 valid, 1 invalid");
     expect(verifyResult.content[0].text).toContain("bad.md");
+  });
+
+  it("enqueues M1 event push on after_tool_call and honors hold-once policy", async () => {
+    const api = new FakePluginApiClient();
+    const loaderClient = new FakeNotesLoaderClient();
+    loaderClient.files = [SAMPLE_NOTE_FILE];
+
+    plugin.register(api as unknown as PluginApi, {
+      notesLoader: loaderClient.getLoader(),
+    });
+
+    await api.hooks.get("gateway_start")!({});
+
+    const afterToolCall = api.hooks.get("after_tool_call")!;
+    expect(afterToolCall).toBeDefined();
+
+    // 1. Tool call matches note's paths
+    await afterToolCall(
+      {
+        toolName: "edit_file",
+        params: { path: "src/auth/session.ts" },
+        result: "updated",
+      },
+      { sessionKey: "session-42" },
+    );
+
+    expect(api.enqueuedInjections).toHaveLength(1);
+    expect(api.enqueuedInjections[0].sessionKey).toBe("session-42");
+    expect(api.enqueuedInjections[0].text).toContain("# [MEMORY CUE]");
+    expect(api.enqueuedInjections[0].text).toContain("src/auth/tokens.ts");
+    expect(api.enqueuedInjections[0].idempotencyKey).toContain("m1-hold-session-42-");
+
+    // 2. Second tool call in same session -> hold-once suppresses duplicate
+    await afterToolCall(
+      {
+        toolName: "edit_file",
+        params: { path: "src/auth/session.ts" },
+        result: "updated again",
+      },
+      { sessionKey: "session-42" },
+    );
+
+    expect(api.enqueuedInjections).toHaveLength(1); // Still 1
+
+    // 3. Telemetry reflects M1 fired and hit
+    const statusTool = api.tools.get("recall_status")!;
+    const statusResult = await statusTool.execute("call-telemetry", {});
+    expect(statusResult.content[0].text).toContain("M1");
   });
 });
