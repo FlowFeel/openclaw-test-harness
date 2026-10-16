@@ -76,7 +76,11 @@ export default definePluginEntry({
   description:
     "Memory-recall delivery arms — note registry, telemetry, and M6 marker-on-file-read signposts",
   register(api: PluginApi, config?: Record<string, unknown>) {
-    const cfg = (config as OcMemoryRecallConfig) ?? {};
+    // Config resolution order: explicit 2nd arg (test doubles / programmatic
+    // registration) → api.pluginConfig (the real host passes the plugin-scoped
+    // entry config there — buildPluginApi puts it on the API object, NOT as the
+    // register() argument) → empty (plugin defaults).
+    const cfg = (config ?? (api as { pluginConfig?: unknown }).pluginConfig ?? {}) as OcMemoryRecallConfig;
     const notesDir = cfg.notesDir ?? "memory";
     const subdirs = Array.isArray(cfg.subdirs) ? cfg.subdirs.map(String) : [];
     const markerPrefix = cfg.markerPrefix ?? DEFAULT_MARKER_PREFIX;
