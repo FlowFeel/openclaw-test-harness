@@ -26,6 +26,10 @@ describe("oc-memory-recall plugin", () => {
   );
 
   it("declares expected tools", () => {
-    expect(manifest.contracts.tools).toEqual(["recall_status","recall_verify"]);
+    expect(manifest.contracts.tools).toEqual([
+      "recall_status",
+      "recall_verify",
+      "recall_catalogue",
+    ]);
   });
 });

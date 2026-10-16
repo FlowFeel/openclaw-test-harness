@@ -252,16 +252,16 @@ export function createRegistry(notes: MemoryNote[]): NoteRegistry {
     kindToNotes.set(kind, existingKind);
 
     // Index by target paths
-    const targetPaths: string[] = [];
+    const rawTargetPaths: string[] = [];
     if (note.frontmatter.source) {
-      targetPaths.push(note.frontmatter.source);
+      rawTargetPaths.push(note.frontmatter.source);
     }
     if (Array.isArray(note.frontmatter.paths)) {
-      targetPaths.push(...note.frontmatter.paths);
+      rawTargetPaths.push(...note.frontmatter.paths);
     }
 
-    for (const p of targetPaths) {
-      const norm = normalizePath(p);
+    const uniqueNormPaths = new Set(rawTargetPaths.map((p) => normalizePath(p)));
+    for (const norm of uniqueNormPaths) {
       const existingPath = pathToNotes.get(norm) ?? [];
       existingPath.push(note);
       pathToNotes.set(norm, existingPath);
@@ -533,5 +533,262 @@ export function buildRecallStatusReport(
       telemetry: telemetry.stats,
       issues,
     },
+  };
+}
+
+// ── 6. Tool-Description Note Injection (Deliverable 5 - M2) ────────────────
+
+export interface ToolDescriptionInjectionResult {
+  tools: Array<{ name: string; description?: string; [key: string]: unknown }>;
+  modifiedCount: number;
+  notesApplied: MemoryNote[];
+}
+
+export function formatToolNoteSignpost(note: MemoryNote): string {
+  const pointer = note.frontmatter.source || note.id;
+  const useWhen = note.frontmatter.use_when ? ` — ${note.frontmatter.use_when}` : "";
+  return `\n[Memory Authority: ${pointer} (${note.frontmatter.kind})${useWhen}]`;
+}
+
+export function injectToolDescriptionNotes(
+  tools: Array<{ name: string; description?: string; [key: string]: unknown }>,
+  registry: NoteRegistry
+): ToolDescriptionInjectionResult {
+  const notesApplied: MemoryNote[] = [];
+  let modifiedCount = 0;
+
+  const updatedTools = tools.map((tool) => {
+    const matchingNotes: MemoryNote[] = [];
+    const tName = tool.name.toLowerCase();
+
+    for (const note of registry.notes.values()) {
+      if (!note.valid) continue;
+
+      let matches = false;
+      if (Array.isArray(note.frontmatter.tools)) {
+        if ((note.frontmatter.tools as string[]).some((t) => String(t).toLowerCase() === tName)) {
+          matches = true;
+        }
+      }
+      if (typeof note.frontmatter.tool === "string" && note.frontmatter.tool.toLowerCase() === tName) {
+        matches = true;
+      }
+      if (
+        (note.frontmatter.kind === "authority" || note.frontmatter.kind === "procedure") &&
+        note.frontmatter.use_when.toLowerCase().includes(tName)
+      ) {
+        matches = true;
+      }
+
+      if (matches && !matchingNotes.includes(note)) {
+        matchingNotes.push(note);
+      }
+    }
+
+    if (matchingNotes.length === 0) {
+      return tool;
+    }
+
+    let desc = tool.description ?? "";
+    let toolModified = false;
+
+    for (const n of matchingNotes) {
+      const signpost = formatToolNoteSignpost(n);
+      const pointer = n.frontmatter.source || n.id;
+      if (!desc.includes(pointer)) {
+        desc += signpost;
+        toolModified = true;
+        if (!notesApplied.includes(n)) {
+          notesApplied.push(n);
+        }
+      }
+    }
+
+    if (toolModified) {
+      modifiedCount++;
+      return { ...tool, description: desc };
+    }
+    return tool;
+  });
+
+  return { tools: updatedTools, modifiedCount, notesApplied };
+}
+
+// ── 7. Note Catalogue (Deliverable 6 - M7) ──────────────────────────────────
+
+export interface CatalogueOptions {
+  maxEntries?: number;
+  kinds?: string[];
+}
+
+export interface CatalogueReport {
+  catalogue: string;
+  totalListed: number;
+  totalAvailable: number;
+}
+
+export function buildNoteCatalogue(
+  registry: NoteRegistry,
+  options?: CatalogueOptions
+): CatalogueReport {
+  const allNotes = Array.from(registry.notes.values()).filter((n) => n.valid);
+  const totalAvailable = allNotes.length;
+
+  const filterKinds = options?.kinds ? new Set(options.kinds.map((k) => k.toLowerCase())) : null;
+  const filtered = filterKinds
+    ? allNotes.filter((n) => filterKinds.has(String(n.frontmatter.kind).toLowerCase()))
+    : allNotes;
+
+  const maxEntries = options?.maxEntries ?? 50;
+  const selected = filtered.slice(0, maxEntries);
+
+  if (selected.length === 0) {
+    return {
+      catalogue: "# [MEMORY CATALOGUE] No active memory notes available.",
+      totalListed: 0,
+      totalAvailable,
+    };
+  }
+
+  const lines: string[] = [
+    `# [MEMORY CATALOGUE] ${selected.length} of ${totalAvailable} memory notes:`,
+  ];
+
+  for (const n of selected) {
+    const pointer = n.frontmatter.source || n.id;
+    const title = n.frontmatter.title ? ` "${n.frontmatter.title}"` : "";
+    lines.push(`• [${n.frontmatter.kind}]${title} (${pointer}) — use when: ${n.frontmatter.use_when}`);
+  }
+
+  return {
+    catalogue: lines.join("\n"),
+    totalListed: selected.length,
+    totalAvailable,
+  };
+}
+
+// ── 8. Pre-Reply Review Gate Linter (Deliverable 6 - M4) ────────────────────
+
+export interface MissingSignpost {
+  noteId: string;
+  kind: string;
+  pointer: string;
+  referencedPath: string;
+  reason: string;
+}
+
+export interface ReplyLintReport {
+  valid: boolean;
+  missingSignposts: MissingSignpost[];
+  suggestedAdditions: string[];
+}
+
+export function lintAgentReply(
+  replyBody: string,
+  registry: NoteRegistry
+): ReplyLintReport {
+  const missingSignposts: MissingSignpost[] = [];
+  const seenNoteIds = new Set<string>();
+  const lowerBody = replyBody.toLowerCase();
+
+  for (const [indexedPath, notes] of registry.pathToNotes.entries()) {
+    if (!indexedPath || indexedPath.length < 3) continue;
+
+    if (lowerBody.includes(indexedPath.toLowerCase())) {
+      for (const note of notes) {
+        if (!note.valid || seenNoteIds.has(note.id)) continue;
+        if (
+          note.frontmatter.kind === "authority" ||
+          note.frontmatter.kind === "code_rule" ||
+          note.frontmatter.kind === "silent_trap" ||
+          note.frontmatter.kind === "architectural_decision"
+        ) {
+          const pointer = note.frontmatter.source || note.id;
+          const noteTitle = note.frontmatter.title?.toLowerCase();
+          const hasCitation =
+            (note.id !== indexedPath && lowerBody.includes(note.id.toLowerCase())) ||
+            (Boolean(noteTitle) && lowerBody.includes(noteTitle!)) ||
+            lowerBody.includes("[signpost]") ||
+            lowerBody.includes("[memory") ||
+            lowerBody.includes("authority note") ||
+            lowerBody.includes("per note");
+
+          if (!hasCitation) {
+            seenNoteIds.add(note.id);
+            missingSignposts.push({
+              noteId: note.id,
+              kind: String(note.frontmatter.kind),
+              pointer,
+              referencedPath: indexedPath,
+              reason: `Referenced path '${indexedPath}' has required ${note.frontmatter.kind} signpost`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const suggestedAdditions = missingSignposts.map(
+    (m) => `[Memory Notice: Path '${m.referencedPath}' governed by ${m.kind}: ${m.pointer}]`
+  );
+
+  return {
+    valid: missingSignposts.length === 0,
+    missingSignposts,
+    suggestedAdditions,
+  };
+}
+
+export function applyReplyLintCorrection(
+  replyBody: string,
+  report: ReplyLintReport
+): string {
+  if (report.valid || report.suggestedAdditions.length === 0) {
+    return replyBody;
+  }
+  return `${replyBody.trim()}\n\n---\n${report.suggestedAdditions.join("\n")}`;
+}
+
+// ── 9. Resume Refresh (Deliverable 6 - M5) ──────────────────────────────────
+
+export interface ResumeRefreshResult {
+  summary: string;
+  refreshedNotes: MemoryNote[];
+}
+
+export function buildResumeRefreshNotice(
+  registry: NoteRegistry,
+  options?: { maxNotes?: number }
+): ResumeRefreshResult {
+  const maxNotes = options?.maxNotes ?? 5;
+  const priorityKinds = new Set(["authority", "architectural_decision", "project_status"]);
+  const candidates: MemoryNote[] = [];
+
+  for (const note of registry.notes.values()) {
+    if (note.valid && priorityKinds.has(String(note.frontmatter.kind))) {
+      candidates.push(note);
+    }
+  }
+
+  const selected = candidates.slice(0, maxNotes);
+  if (selected.length === 0) {
+    return {
+      summary: "",
+      refreshedNotes: [],
+    };
+  }
+
+  const lines: string[] = [
+    `# [MEMORY RESUME REFRESH] Standing authority & decisions in memory:`,
+  ];
+
+  for (const n of selected) {
+    const pointer = n.frontmatter.source || n.id;
+    lines.push(`• [${n.frontmatter.kind}] ${pointer} — ${n.frontmatter.use_when}`);
+  }
+
+  return {
+    summary: lines.join("\n"),
+    refreshedNotes: selected,
   };
 }

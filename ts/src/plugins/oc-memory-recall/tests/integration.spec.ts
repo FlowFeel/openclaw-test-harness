@@ -66,10 +66,12 @@ describe("oc-memory-recall integration", () => {
       "gateway_start",
       "tool_result_persist",
       "after_tool_call",
+      "before_agent_reply",
     ]);
     expect(Array.from(api.tools.keys())).toEqual([
       "recall_status",
       "recall_verify",
+      "recall_catalogue",
     ]);
   });
 
@@ -206,11 +208,13 @@ describe("oc-memory-recall integration", () => {
       { sessionKey: "session-42" },
     );
 
-    expect(api.enqueuedInjections).toHaveLength(1);
-    expect(api.enqueuedInjections[0].sessionKey).toBe("session-42");
-    expect(api.enqueuedInjections[0].text).toContain("# [MEMORY CUE]");
-    expect(api.enqueuedInjections[0].text).toContain("src/auth/tokens.ts");
-    expect(api.enqueuedInjections[0].idempotencyKey).toContain("m1-hold-session-42-");
+    const m1Injections = api.enqueuedInjections.filter((inj) =>
+      inj.text.includes("# [MEMORY CUE]"),
+    );
+    expect(m1Injections).toHaveLength(1);
+    expect(m1Injections[0].sessionKey).toBe("session-42");
+    expect(m1Injections[0].text).toContain("src/auth/tokens.ts");
+    expect(m1Injections[0].idempotencyKey).toContain("m1-hold-session-42-");
 
     // 2. Second tool call in same session -> hold-once suppresses duplicate
     await afterToolCall(
@@ -222,11 +226,85 @@ describe("oc-memory-recall integration", () => {
       { sessionKey: "session-42" },
     );
 
-    expect(api.enqueuedInjections).toHaveLength(1); // Still 1
+    const m1InjectionsAfter = api.enqueuedInjections.filter((inj) =>
+      inj.text.includes("# [MEMORY CUE]"),
+    );
+    expect(m1InjectionsAfter).toHaveLength(1); // Still 1
 
     // 3. Telemetry reflects M1 fired and hit
     const statusTool = api.tools.get("recall_status")!;
     const statusResult = await statusTool.execute("call-telemetry", {});
     expect(statusResult.content[0].text).toContain("M1");
+  });
+
+  it("enqueues M5 resume refresh on gateway_start for authority notes", async () => {
+    const api = new FakePluginApiClient();
+    const loaderClient = new FakeNotesLoaderClient();
+    loaderClient.files = [SAMPLE_NOTE_FILE]; // architectural_decision kind
+
+    plugin.register(api as unknown as PluginApi, {
+      notesLoader: loaderClient.getLoader(),
+    });
+
+    await api.hooks.get("gateway_start")!({});
+
+    // M5 refresh injection was queued
+    expect(api.enqueuedInjections.length).toBeGreaterThanOrEqual(1);
+    const m5Injection = api.enqueuedInjections.find((inj) =>
+      inj.text.includes("# [MEMORY RESUME REFRESH]"),
+    );
+    expect(m5Injection).toBeDefined();
+    expect(m5Injection!.text).toContain("src/auth/tokens.ts");
+  });
+
+  it("recall_catalogue returns structured one-line catalogue (M7)", async () => {
+    const api = new FakePluginApiClient();
+    const loaderClient = new FakeNotesLoaderClient();
+    loaderClient.files = [SAMPLE_NOTE_FILE];
+
+    plugin.register(api as unknown as PluginApi, {
+      notesLoader: loaderClient.getLoader(),
+    });
+
+    await api.hooks.get("gateway_start")!({});
+
+    const catalogueTool = api.tools.get("recall_catalogue")!;
+    expect(catalogueTool).toBeDefined();
+
+    const result = await catalogueTool.execute("call-cat", {});
+    expect(result.content[0].text).toContain("# [MEMORY CATALOGUE] 1 of 1 memory notes:");
+    expect(result.content[0].text).toContain("[architectural_decision]");
+    expect(result.content[0].text).toContain("Token Expiry Invariants");
+  });
+
+  it("intercepts reply in before_agent_reply and appends missing signposts (M4 Linter)", async () => {
+    const api = new FakePluginApiClient();
+    const loaderClient = new FakeNotesLoaderClient();
+    loaderClient.files = [SAMPLE_NOTE_FILE];
+
+    plugin.register(api as unknown as PluginApi, {
+      notesLoader: loaderClient.getLoader(),
+    });
+
+    await api.hooks.get("gateway_start")!({});
+
+    const beforeReplyHook = api.hooks.get("before_agent_reply")!;
+    expect(beforeReplyHook).toBeDefined();
+
+    // 1. Reply mentioning tracked path 'src/auth/tokens.ts' without signpost
+    const rawReply = "I have modified src/auth/tokens.ts to use 1800s expiry.";
+    const result1 = (await beforeReplyHook({ cleanedBody: rawReply })) as {
+      handled: boolean;
+      reply: { text: string };
+    };
+
+    expect(result1).toBeDefined();
+    expect(result1.handled).toBe(true);
+    expect(result1.reply.text).toContain("[Memory Notice: Path 'src/auth/tokens.ts' governed by architectural_decision: src/auth/tokens.ts]");
+
+    // 2. Reply that already includes signpost -> untouched
+    const compliantReply = "Updated per src/auth/tokens.ts authority note.";
+    const result2 = await beforeReplyHook({ cleanedBody: compliantReply });
+    expect(result2).toBeUndefined();
   });
 });

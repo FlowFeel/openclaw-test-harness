@@ -28,6 +28,11 @@ import {
   recordFire,
   recordHit,
   verifyNotes,
+  buildNoteCatalogue,
+  lintAgentReply,
+  applyReplyLintCorrection,
+  buildResumeRefreshNotice,
+  injectToolDescriptionNotes,
   type MemoryNote,
   type NoteRegistry,
   type RecallTelemetryState,
@@ -96,6 +101,26 @@ export default definePluginEntry({
         api.logger?.info?.(
           `[oc-memory-recall] indexed ${reg.notes.size} notes (${validCount} valid) across ${reg.kindToNotes.size} kinds`,
         );
+
+        // ── Resume Refresh (Deliverable 6 - M5) ────────────────────────
+        const refresh = buildResumeRefreshNotice(reg);
+        if (refresh.summary) {
+          for (const note of refresh.refreshedNotes) {
+            telemetry = recordFire(telemetry, note.frontmatter.kind, "M5");
+            telemetry = recordHit(telemetry, note.frontmatter.kind, "M5");
+          }
+          if (typeof api.session?.workflow?.enqueueNextTurnInjection === "function") {
+            await api.session.workflow.enqueueNextTurnInjection({
+              text: refresh.summary,
+              idempotencyKey: `m5-refresh-${reg.notes.size}`,
+            });
+          } else if (typeof api.enqueueNextTurnInjection === "function") {
+            await api.enqueueNextTurnInjection({
+              text: refresh.summary,
+              idempotencyKey: `m5-refresh-${reg.notes.size}`,
+            });
+          }
+        }
       } catch (err) {
         api.logger?.error?.(
           `[oc-memory-recall] gateway_start failed: ${String(err)}`,
@@ -233,6 +258,34 @@ export default definePluginEntry({
       }
     });
 
+    // ── Hook: before_agent_reply (Deliverable 6 - M4 Linter) ─────────
+    api.on("before_agent_reply", async (event: Record<string, unknown>) => {
+      try {
+        const cleanedBody = typeof event.cleanedBody === "string" ? event.cleanedBody : "";
+        if (!cleanedBody) return undefined;
+
+        const lint = lintAgentReply(cleanedBody, registry);
+        if (lint.valid) return undefined;
+
+        // Record M4 telemetry for flagged notes
+        for (const item of lint.missingSignposts) {
+          telemetry = recordFire(telemetry, item.kind, "M4");
+          telemetry = recordHit(telemetry, item.kind, "M4");
+        }
+
+        const corrected = applyReplyLintCorrection(cleanedBody, lint);
+        return {
+          handled: true,
+          reply: { text: corrected, body: corrected },
+        };
+      } catch (err) {
+        api.logger?.warn?.(
+          `[oc-memory-recall] before_agent_reply lint error: ${String(err)}`,
+        );
+        return undefined;
+      }
+    });
+
     // ── Tool: recall_status ──────────────────────────────────────────
     api.registerTool({
       name: "recall_status",
@@ -278,6 +331,31 @@ export default definePluginEntry({
             : "";
           return {
             content: [{ type: "text" as const, text: `${verdict}: ${summary}${details}` }],
+          };
+        } catch (err) {
+          return {
+            content: [{ type: "text" as const, text: `failed: ${String(err)}` }],
+          };
+        }
+      },
+    });
+
+    // ── Tool: recall_catalogue (Deliverable 6 - M7) ──────────────────
+    api.registerTool({
+      name: "recall_catalogue",
+      description:
+        "Browse memory note catalogue — 1-line index of notes, kinds, live pointers, and scope conditions.",
+      parameters: Type.Object({
+        kind: Type.Optional(Type.String({ description: "Filter catalogue by note kind" })),
+        maxEntries: Type.Optional(Type.Number({ description: "Maximum entries to return (default: 50)" })),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        try {
+          const kinds = typeof params.kind === "string" ? [params.kind] : undefined;
+          const maxEntries = typeof params.maxEntries === "number" ? params.maxEntries : undefined;
+          const report = buildNoteCatalogue(registry, { kinds, maxEntries });
+          return {
+            content: [{ type: "text" as const, text: report.catalogue }],
           };
         } catch (err) {
           return {

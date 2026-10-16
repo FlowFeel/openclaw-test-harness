@@ -20,6 +20,11 @@ import {
   recordFollow,
   recordHit,
   verifyNotes,
+  injectToolDescriptionNotes,
+  buildNoteCatalogue,
+  lintAgentReply,
+  applyReplyLintCorrection,
+  buildResumeRefreshNotice,
   type MemoryNote,
 } from "../src/memory-recall-logic.js";
 
@@ -239,5 +244,115 @@ describe("Status and verification builders", () => {
     expect(result.invalidCount).toBe(1);
     expect(result.issues).toHaveLength(1);
     expect(result.issues[0].id).toBe("invalid.md");
+  });
+});
+
+describe("M2: Tool-description note injection", () => {
+  it("injects memory signposts into tool descriptions", () => {
+    const rawNote = `---
+kind: authority
+use_when: executing database migrations
+does_not_apply_when: read queries
+provenance: "Architecture DB team"
+source: "docs/db-migrations.md"
+tool: "run_migrations"
+---
+# Migration note`;
+    const note = parseNoteFrontmatter(rawNote, "db-note.md");
+    const registry = createRegistry([note]);
+
+    const tools = [
+      { name: "run_migrations", description: "Executes pending schema migrations." },
+      { name: "query_db", description: "Runs read query." },
+    ];
+
+    const result = injectToolDescriptionNotes(tools, registry);
+    expect(result.modifiedCount).toBe(1);
+    expect(result.notesApplied).toHaveLength(1);
+    expect(result.tools[0].description).toContain("docs/db-migrations.md");
+    expect(result.tools[0].description).toContain("[Memory Authority:");
+    expect(result.tools[1].description).toBe("Runs read query.");
+  });
+});
+
+describe("M7: Note catalogue", () => {
+  it("generates a clean 1-line index per note", () => {
+    const note = parseNoteFrontmatter(VALID_NOTE_RAW, "note1.md");
+    const registry = createRegistry([note]);
+
+    const report = buildNoteCatalogue(registry);
+    expect(report.totalListed).toBe(1);
+    expect(report.catalogue).toContain("# [MEMORY CATALOGUE] 1 of 1 memory notes:");
+    expect(report.catalogue).toContain("[house_style] \"House Style Guidelines\" (docs/coding-style.md)");
+    expect(report.catalogue).toContain("Writing or modifying plugin logic seams");
+  });
+});
+
+describe("M4: Pre-reply review gate linter", () => {
+  it("detects missing signpost when replying about a governed path without citation", () => {
+    const rawNote = `---
+kind: authority
+use_when: changing token auth
+does_not_apply_when: ui
+provenance: "Security"
+source: "src/auth/jwt.ts"
+paths:
+  - "src/auth/jwt.ts"
+---
+# Token note`;
+    const note = parseNoteFrontmatter(rawNote, "jwt.md");
+    const registry = createRegistry([note]);
+
+    const badReply = "I have updated src/auth/jwt.ts with the new signature.";
+    const lint = lintAgentReply(badReply, registry);
+    expect(lint.valid).toBe(false);
+    expect(lint.missingSignposts).toHaveLength(1);
+    expect(lint.missingSignposts[0].pointer).toBe("src/auth/jwt.ts");
+
+    const corrected = applyReplyLintCorrection(badReply, lint);
+    expect(corrected).toContain("governed by authority: src/auth/jwt.ts");
+  });
+
+  it("passes when signpost/pointer is present in reply", () => {
+    const rawNote = `---
+kind: authority
+use_when: changing token auth
+does_not_apply_when: ui
+provenance: "Security"
+source: "src/auth/jwt.ts"
+paths:
+  - "src/auth/jwt.ts"
+---
+# Token note`;
+    const note = parseNoteFrontmatter(rawNote, "jwt.md");
+    const registry = createRegistry([note]);
+
+    const goodReply = "Updated according to authority note src/auth/jwt.ts.";
+    const lint = lintAgentReply(goodReply, registry);
+    expect(lint.valid).toBe(true);
+    expect(lint.missingSignposts).toHaveLength(0);
+  });
+});
+
+describe("M5: Resume refresh", () => {
+  it("summarizes standing authority and architectural decisions", () => {
+    const note1 = parseNoteFrontmatter(VALID_NOTE_RAW, "note1.md"); // house_style
+    const note2 = parseNoteFrontmatter(
+      `---
+kind: architectural_decision
+use_when: state machine updates
+does_not_apply_when: none
+provenance: "Architecture"
+source: "docs/arch.md"
+---
+# Arch`,
+      "note2.md",
+    );
+    const registry = createRegistry([note1, note2]);
+
+    const refresh = buildResumeRefreshNotice(registry);
+    expect(refresh.refreshedNotes).toHaveLength(1);
+    expect(refresh.summary).toContain("# [MEMORY RESUME REFRESH]");
+    expect(refresh.summary).toContain("docs/arch.md");
   });
 });

@@ -1,16 +1,18 @@
 {
   "id": "oc-memory-recall",
   "name": "OcMemoryRecall",
-  "description": "Memory-recall delivery arms — note registry, telemetry, and M6 marker-on-file-read signposts",
+  "description": "Memory-recall delivery arms — note registry, telemetry, M6 file signposts, M1 event push, M2 tool notes, M4 review gate, M7 catalogue, and M5 resume refresh",
   "contracts": {
     "tools": [
       "recall_status",
-      "recall_verify"
+      "recall_verify",
+      "recall_catalogue"
     ],
     "hooks": [
       "gateway_start",
       "tool_result_persist",
-      "after_tool_call"
+      "after_tool_call",
+      "before_agent_reply"
     ]
   },
   "activation": {
