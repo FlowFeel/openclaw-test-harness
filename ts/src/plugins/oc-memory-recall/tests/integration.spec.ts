@@ -131,6 +131,46 @@ describe("oc-memory-recall integration", () => {
     expect(statusResult.content[0].text).toContain("[architectural_decision][M6]: fired=1 hit=1 followed=0");
   });
 
+
+  it("boot-flood guard: passes subdirs to the loader and filters non-kind files before parsing", async () => {
+    const api = new FakePluginApiClient();
+    const seen: Array<{ dir: string; subdirs?: string[] }> = [];
+    const dailyLog: RawNoteFile = {
+      id: "2026-06-12.md",
+      filePath: "memory/2026-06-12.md",
+      rawContent: "---\ndate: 2026-06-12\nsessions: 1\n---\n# Daily log\n episodic content\n",
+    };
+    const noFrontmatter: RawNoteFile = {
+      id: "INDEX.md",
+      filePath: "memory/INDEX.md",
+      rawContent: "# Index\nplain markdown, no frontmatter\n",
+    };
+    const loader: MemoryNotesLoader = (dir, subdirs) => {
+      seen.push({ dir, subdirs });
+      return [SAMPLE_NOTE_FILE, dailyLog, noFrontmatter];
+    };
+    plugin.register(api as unknown as PluginApi, {
+      notesLoader: loader,
+      subdirs: ["authoritative"],
+    });
+
+    const start = api.hooks.get("gateway_start") as (e?: unknown, c?: unknown) => Promise<void>;
+    await start(undefined, undefined);
+
+    // Loader received the configured subdirs
+    expect(seen.length).toBe(1);
+    expect(seen[0].subdirs).toEqual(["authoritative"]);
+
+    // Registry holds only the kind-bearing authoritative note — the daily log
+    // and the plain markdown file never enter indexing.
+    const status = await api.tools.get("recall_status")!.execute("t1", {});
+    const text = (status as { content: Array<{ type: string; text: string }> }).content
+      .map((c) => c.text)
+      .join("\n");
+    expect(text).toContain("1 total (1 valid, 0 invalid)");
+    expect(text).not.toContain("unknown");
+  });
+
   it("handles structured array message content in tool_result_persist", async () => {
     const api = new FakePluginApiClient();
     const loaderClient = new FakeNotesLoaderClient();

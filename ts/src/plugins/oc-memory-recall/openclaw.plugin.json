@@ -27,6 +27,12 @@
         "default": "memory",
         "description": "Root directory containing memory note markdown files"
       },
+      "subdirs": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": [],
+        "description": "Explicitly enumerated subdirectories of notesDir to scan (flat, non-recursive). Files without a kind: frontmatter block are never indexed."
+      },
       "markerPrefix": {
         "type": "string",
         "default": "# [SIGNPOST] May be out of date; the current version is kept in memory:",
