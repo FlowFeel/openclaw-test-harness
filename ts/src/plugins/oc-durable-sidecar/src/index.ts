@@ -5,7 +5,8 @@
  * Registers seven durable proxy tools that talk to the prime-durable sidecar
  * HTTP API on loopback. Every tool: build request (pure seam) → execute
  * (I/O wrapper) → interpret (pure seam) → render as text content.
- * gateway_start fires a sidecar health probe and logs the verdict.
+ * Also registers an HTTP callback endpoint at /api/v1/durable/callback
+ * so task outcomes can resume conversation lanes with full context.
  *
  * @invariants
  * - No logic in this file — wiring only (build → execute → interpret).
@@ -34,6 +35,7 @@ import {
   interpretTransportFailure,
   type InterpretOptions,
   type ListFilters,
+  type NotifySpec,
   type SidecarRequest,
 } from "./durable-sidecar-logic.js";
 import { makeHttpFetchJson, type FetchJson } from "./durable-sidecar-io.js";
@@ -78,6 +80,66 @@ export default definePluginEntry({
       }
     }
 
+    // ── HTTP Route: /api/v1/durable/callback ────────────────────────
+    if (typeof (api as any).registerHttpRoute === "function") {
+      (api as any).registerHttpRoute({
+        path: "/api/v1/durable/callback",
+        auth: "plugin",
+        match: "exact",
+        handler: async (req: any, res: any) => {
+          if (req.method !== "POST") {
+            res.statusCode = 405;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "method not allowed" }));
+            return;
+          }
+          let bodyStr = "";
+          req.on("data", (chunk: any) => {
+            bodyStr += chunk;
+          });
+          req.on("end", async () => {
+            try {
+              const body = JSON.parse(bodyStr || "{}");
+              const sessionKey = body.session_key;
+              const message = body.message || (body.payload ? JSON.stringify(body.payload) : "Durable task finished");
+              if (!sessionKey) {
+                res.statusCode = 400;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "session_key required" }));
+                return;
+              }
+
+              // Wake or schedule session turn
+              let wakeOk = false;
+              try {
+                // Dynamically load callGateway from openclaw dist if available
+                const { c: callGateway } = await import("/usr/lib/nodejs22/lib/node_modules/openclaw/dist/call-BlqKbSL2.js" as any);
+                const wakeResult = await callGateway({
+                  method: "wake",
+                  params: {
+                    mode: "now",
+                    text: message,
+                    sessionKey,
+                  },
+                });
+                wakeOk = Boolean((wakeResult as any)?.ok);
+              } catch (callErr) {
+                api.logger?.warn?.(`[oc-durable-sidecar] wake failed for ${sessionKey}: ${String(callErr)}`);
+              }
+
+              res.statusCode = 200;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ ok: true, session_key: sessionKey, wake: wakeOk }));
+            } catch (err) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: String(err) }));
+            }
+          });
+        },
+      });
+    }
+
     // ── Hook: gateway_start ──────────────────────────────────────────
     api.on("gateway_start", async () => {
       try {
@@ -114,15 +176,27 @@ export default definePluginEntry({
       name: "durable_spawn",
       description:
         "Spawn a durable task on the absurd-backed worker (checkpointed, " +
-        "crash-recoverable). Returns a task id. " + SIDECAR_DOC,
+        "crash-recoverable). Supports continuity callbacks via `notify`. Returns a task id. " + SIDECAR_DOC,
       parameters: Type.Object({
         task_name: Type.String({ description: "Registered task name (allowlist enforced by the sidecar)" }),
         params: Type.Object({}, { description: "JSON params passed to the task handler" }),
         queue: Type.Optional(Type.String({ description: "Queue override" })),
+        notify: Type.Optional(
+          Type.Object({
+            session_key: Type.Optional(Type.String({ description: "OpenClaw session key to wake on task completion" })),
+            url: Type.Optional(Type.String({ description: "HTTP Webhook URL to POST task completion result" })),
+            custom_message: Type.Optional(Type.String({ description: "Custom notification message text" })),
+          }, { description: "Notification target on completion or failure" }),
+        ),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
-        const p = params as { task_name: string; params: Record<string, unknown>; queue?: string };
-        return execute(buildSpawnRequest(p.task_name, p.params ?? {}, p.queue));
+        const p = params as {
+          task_name: string;
+          params: Record<string, unknown>;
+          queue?: string;
+          notify?: NotifySpec;
+        };
+        return execute(buildSpawnRequest(p.task_name, p.params ?? {}, p.queue, p.notify));
       },
     });
 

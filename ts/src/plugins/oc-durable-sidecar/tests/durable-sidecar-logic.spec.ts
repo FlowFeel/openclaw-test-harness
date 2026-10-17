@@ -212,3 +212,18 @@ describe("interpret", () => {
     expect(out.summary).toContain("ECONNREFUSED");
   });
 });
+
+  it("buildSpawnRequest preserves notify parameter when provided", () => {
+    const notify = { session_key: "agent:main:telegram:group:123", custom_message: "Finished" };
+    const req = buildSpawnRequest("agent_step", { prompt: "run tests" }, "default", notify);
+    expect(req).toEqual({
+      method: "POST",
+      path: "/spawn",
+      body: {
+        task_name: "agent_step",
+        params: { prompt: "run tests" },
+        queue: "default",
+        notify,
+      },
+    });
+  });
