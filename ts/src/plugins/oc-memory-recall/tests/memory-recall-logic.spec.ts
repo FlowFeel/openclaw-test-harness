@@ -32,8 +32,10 @@ import {
   projectCueLine,
   lintNoteSchemaV2,
   isProsePointer,
+  resolvePointer,
   type MemoryNote,
 } from "../src/memory-recall-logic.js";
+import { formatEventPushCue } from "../src/event-push-logic.js";
 
 const VALID_NOTE_RAW = `---
 kind: house_style
@@ -826,5 +828,75 @@ Body`, "event-warn.md");
 
     const lint = lintNoteSchemaV2(misplacedEvent);
     expect(lint.warnings.some((w) => w.includes("Field 'event' present on non-event kind"))).toBe(true);
+  });
+});
+
+describe("resolvePointer (exact-path pointer guarantee)", () => {
+  it("uses path-shaped source verbatim as the pointer", () => {
+    const note = parseNoteFrontmatter(
+      `---\nkind: house_style\nuse_when: x\ndoes_not_apply_when: y\nprovenance: p\nsource: "docs/style.md"\n---\n# T\n`,
+      "notes/style-note.md",
+    );
+    expect(resolvePointer(note)).toEqual({ pointer: "docs/style.md" });
+  });
+
+  it("demotes prose source to context and falls back to the note's own id", () => {
+    const note = parseNoteFrontmatter(
+      `---\nkind: house_style\nuse_when: x\ndoes_not_apply_when: y\nprovenance: p\nsource: "the wiki entry on style guidelines"\n---\n# T\n`,
+      "notes/style-note.md",
+    );
+    const r = resolvePointer(note);
+    expect(r.pointer).toBe("notes/style-note");
+    expect(r.context).toBe("the wiki entry on style guidelines");
+  });
+
+  it("demotes URI sources (index-hop risk)", () => {
+    const note = parseNoteFrontmatter(
+      `---\nkind: authority\nuse_when: x\ndoes_not_apply_when: y\nprovenance: p\nsource: "https://wiki.example.org/Authority"\n---\n# T\n`,
+      "notes/authority-note.md",
+    );
+    const r = resolvePointer(note);
+    expect(r.pointer).toBe("notes/authority-note");
+    expect(r.context).toBe("https://wiki.example.org/Authority");
+  });
+
+  it("falls back to the registry id when source is empty", () => {
+    const note = parseNoteFrontmatter(
+      `---\nkind: domain_fact\nuse_when: x\ndoes_not_apply_when: y\nprovenance: p\nsource: ""\n---\n# T\n`,
+      "notes/fact.md",
+    );
+    expect(resolvePointer(note).pointer).toBe("notes/fact");
+  });
+
+  it("projectCueLine uses the resolved pointer (plain form)", () => {
+    const note = parseNoteFrontmatter(
+      `---\nkind: glossary\nuse_when: x\ndoes_not_apply_when: y\nprovenance: p\nsource: "Glossary of Terms"\n---\n# T\n`,
+      "notes/glossary-entry.md",
+    );
+    const cue = projectCueLine(note, { arm: "file_read" });
+    expect(cue.cueText).toBe("T — see notes/glossary-entry");
+    expect(cue.cueText).not.toContain("Glossary of Terms");
+  });
+
+  it("v1 fallback marker carries the exact path with prose source as context", () => {
+    const note = parseNoteFrontmatter(
+      `---\nkind: environment\nuse_when: host work\ndoes_not_apply_when: n/a\nprovenance: p\nsource: "the platform wiki"\n---\n# T\n`,
+      "notes/env-note.md",
+    );
+    const marker = formatFileMarker(note, "# [SIGNPOST] current version in memory:");
+    // Pointer token must be the exact path; prose source demoted to trailing context
+    expect(marker).toContain(": notes/env-note (the platform wiki) (host work)");
+    expect(marker.startsWith("# [SIGNPOST] current version in memory: notes/env-note")).toBe(true);
+  });
+
+  it("formatEventPushCue resolves prose sources to the registry path", () => {
+    const note = parseNoteFrontmatter(
+      `---\nkind: project_status\nuse_when: x\ndoes_not_apply_when: y\nprovenance: p\nsource: "Standup Board"\n---\n# T\n`,
+      "notes/status.md",
+    );
+    const cue = formatEventPushCue(note, "hold-once");
+    // Pointer token is the exact path; prose source may appear only as demoted context
+    expect(cue).toContain("• notes/status — via: Standup Board");
+    expect(cue.indexOf("notes/status")).toBeLessThan(cue.indexOf("Standup Board"));
   });
 });

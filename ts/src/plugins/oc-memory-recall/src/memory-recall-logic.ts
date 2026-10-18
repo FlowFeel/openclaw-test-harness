@@ -540,7 +540,7 @@ export function projectCueLine(
   context: CueContext = { arm: "file_read" },
 ): CueProjectionResult {
   const compression = getKindCompression(note);
-  const pointer = note.frontmatter.source || note.id;
+  const { pointer, context: pointerContext } = resolvePointer(note);
   const bind = extractBindPhrase(note);
 
   // 1. Skip-list kinds (methods, mistakes)
@@ -622,9 +622,10 @@ export function formatFileMarker(
   }
 
   // Backwards-compatible v1 fallback
-  const pointer = note.frontmatter.source || note.id;
+  const { pointer, context: pointerContext } = resolvePointer(note);
   const useWhen = note.frontmatter.use_when ? ` (${note.frontmatter.use_when})` : "";
-  return `${prefix} ${pointer}${useWhen}`;
+  const contextSuffix = pointerContext ? ` (${pointerContext})` : "";
+  return `${prefix} ${pointer}${contextSuffix}${useWhen}`;
 }
 
 export interface MarkerProcessResult {
@@ -729,6 +730,33 @@ export function isProsePointer(pathStr: string): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Resolves the POINTER slot for any cue or signpost emission.
+ *
+ * Bench rule 1 (itch main run): the cue must carry an exact readable path.
+ * Index hops keep ~1/4 of the follow effect; wrong paths are copied verbatim
+ * by the agent (12/42 copies at proximity 0). `source` is therefore only
+ * trusted when it is itself path-shaped; anything else (URIs, wiki titles,
+ * prose) demotes to parenthetical context and the note's own registry id —
+ * which is always a readable workspace-relative path — becomes the pointer.
+ *
+ * Pure: no I/O. Registered by every emission site (projection, v1 fallback,
+ * tool signposts, catalogue, resume refresh, reply lint).
+ */
+export function resolvePointer(note: MemoryNote): {
+  pointer: string;
+  context?: string;
+} {
+  const source = note.frontmatter.source;
+  const id = note.id.replace(/\.md$/, "");
+  if (typeof source === "string" && source.trim().length > 0 && !isProsePointer(source)) {
+    return { pointer: source.trim() };
+  }
+  const contextNote =
+    typeof source === "string" && source.trim().length > 0 ? source.trim() : undefined;
+  return { pointer: id, context: contextNote };
 }
 
 export function lintNoteSchemaV2(note: MemoryNote): { errors: string[]; warnings: string[] } {
@@ -859,9 +887,10 @@ export interface ToolDescriptionInjectionResult {
 }
 
 export function formatToolNoteSignpost(note: MemoryNote): string {
-  const pointer = note.frontmatter.source || note.id;
+  const { pointer, context } = resolvePointer(note);
+  const contextSuffix = context ? ` — via: ${context}` : "";
   const useWhen = note.frontmatter.use_when ? ` — ${note.frontmatter.use_when}` : "";
-  return `\n[Memory Authority: ${pointer} (${note.frontmatter.kind})${useWhen}]`;
+  return `\n[Memory Authority: ${pointer} (${note.frontmatter.kind})${contextSuffix}${useWhen}]`;
 }
 
 export function injectToolDescriptionNotes(
@@ -908,7 +937,7 @@ export function injectToolDescriptionNotes(
 
     for (const n of matchingNotes) {
       const signpost = formatToolNoteSignpost(n);
-      const pointer = n.frontmatter.source || n.id;
+      const { pointer } = resolvePointer(n);
       if (!desc.includes(pointer)) {
         desc += signpost;
         toolModified = true;
@@ -969,9 +998,10 @@ export function buildNoteCatalogue(
   ];
 
   for (const n of selected) {
-    const pointer = n.frontmatter.source || n.id;
+    const { pointer, context } = resolvePointer(n);
+    const contextSuffix = context ? ` — via: ${context}` : "";
     const title = n.frontmatter.title ? ` "${n.frontmatter.title}"` : "";
-    lines.push(`• [${n.frontmatter.kind}]${title} (${pointer}) — use when: ${n.frontmatter.use_when}`);
+    lines.push(`• [${n.frontmatter.kind}]${title} (${pointer}${contextSuffix}) — use when: ${n.frontmatter.use_when}`);
   }
 
   return {
@@ -1017,7 +1047,7 @@ export function lintAgentReply(
           note.frontmatter.kind === "silent_trap" ||
           note.frontmatter.kind === "architectural_decision"
         ) {
-          const pointer = note.frontmatter.source || note.id;
+          const { pointer } = resolvePointer(note);
           const noteTitle = note.frontmatter.title?.toLowerCase();
           const hasCitation =
             (note.id !== indexedPath && lowerBody.includes(note.id.toLowerCase())) ||
@@ -1101,8 +1131,9 @@ export function buildResumeRefreshNotice(
       const cue = projectCueLine(n, { arm: "resume_refresh" });
       lines.push(`• [${n.frontmatter.kind}] ${cue.cueText}`);
     } else {
-      const pointer = n.frontmatter.source || n.id;
-      lines.push(`• [${n.frontmatter.kind}] ${pointer} — ${n.frontmatter.use_when}`);
+      const { pointer, context } = resolvePointer(n);
+      const contextSuffix = context ? ` — via: ${context}` : "";
+      lines.push(`• [${n.frontmatter.kind}] ${pointer}${contextSuffix} — ${n.frontmatter.use_when}`);
     }
   }
 
