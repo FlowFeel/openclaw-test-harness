@@ -347,4 +347,97 @@ describe("oc-memory-recall integration", () => {
     const result2 = await beforeReplyHook({ cleanedBody: compliantReply });
     expect(result2).toBeUndefined();
   });
+
+  it("Schema v2 integration: recall_verify surfaces prose pointer, predicate lint errors and warnings", async () => {
+    const api = new FakePluginApiClient();
+    const badV2Note: RawNoteFile = {
+      id: "bad-v2.md",
+      filePath: "memory/bad-v2.md",
+      rawContent: `---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "src/style.ts"
+paths:
+  - "all files in repo"
+predicate: "always follow instructions. Do not deviate"
+updated: "not-iso-date"
+event: "lint fails"
+---
+# Bad Note Content
+`,
+    };
+    const loader: MemoryNotesLoader = () => [badV2Note];
+    plugin.register(api as unknown as PluginApi, { notesLoader: loader });
+
+    const verifyTool = api.tools.get("recall_verify")!;
+    const result = await verifyTool.execute("c1", {});
+    const text = result.content[0].text;
+    expect(text).toContain("failed:");
+    expect(text).toContain("prose/URI pointer");
+    expect(text).toContain("sentence-internal period");
+    expect(text).toContain("imperative mood");
+    expect(text).toContain("warnings");
+    expect(text).toContain("not a valid ISO 8601 date string");
+  });
+
+  it("Schema v2 integration: tool_result_persist emits three-slot cue for v2 notes and suppresses skip-list notes", async () => {
+    const api = new FakePluginApiClient();
+    const v2ClaimNote: RawNoteFile = {
+      id: "v2-claim.md",
+      filePath: "memory/v2-claim.md",
+      rawContent: `---
+kind: house_style
+use_when: Writing plugins
+does_not_apply_when: Writing tests
+provenance: "2026-10-18"
+source: "src/auth/jwt.ts"
+title: "JWT Invariants"
+predicate: "changed since this summary: pure logic required"
+---
+# JWT Rules
+`,
+    };
+    const skipListNote: RawNoteFile = {
+      id: "v2-skip.md",
+      filePath: "memory/v2-skip.md",
+      rawContent: `---
+kind: procedure
+use_when: running tests
+does_not_apply_when: deploy
+provenance: "2026-10-18"
+source: "src/auth/tests.ts"
+predicate: "step 1"
+---
+# Procedure
+`,
+    };
+    const loader: MemoryNotesLoader = () => [v2ClaimNote, skipListNote];
+    plugin.register(api as unknown as PluginApi, { notesLoader: loader });
+
+    const persistHook = api.hooks.get("tool_result_persist");
+
+    // 1. Reading file tracked by v2 claim note
+    const event1 = {
+      toolName: "read_file",
+      params: { path: "src/auth/jwt.ts" },
+      message: { content: "original jwt content" },
+    };
+    const outcome1 = (await persistHook!(event1)) as { message: { content: string } };
+    expect(outcome1).toBeDefined();
+    expect(outcome1.message.content).toContain(
+      "changed since this summary: pure logic required: JWT Invariants — see src/auth/jwt.ts"
+    );
+
+    // 2. Reading file tracked only by skip-list note -> suppressed, untouched (returns undefined)
+    const event2 = {
+      toolName: "read_file",
+      params: { path: "src/auth/tests.ts" },
+      message: { content: "original test content" },
+    };
+    const outcome2 = await persistHook!(event2);
+    expect(outcome2).toBeUndefined();
+  });
 });
+

@@ -18,7 +18,7 @@
  * - Tested with inline mock data and zero filesystem fixtures.
  */
 
-import type { MemoryNote, NoteRegistry } from "./memory-recall-logic.js";
+import { projectCueLine, type MemoryNote, type NoteRegistry } from "./memory-recall-logic.js";
 
 export type DeliveryPolicy = "hold-once" | "let-run";
 
@@ -145,6 +145,14 @@ export function matchesEvent(note: MemoryNote, event: EventPushTriggerEvent): bo
     }
   }
 
+  // 4. Schema v2 event matching: match trigger string
+  if (note.frontmatter.event) {
+    const ev = String(note.frontmatter.event).toLowerCase().trim();
+    if (ev.length > 0 && combinedEventText.includes(ev)) {
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -156,6 +164,14 @@ export function formatEventPushCue(
   note: MemoryNote,
   policy: DeliveryPolicy
 ): string {
+  if (note.frontmatter.event) {
+    const cue = projectCueLine(note, { arm: "event_push" });
+    return (
+      `# [MEMORY CUE] Relevant memory note for current workflow (${note.frontmatter.kind}):\n` +
+      `• ${cue.cueText}`
+    );
+  }
+
   const pointer = note.frontmatter.source || note.id;
   const useWhen = note.frontmatter.use_when ? ` — ${note.frontmatter.use_when}` : "";
   return (

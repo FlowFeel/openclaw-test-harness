@@ -380,12 +380,17 @@ export default definePluginEntry({
           const notes = [...Array.from(registry.notes.values()), ...skippedParsed];
           const verification = verifyNotes(notes);
           const verdict = verification.invalidCount > 0 ? "failed" : "ok";
-          const summary = `verified ${notes.length} notes: ${verification.validCount} valid, ${verification.invalidCount} invalid`;
-          const details = verification.issues.length > 0
+          const warnCount = verification.warnings ? verification.warnings.length : 0;
+          const warnText = warnCount > 0 ? ` (${warnCount} warnings)` : "";
+          const summary = `verified ${notes.length} notes: ${verification.validCount} valid, ${verification.invalidCount} invalid${warnText}`;
+          const issueDetails = verification.issues.length > 0
             ? `\nissues:\n${verification.issues.map((i) => `  - ${i.id}: ${i.errors.join(", ")}`).join("\n")}`
             : "";
+          const warnDetails = verification.warnings && verification.warnings.length > 0
+            ? `\nwarnings:\n${verification.warnings.map((w) => `  - ${w.id}: ${w.warnings.join(", ")}`).join("\n")}`
+            : "";
           return {
-            content: [{ type: "text" as const, text: `${verdict}: ${summary}${details}` }],
+            content: [{ type: "text" as const, text: `${verdict}: ${summary}${issueDetails}${warnDetails}` }],
           };
         } catch (err) {
           return {
