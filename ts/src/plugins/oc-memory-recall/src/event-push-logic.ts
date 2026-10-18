@@ -18,7 +18,7 @@
  * - Tested with inline mock data and zero filesystem fixtures.
  */
 
-import { projectCueLine, type MemoryNote, type NoteRegistry } from "./memory-recall-logic.js";
+import { projectCueLine, resolvePointer, type MemoryNote, type NoteRegistry } from "./memory-recall-logic.js";
 
 export type DeliveryPolicy = "hold-once" | "let-run";
 
@@ -172,11 +172,12 @@ export function formatEventPushCue(
     );
   }
 
-  const pointer = note.frontmatter.source || note.id;
+  const { pointer, context } = resolvePointer(note);
+  const contextSuffix = context ? ` — via: ${context}` : "";
   const useWhen = note.frontmatter.use_when ? ` — ${note.frontmatter.use_when}` : "";
   return (
     `# [MEMORY CUE] Relevant memory note for current workflow (${note.frontmatter.kind}):\n` +
-    `• ${pointer}${useWhen}`
+    `• ${pointer}${contextSuffix}${useWhen}`
   );
 }
 
