@@ -48,7 +48,31 @@ paths:
 - `does_not_apply_when`: Scope boundaries preventing misapplication.
 - `provenance`: Origin basis and freshness age.
 - `source`: Primary authoritative file or live-source pointer.
-- `paths` (optional): Additional file paths or patterns that trigger the M6 marker when read.
+- `paths` (optional): Exact filesystem paths that trigger the M6 marker when read (prose/URIs rejected by lint).
+- `bind` (optional): Explicit anchor line override; falls back to `title` or first `# Heading`.
+- `predicate` (optional): Single free-language clause (≤140 chars, no sentence-internal periods, no imperative mood).
+- `event` (optional): Awaited event string triggering open loops or case obligations.
+- `updated` (optional): ISO 8601 timestamp for condition-gated staleness validation.
+
+---
+
+## Schema v2: Three-Slot Cue Grammar & Predicate Ordering
+
+Schema v2 projects authoritative memory notes into fixed three-slot cues without closed vocabularies:
+
+```text
+[PREDICATE]: [BIND] — see [POINTER]
+```
+
+### Predicate Order Rules
+1. **Claim-type**: Licence leads — **PREDICATE before BIND** (`changed since this summary: House Style Guidelines — see docs/coding-style.md`).
+2. **Obligation / Event**: Event anchors, obligation closes — **BIND before PREDICATE** (`PR #58 Review, waiting for: test suite passing — you owe a step when this happens; see docs/pr-process.md`).
+3. **Plain**: Compressed form — **BIND + POINTER only** (`System Architecture Glossary — see docs/glossary.md`).
+4. **Skip-list**: High-FPR methods and mistakes (`procedure`, `workaround`, `historical_incident`) emit **no cue line** (0 token overhead).
+
+### Condition Gating (Truthfulness Invariant)
+- **File Read (stale value in view)**: Predicate claims permitted.
+- **Context Injection (no value in view)**: Predicate claims suppressed $\to$ emits plain BIND + POINTER to prevent negative prompt drag.
 
 ---
 

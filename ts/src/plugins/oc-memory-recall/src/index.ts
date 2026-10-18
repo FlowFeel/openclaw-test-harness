@@ -76,7 +76,11 @@ export default definePluginEntry({
   description:
     "Memory-recall delivery arms — note registry, telemetry, and M6 marker-on-file-read signposts",
   register(api: PluginApi, config?: Record<string, unknown>) {
-    const cfg = (config as OcMemoryRecallConfig) ?? {};
+    // Config resolution order: explicit 2nd arg (test doubles / programmatic
+    // registration) → api.pluginConfig (the real host passes the plugin-scoped
+    // entry config there — buildPluginApi puts it on the API object, NOT as the
+    // register() argument) → empty (plugin defaults).
+    const cfg = (config ?? (api as { pluginConfig?: unknown }).pluginConfig ?? {}) as OcMemoryRecallConfig;
     const notesDir = cfg.notesDir ?? "memory";
     const subdirs = Array.isArray(cfg.subdirs) ? cfg.subdirs.map(String) : [];
     const markerPrefix = cfg.markerPrefix ?? DEFAULT_MARKER_PREFIX;
@@ -96,6 +100,23 @@ export default definePluginEntry({
       candidates: 0,
       skipped: [],
     };
+
+    // ── Lazy first-scan ──────────────────────────────────────────────
+    // The host instantiates the plugin module once per registration context
+    // (full-mode for gateway hooks, tool-discovery for tool serving), each
+    // with its own closure. Only full-mode instances receive gateway_start,
+    // so tool-serving registrations must scan on first use instead of
+    // waiting for the hook.
+    let everScanned = false;
+    function ensureScanned(): void {
+      if (everScanned) return;
+      everScanned = true;
+      try {
+        reloadRegistry();
+      } catch (err) {
+        api.logger?.warn?.(`[oc-memory-recall] lazy first-scan failed: ${String(err)}`);
+      }
+    }
 
     function reloadRegistry(): { registry: NoteRegistry; scanned: number; candidates: number } {
       const rawNotes = notesLoader(notesDir, subdirs);
@@ -154,6 +175,7 @@ export default definePluginEntry({
     // ── Hook: tool_result_persist ────────────────────────────────────
     api.on("tool_result_persist", (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
       try {
+        ensureScanned();
         const msg = (event.message as Record<string, unknown>) ?? {};
         const toolName = String(event.toolName ?? ctx?.toolName ?? "");
         const params = (event.params as Record<string, unknown>) ?? (ctx?.params as Record<string, unknown>) ?? {};
@@ -217,6 +239,7 @@ export default definePluginEntry({
     // ── Hook: after_tool_call (Deliverable 4 - M1) ───────────────────
     api.on("after_tool_call", async (event: Record<string, unknown>, ctx?: Record<string, unknown>) => {
       try {
+        ensureScanned();
         if (!eventPushEnabled) return;
 
         const nowMs = Date.now();
@@ -284,6 +307,7 @@ export default definePluginEntry({
     // ── Hook: before_agent_reply (Deliverable 6 - M4 Linter) ─────────
     api.on("before_agent_reply", async (event: Record<string, unknown>) => {
       try {
+        ensureScanned();
         const cleanedBody = typeof event.cleanedBody === "string" ? event.cleanedBody : "";
         if (!cleanedBody) return undefined;
 
@@ -317,6 +341,7 @@ export default definePluginEntry({
       parameters: Type.Object({}),
       async execute(_id: string, _params: Record<string, unknown>) {
         try {
+          ensureScanned();
           const report = buildRecallStatusReport(registry, telemetry);
           const scanLine = `scan: ${lastScan.scanned} md files seen, ${lastScan.skipped.length} skipped (no kind frontmatter), ${lastScan.candidates} candidates`;
           return {
@@ -342,6 +367,7 @@ export default definePluginEntry({
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         try {
+          ensureScanned();
           const reload = params.reload !== false;
           if (reload) {
             reloadRegistry();
@@ -354,12 +380,17 @@ export default definePluginEntry({
           const notes = [...Array.from(registry.notes.values()), ...skippedParsed];
           const verification = verifyNotes(notes);
           const verdict = verification.invalidCount > 0 ? "failed" : "ok";
-          const summary = `verified ${notes.length} notes: ${verification.validCount} valid, ${verification.invalidCount} invalid`;
-          const details = verification.issues.length > 0
+          const warnCount = verification.warnings ? verification.warnings.length : 0;
+          const warnText = warnCount > 0 ? ` (${warnCount} warnings)` : "";
+          const summary = `verified ${notes.length} notes: ${verification.validCount} valid, ${verification.invalidCount} invalid${warnText}`;
+          const issueDetails = verification.issues.length > 0
             ? `\nissues:\n${verification.issues.map((i) => `  - ${i.id}: ${i.errors.join(", ")}`).join("\n")}`
             : "";
+          const warnDetails = verification.warnings && verification.warnings.length > 0
+            ? `\nwarnings:\n${verification.warnings.map((w) => `  - ${w.id}: ${w.warnings.join(", ")}`).join("\n")}`
+            : "";
           return {
-            content: [{ type: "text" as const, text: `${verdict}: ${summary}${details}` }],
+            content: [{ type: "text" as const, text: `${verdict}: ${summary}${issueDetails}${warnDetails}` }],
           };
         } catch (err) {
           return {
@@ -380,6 +411,7 @@ export default definePluginEntry({
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         try {
+          ensureScanned();
           const kinds = typeof params.kind === "string" ? [params.kind] : undefined;
           const maxEntries = typeof params.maxEntries === "number" ? params.maxEntries : undefined;
           const report = buildNoteCatalogue(registry, { kinds, maxEntries });

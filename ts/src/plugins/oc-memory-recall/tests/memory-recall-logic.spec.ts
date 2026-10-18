@@ -26,6 +26,12 @@ import {
   lintAgentReply,
   applyReplyLintCorrection,
   buildResumeRefreshNotice,
+  extractBindPhrase,
+  getKindCompression,
+  isPredicatePermitted,
+  projectCueLine,
+  lintNoteSchemaV2,
+  isProsePointer,
   type MemoryNote,
 } from "../src/memory-recall-logic.js";
 
@@ -401,5 +407,424 @@ describe("createRegistry (valid-only indexing)", () => {
     expect(registry.notes.size).toBe(1);
     expect(registry.kindToNotes.has("unknown")).toBe(false);
     expect(registry.kindToNotes.get("house_style")?.length).toBe(1);
+  });
+});
+
+describe("Schema v2: Frontmatter Parsing & BIND Extraction", () => {
+  it("parses v2 optional fields (bind, predicate, event, updated)", () => {
+    const raw = `---
+kind: house_style
+use_when: Writing plugins
+does_not_apply_when: Writing scripts
+provenance: "Research Stable 2026-10-18"
+source: "docs/style.md"
+title: "House Style Note"
+bind: "Explicit Bind Override"
+predicate: "changed since this summary: new style rules recorded"
+event: "lint passes"
+updated: "2026-10-18T12:00:00Z"
+---
+# Content Header
+Body content.
+`;
+    const note = parseNoteFrontmatter(raw, "v2-note.md");
+    expect(note.valid).toBe(true);
+    expect(note.frontmatter.bind).toBe("Explicit Bind Override");
+    expect(note.frontmatter.predicate).toBe("changed since this summary: new style rules recorded");
+    expect(note.frontmatter.event).toBe("lint passes");
+    expect(note.frontmatter.updated).toBe("2026-10-18T12:00:00Z");
+  });
+
+  it("extracts BIND with correct precedence: bind -> title -> first heading -> note ID", () => {
+    // 1. Explicit bind field
+    const noteWithBind: MemoryNote = {
+      id: "note-a.md",
+      frontmatter: {
+        kind: "house_style",
+        use_when: "x",
+        does_not_apply_when: "y",
+        provenance: "z",
+        source: "s",
+        bind: "Explicit Bind",
+        title: "Title Value",
+      },
+      content: "# Header One\nText",
+      raw: "",
+      valid: true,
+    };
+    expect(extractBindPhrase(noteWithBind)).toBe("Explicit Bind");
+
+    // 2. Title field fallback
+    const noteWithTitle: MemoryNote = {
+      id: "note-b.md",
+      frontmatter: {
+        kind: "house_style",
+        use_when: "x",
+        does_not_apply_when: "y",
+        provenance: "z",
+        source: "s",
+        title: "Title Value",
+      },
+      content: "# Header One\nText",
+      raw: "",
+      valid: true,
+    };
+    expect(extractBindPhrase(noteWithTitle)).toBe("Title Value");
+
+    // 3. First heading fallback
+    const noteWithHeading: MemoryNote = {
+      id: "note-c.md",
+      frontmatter: {
+        kind: "house_style",
+        use_when: "x",
+        does_not_apply_when: "y",
+        provenance: "z",
+        source: "s",
+      },
+      content: "# First Extracted Heading\nSome body text",
+      raw: "",
+      valid: true,
+    };
+    expect(extractBindPhrase(noteWithHeading)).toBe("First Extracted Heading");
+
+    // 4. Note ID fallback
+    const noteWithIdOnly: MemoryNote = {
+      id: "path/to/my-rule.md",
+      frontmatter: {
+        kind: "house_style",
+        use_when: "x",
+        does_not_apply_when: "y",
+        provenance: "z",
+        source: "s",
+      },
+      content: "No headings here.",
+      raw: "",
+      valid: true,
+    };
+    expect(extractBindPhrase(noteWithIdOnly)).toBe("path/to/my-rule");
+  });
+});
+
+describe("Schema v2: Kind Compression & Selection", () => {
+  it("maps methods/mistakes to the skip-list (procedure, workaround, historical_incident)", () => {
+    const proc = parseNoteFrontmatter(`---
+kind: procedure
+use_when: deployment
+does_not_apply_when: local dev
+provenance: "2026-10-18"
+source: "deploy.md"
+predicate: "step 1"
+---
+Body`, "proc.md");
+    expect(getKindCompression(proc)).toBe("skip");
+
+    const workaround = parseNoteFrontmatter(`---
+kind: workaround
+use_when: bug
+does_not_apply_when: fix
+provenance: "2026-10-18"
+source: "bug.md"
+---
+Body`, "wa.md");
+    expect(getKindCompression(workaround)).toBe("skip");
+  });
+
+  it("maps notes with event to event_slot", () => {
+    const eventNote = parseNoteFrontmatter(`---
+kind: open_loop
+use_when: awaiting CI
+does_not_apply_when: done
+provenance: "2026-10-18"
+source: "ci.md"
+event: "CI passes"
+---
+Body`, "ci.md");
+    expect(getKindCompression(eventNote)).toBe("event_slot");
+  });
+
+  it("maps notes with predicate to three_slot", () => {
+    const claimNote = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "style.md"
+predicate: "changed since this summary: pure logic required"
+---
+Body`, "style.md");
+    expect(getKindCompression(claimNote)).toBe("three_slot");
+  });
+
+  it("maps notes without predicate to plain", () => {
+    const plainNote = parseNoteFrontmatter(`---
+kind: glossary
+use_when: terms
+does_not_apply_when: none
+provenance: "2026-10-18"
+source: "glossary.md"
+title: "Project Glossary"
+---
+Body`, "gloss.md");
+    expect(getKindCompression(plainNote)).toBe("plain");
+  });
+});
+
+describe("Schema v2: Condition Gating (Truthfulness Invariant)", () => {
+  const noteWithUpdated = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "style.md"
+title: "House Style"
+predicate: "changed since this summary: new pure logic rule"
+updated: "2026-10-18T12:00:00Z"
+---
+Body`, "style.md");
+
+  it("permits predicate during file-read arm", () => {
+    expect(isPredicatePermitted(noteWithUpdated, { arm: "file_read" })).toBe(true);
+  });
+
+  it("suppresses predicate during injection/refresh arms to avoid negative prompt penalty", () => {
+    expect(isPredicatePermitted(noteWithUpdated, { arm: "resume_refresh" })).toBe(false);
+    expect(isPredicatePermitted(noteWithUpdated, { arm: "event_push" })).toBe(false);
+    expect(isPredicatePermitted(noteWithUpdated, { arm: "status" })).toBe(false);
+  });
+
+  it("suppresses predicate when note is not newer than file mtime", () => {
+    const fileMtimeMs = Date.parse("2026-10-18T13:00:00Z"); // file is newer than note (12:00)
+    expect(isPredicatePermitted(noteWithUpdated, { arm: "file_read", fileMtimeMs })).toBe(false);
+
+    const olderFileMtimeMs = Date.parse("2026-10-18T11:00:00Z"); // file is older than note
+    expect(isPredicatePermitted(noteWithUpdated, { arm: "file_read", fileMtimeMs: olderFileMtimeMs })).toBe(true);
+  });
+});
+
+describe("Schema v2: Cue Projection Grammar & Slot Order", () => {
+  it("projects Claim-type with PREDICATE before BIND: [PREDICATE]: [BIND] — see [POINTER]", () => {
+    const claimNote = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+title: "House Style Guidelines"
+predicate: "changed since this summary: pure logic required"
+---
+Body`, "style.md");
+
+    const result = projectCueLine(claimNote, { arm: "file_read" });
+    expect(result.emitted).toBe(true);
+    expect(result.compression).toBe("three_slot");
+    expect(result.cueText).toBe(
+      "changed since this summary: pure logic required: House Style Guidelines — see docs/style.md"
+    );
+  });
+
+  it("projects Event-type with BIND before PREDICATE: [BIND], waiting for: [EVENT] — [PREDICATE]; see [POINTER]", () => {
+    const eventNote = parseNoteFrontmatter(`---
+kind: open_loop
+use_when: PR open
+does_not_apply_when: merged
+provenance: "2026-10-18"
+source: "docs/pr-process.md"
+title: "PR #58 Review"
+event: "test suite passing"
+predicate: "you owe a step when this happens"
+---
+Body`, "pr58.md");
+
+    const result = projectCueLine(eventNote, { arm: "file_read" });
+    expect(result.emitted).toBe(true);
+    expect(result.compression).toBe("event_slot");
+    expect(result.cueText).toBe(
+      "PR #58 Review, waiting for: test suite passing — you owe a step when this happens; see docs/pr-process.md"
+    );
+  });
+
+  it("projects Plain-type with BIND + POINTER only: [BIND] — see [POINTER]", () => {
+    const plainNote = parseNoteFrontmatter(`---
+kind: glossary
+use_when: terms
+does_not_apply_when: none
+provenance: "2026-10-18"
+source: "docs/glossary.md"
+title: "System Architecture Glossary"
+---
+Body`, "gloss.md");
+
+    const result = projectCueLine(plainNote, { arm: "file_read" });
+    expect(result.emitted).toBe(true);
+    expect(result.compression).toBe("plain");
+    expect(result.cueText).toBe("System Architecture Glossary — see docs/glossary.md");
+  });
+
+  it("suppresses Skip-list kinds (emits false, empty cueText)", () => {
+    const procNote = parseNoteFrontmatter(`---
+kind: procedure
+use_when: deployment
+does_not_apply_when: none
+provenance: "2026-10-18"
+source: "docs/deploy.md"
+title: "Deployment Checklist"
+predicate: "step 1 run migrations"
+---
+Body`, "deploy.md");
+
+    const result = projectCueLine(procNote, { arm: "file_read" });
+    expect(result.emitted).toBe(false);
+    expect(result.cueText).toBe("");
+    expect(result.compression).toBe("skip");
+  });
+
+  it("falls back to plain BIND + POINTER when condition gating suppresses predicate", () => {
+    const claimNote = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+title: "House Style Guidelines"
+predicate: "changed since this summary: pure logic required"
+---
+Body`, "style.md");
+
+    // Injected arm (e.g. resume_refresh) suppresses predicate
+    const result = projectCueLine(claimNote, { arm: "resume_refresh" });
+    expect(result.emitted).toBe(true);
+    expect(result.compression).toBe("plain");
+    expect(result.cueText).toBe("House Style Guidelines — see docs/style.md");
+    expect(result.reason).toContain("Predicate suppressed by condition gating");
+  });
+
+  it("formatFileMarker formats v2 cue lines with prefix", () => {
+    const claimNote = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+title: "House Style Guidelines"
+predicate: "changed since this summary: pure logic required"
+---
+Body`, "style.md");
+
+    const marker = formatFileMarker(claimNote);
+    expect(marker).toContain(DEFAULT_MARKER_PREFIX);
+    expect(marker).toContain("changed since this summary: pure logic required: House Style Guidelines — see docs/style.md");
+  });
+});
+
+describe("Schema v2: recall_verify Linter Checks", () => {
+  it("rejects prose and URI pointers in paths", () => {
+    expect(isProsePointer("all typescript files across the repository")).toBe(true);
+    expect(isProsePointer("https://example.com/docs")).toBe(true);
+    expect(isProsePointer("src/plugins/shared/types.ts")).toBe(false);
+    expect(isProsePointer("docs/conventions.md")).toBe(false);
+    expect(isProsePointer("types.ts")).toBe(false);
+
+    const proseNote = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+paths:
+  - "all typescript files across the repository"
+  - "https://internal.wiki/rules"
+---
+Body`, "bad-paths.md");
+
+    const lint = lintNoteSchemaV2(proseNote);
+    expect(lint.errors.length).toBe(2);
+    expect(lint.errors[0]).toContain("prose/URI pointer");
+    expect(lint.errors[1]).toContain("prose/URI pointer");
+  });
+
+  it("rejects multi-clause predicates with sentence-internal periods", () => {
+    const multiClauseNote = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+predicate: "first clause stated. Second clause follows immediately"
+---
+Body`, "multi.md");
+
+    const lint = lintNoteSchemaV2(multiClauseNote);
+    expect(lint.errors.some((e) => e.includes("sentence-internal period"))).toBe(true);
+  });
+
+  it("rejects predicates exceeding 140 characters", () => {
+    const longPred = "a".repeat(141);
+    const longNote = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+predicate: "${longPred}"
+---
+Body`, "long.md");
+
+    const lint = lintNoteSchemaV2(longNote);
+    expect(lint.errors.some((e) => e.includes("exceeds 140 characters"))).toBe(true);
+  });
+
+  it("rejects imperative mood in predicates", () => {
+    const imperativeDoNot = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+predicate: "do not use Date.now() directly in logic"
+---
+Body`, "imp1.md");
+
+    const imperativeAlways = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+predicate: "always wrap I/O behind protocols"
+---
+Body`, "imp2.md");
+
+    expect(lintNoteSchemaV2(imperativeDoNot).errors.some((e) => e.includes("imperative mood"))).toBe(true);
+    expect(lintNoteSchemaV2(imperativeAlways).errors.some((e) => e.includes("imperative mood"))).toBe(true);
+  });
+
+  it("warns on unparseable ISO 8601 in updated field", () => {
+    const badDateNote = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+updated: "not-a-date"
+---
+Body`, "bad-date.md");
+
+    const lint = lintNoteSchemaV2(badDateNote);
+    expect(lint.warnings.some((w) => w.includes("not a valid ISO 8601 date string"))).toBe(true);
+  });
+
+  it("warns on event field present on non-event kinds", () => {
+    const misplacedEvent = parseNoteFrontmatter(`---
+kind: house_style
+use_when: coding
+does_not_apply_when: tests
+provenance: "2026-10-18"
+source: "docs/style.md"
+event: "lint passes"
+---
+Body`, "event-warn.md");
+
+    const lint = lintNoteSchemaV2(misplacedEvent);
+    expect(lint.warnings.some((w) => w.includes("Field 'event' present on non-event kind"))).toBe(true);
   });
 });

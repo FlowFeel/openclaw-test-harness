@@ -2,7 +2,7 @@
  * OcDurableSidecar — pure logic seam.
  *
  * @behavior
- * Pure request construction and response interpretation for the five durable
+ * Pure request construction and response interpretation for the durable
  * proxy tools. Fetch is NEVER called here — the io layer executes requests
  * built by this module, and interpretation functions classify responses.
  *
@@ -28,10 +28,19 @@ export interface SidecarResponse {
   body: Record<string, unknown>;
 }
 
+export interface NotifySpec {
+  url?: string;
+  session_key?: string;
+  gateway_url?: string;
+  token?: string;
+  custom_message?: string;
+}
+
 export interface SpawnParams {
   task_name: string;
   params: Record<string, unknown>;
   queue?: string;
+  notify?: NotifySpec;
 }
 
 export interface ListFilters {
@@ -67,9 +76,11 @@ export function buildSpawnRequest(
   taskName: string,
   params: Record<string, unknown>,
   queue?: string,
+  notify?: NotifySpec,
 ): SidecarRequest {
   const body: Record<string, unknown> = { task_name: taskName, params };
   if (queue !== undefined) body.queue = queue;
+  if (notify !== undefined) body.notify = notify;
   return { method: "POST", path: "/spawn", body };
 }
 
