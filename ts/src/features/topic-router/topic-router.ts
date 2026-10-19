@@ -100,11 +100,13 @@ export class TopicRouter extends BaseSupervisor {
     if (!existing) {
       // Lazy spawn — a topic gets an actor on first dispatch.
       this.spawn({ sessionKey: topic })
-    } else if (TerminalStates.has(existing.state)) {
-      // Self-healing: a terminal actor is restarted before routing.
-      const restarted = this.restart(topic)
-      if (!restarted) {
-        throw new Error(`topic ${topic} exhausted retries (${existing.retryCount})`)
+    } else {
+      if (TerminalStates.has(existing.state)) {
+        // Self-healing: a terminal actor is restarted before routing.
+        const restarted = this.restart(topic)
+        if (!restarted) {
+          throw new Error(`topic ${topic} exhausted retries (${existing.retryCount})`)
+        }
       }
     }
     // Wait for the actor to reach `running` (the worker's 'online' event drove

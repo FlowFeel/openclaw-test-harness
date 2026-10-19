@@ -163,16 +163,15 @@ export function calculateEffectiveCapacity(
 
   // If above soft limit, reduce based on health
   if (health.activeSubagents >= policy.softLimit) {
-    // If event loop is stressed, reduce to 0 (no new spawns)
-    if (health.eventLoopP99Ms > policy.eventLoopP99Threshold) {
-      effective = 0
-    } else if (health.eventLoopUtilization > policy.eventLoopUtilizationThreshold) {
-      effective = 0
-    } else if (health.cpuCoreRatio > policy.cpuCoreRatioThreshold) {
-      effective = 0
+    const isStressed =
+      health.eventLoopP99Ms > policy.eventLoopP99Threshold ||
+      health.eventLoopUtilization > policy.eventLoopUtilizationThreshold ||
+      health.cpuCoreRatio > policy.cpuCoreRatioThreshold;
+    if (isStressed) {
+      effective = 0;
     } else {
       // Above soft limit but healthy — allow 1 more
-      effective = Math.min(effective, 1)
+      effective = Math.min(effective, 1);
     }
   }
 

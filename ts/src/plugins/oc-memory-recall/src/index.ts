@@ -153,13 +153,11 @@ export default definePluginEntry({
             telemetry = recordFire(telemetry, note.frontmatter.kind, "M5");
             telemetry = recordHit(telemetry, note.frontmatter.kind, "M5");
           }
-          if (typeof api.session?.workflow?.enqueueNextTurnInjection === "function") {
-            await api.session.workflow.enqueueNextTurnInjection({
-              text: refresh.summary,
-              idempotencyKey: `m5-refresh-${reg.notes.size}`,
-            });
-          } else if (typeof api.enqueueNextTurnInjection === "function") {
-            await api.enqueueNextTurnInjection({
+          const enqueueInjection =
+            api.session?.workflow?.enqueueNextTurnInjection ??
+            api.enqueueNextTurnInjection;
+          if (typeof enqueueInjection === "function") {
+            await enqueueInjection({
               text: refresh.summary,
               idempotencyKey: `m5-refresh-${reg.notes.size}`,
             });
@@ -186,7 +184,8 @@ export default definePluginEntry({
 
         if (typeof msg.content === "string") {
           originalContent = msg.content;
-        } else if (Array.isArray(msg.content)) {
+        }
+        if (Array.isArray(msg.content)) {
           isStringContent = false;
           const textBlock = (msg.content as Array<Record<string, unknown>>).find((b) => b.type === "text");
           if (textBlock && typeof textBlock.text === "string") {
@@ -274,14 +273,11 @@ export default definePluginEntry({
         if (!decision.shouldPush) return;
 
         for (const item of decision.notesToPush) {
-          if (typeof api.session?.workflow?.enqueueNextTurnInjection === "function") {
-            await api.session.workflow.enqueueNextTurnInjection({
-              sessionKey,
-              text: item.cueText,
-              idempotencyKey: item.idempotencyKey,
-            });
-          } else if (typeof api.enqueueNextTurnInjection === "function") {
-            await api.enqueueNextTurnInjection({
+          const enqueueInjection =
+            api.session?.workflow?.enqueueNextTurnInjection ??
+            api.enqueueNextTurnInjection;
+          if (typeof enqueueInjection === "function") {
+            await enqueueInjection({
               sessionKey,
               text: item.cueText,
               idempotencyKey: item.idempotencyKey,

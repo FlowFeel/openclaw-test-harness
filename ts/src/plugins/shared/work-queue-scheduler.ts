@@ -77,24 +77,31 @@ export function createQueue(specs: TaskSpec[]): WorkQueueState {
     const priority = spec.priority ?? "normal";
     let insertIndex = order.length;
 
-    if (priority === "high") {
-      // Insert before first non-high
-      insertIndex = order.findIndex((id) => {
-        const t = tasks.get(id);
-        const p = t?.spec.priority ?? "normal";
-        return p !== "high";
-      });
-      if (insertIndex === -1) insertIndex = order.length;
-    } else if (priority === "low") {
-      // Insert at end (after everything)
-      insertIndex = order.length;
-    } else {
-      // Normal: after all high, before all low
-      insertIndex = order.findIndex((id) => {
-        const t = tasks.get(id);
-        return (t?.spec.priority ?? "normal") === "low";
-      });
-      if (insertIndex === -1) insertIndex = order.length;
+    switch (priority) {
+      case "high": {
+        // Insert before first non-high
+        const idx = order.findIndex((id) => {
+          const t = tasks.get(id);
+          const p = t?.spec.priority ?? "normal";
+          return p !== "high";
+        });
+        insertIndex = idx === -1 ? order.length : idx;
+        break;
+      }
+      case "low": {
+        // Insert at end (after everything)
+        insertIndex = order.length;
+        break;
+      }
+      default: {
+        // Normal: after all high, before all low
+        const idx = order.findIndex((id) => {
+          const t = tasks.get(id);
+          return (t?.spec.priority ?? "normal") === "low";
+        });
+        insertIndex = idx === -1 ? order.length : idx;
+        break;
+      }
     }
 
     order.splice(insertIndex, 0, spec.id);

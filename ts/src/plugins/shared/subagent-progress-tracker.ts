@@ -237,7 +237,10 @@ export function detectStuck(
       if (nowMs - record.startedAtMs > maxHeartbeatAgeMs) {
         stuck.push(taskId);
       }
-    } else if (nowMs - record.lastHeartbeat.ts > maxHeartbeatAgeMs) {
+      continue;
+    }
+
+    if (nowMs - record.lastHeartbeat.ts > maxHeartbeatAgeMs) {
       staleHeartbeat.push(taskId);
       stuck.push(taskId);
     } else {

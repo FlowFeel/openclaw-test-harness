@@ -544,13 +544,15 @@ export default definePluginEntry({
             if (runId) {
               runPoolMap.delete(runId);
               releaseLease(activeLeases, runId);
-            } else if (activeLeases.size > 0) {
-              // If runId missing, release oldest main lease
-              for (const [id, l] of activeLeases) {
-                if (l.pool === "main") {
-                  activeLeases.delete(id);
-                  runPoolMap.delete(id);
-                  break;
+            } else {
+              if (activeLeases.size > 0) {
+                // If runId missing, release oldest main lease
+                for (const [id, l] of activeLeases) {
+                  if (l.pool === "main") {
+                    activeLeases.delete(id);
+                    runPoolMap.delete(id);
+                    break;
+                  }
                 }
               }
             }
@@ -657,12 +659,14 @@ export default definePluginEntry({
             if (runId) {
               runPoolMap.delete(runId);
               releaseLease(activeLeases, runId);
-            } else if (activeLeases.size > 0) {
-              for (const [id, l] of activeLeases) {
-                if (l.pool === "sub") {
-                  activeLeases.delete(id);
-                  runPoolMap.delete(id);
-                  break;
+            } else {
+              if (activeLeases.size > 0) {
+                for (const [id, l] of activeLeases) {
+                  if (l.pool === "sub") {
+                    activeLeases.delete(id);
+                    runPoolMap.delete(id);
+                    break;
+                  }
                 }
               }
             }

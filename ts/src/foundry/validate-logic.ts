@@ -173,7 +173,9 @@ function extractRegisteredHooks(source: string): string[] {
   while ((m = re.exec(source)) !== null) {
     if (m[1]) {
       hooks.push(m[1]);
-    } else if (m[2]) {
+      continue;
+    }
+    if (m[2]) {
       // Array form: extract each quoted string
       const inner = m[2].matchAll(/["']([^"']+)["']/g);
       for (const im of inner) hooks.push(im[1]);

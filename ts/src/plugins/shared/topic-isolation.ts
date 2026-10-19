@@ -225,13 +225,18 @@ export function getBottleneckTopic(
 
   for (let i = 1; i < stats.length; i++) {
     const s = stats[i];
-    if (s.available < minAvailable) {
-      minAvailable = s.available;
-      minTopic = s.topic;
-      isTie = false;
-    } else if (s.available === minAvailable) {
-      // Only mark tie if values are truly the same
-      isTie = true;
+    switch (true) {
+      case s.available < minAvailable:
+        minAvailable = s.available;
+        minTopic = s.topic;
+        isTie = false;
+        break;
+      case s.available === minAvailable:
+        // Only mark tie if values are truly the same
+        isTie = true;
+        break;
+      default:
+        break;
     }
   }
 

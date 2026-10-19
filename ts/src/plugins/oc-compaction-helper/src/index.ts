@@ -194,12 +194,16 @@ export default definePluginEntry({
       selectedOcProviderId,
       registeredProviderIds
     );
-    if (providerSelection.assertion.verdict === "error") {
-      api.logger?.error?.(`[oc-compaction-helper] ${providerSelection.doctorLine}`);
-    } else if (providerSelection.assertion.verdict === "warn") {
-      api.logger?.warn?.(`[oc-compaction-helper] ${providerSelection.doctorLine}`);
-    } else {
-      api.logger?.info?.(`[oc-compaction-helper] ${providerSelection.doctorLine}`);
+    switch (providerSelection.assertion.verdict) {
+      case "error":
+        api.logger?.error?.(`[oc-compaction-helper] ${providerSelection.doctorLine}`);
+        break;
+      case "warn":
+        api.logger?.warn?.(`[oc-compaction-helper] ${providerSelection.doctorLine}`);
+        break;
+      default:
+        api.logger?.info?.(`[oc-compaction-helper] ${providerSelection.doctorLine}`);
+        break;
     }
 
     // Sidecar from the cross-plugin registry (registered by oc-sidecar on gateway_start)
@@ -275,13 +279,11 @@ export default definePluginEntry({
                 const noticeText = formatResumeDeltaNotice(deltaReport);
                 const idempotencyKey = `m8-delta-${deltaReport.checkpointId}-${deltaHash}`;
 
-                if (typeof api.session?.workflow?.enqueueNextTurnInjection === "function") {
-                  await api.session.workflow.enqueueNextTurnInjection({
-                    text: noticeText,
-                    idempotencyKey,
-                  });
-                } else if (typeof api.enqueueNextTurnInjection === "function") {
-                  await api.enqueueNextTurnInjection({
+                const enqueueInjection =
+                  api.session?.workflow?.enqueueNextTurnInjection ??
+                  api.enqueueNextTurnInjection;
+                if (typeof enqueueInjection === "function") {
+                  await enqueueInjection({
                     text: noticeText,
                     idempotencyKey,
                   });

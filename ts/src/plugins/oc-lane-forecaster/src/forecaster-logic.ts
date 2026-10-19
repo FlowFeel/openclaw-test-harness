@@ -18,13 +18,25 @@
  * - Zero external fixtures, sub-millisecond execution.
  */
 
+import {
+  WORK_LOOP_REGEX,
+  TEST_SUITE_FORECAST_REGEX,
+  PROBE_LOOP_REGEX,
+  VISION_MEDIA_REGEX,
+  DEEP_REFACTOR_REGEX,
+  INTENT_DIAGNOSE_REGEX,
+  INTENT_FIX_REGEX,
+  INTENT_TEST_REGEX,
+  INTENT_SHIP_REGEX,
+} from "../../shared/regex-library.ts";
+
 export const DEFAULT_LANE_CAP_MS = 600000; // 600s embedded-run lane cap
 export const DEFAULT_WARN_RATIO = 0.85; // Warn when predicted >= 85% of cap (510s)
 
 export interface SlowOpSignature {
   id: string;
   label: string;
-  pattern: RegExp;
+  pattern: Readonly<RegExp>;
   addedDurationMs: number;
   shape: string;
 }
@@ -33,35 +45,35 @@ export const SLOW_OP_SIGNATURES: readonly SlowOpSignature[] = [
   {
     id: "work-loop",
     label: "Work-loop session (diagnose -> fix -> test -> ship)",
-    pattern: /\b(diagnose\b.*\bfix\b.*\btest\b.*\bship\b|work-loop|PR workloop|checkpoint-first|fix.*and\s+run\s+tests.*and\s+push)\b/i,
+    pattern: WORK_LOOP_REGEX,
     addedDurationMs: 680000, // 11.3 min serial work loop
     shape: "work-loop",
   },
   {
     id: "test-suite",
     label: "Full test suite execution",
-    pattern: /\b(npm\s+(test|run\s+test(:ci)?)|vitest\s+run\b|vitest\b(?!\.config)|jest\b(?!\.config)|pytest\b|cargo\s+test\b|go\s+test\b|playwright\b|e2e\s+test)\b/i,
+    pattern: TEST_SUITE_FORECAST_REGEX,
     addedDurationMs: 650000, // 10.8 min full regression suite
     shape: "test-suite",
   },
   {
     id: "probe-loop",
     label: "HTTP probe / poll loop",
-    pattern: /\b(while\s+true|until\s+.*\bcurl\b|curl.*\|\s*grep|probe\s+loop|wait-for|retry\s+until|poll\s+status)\b/i,
+    pattern: PROBE_LOOP_REGEX,
     addedDurationMs: 630000, // 10.5 min unbounded polling loop
     shape: "probe-loop",
   },
   {
     id: "vision-media",
     label: "Vision / multimodal media processing",
-    pattern: /\b(ffmpeg\b|transcode|vision\s+attachment|process\s+image|analyze\s+screenshot|image-to-text|video\s+render)\b/i,
+    pattern: VISION_MEDIA_REGEX,
     addedDurationMs: 620000, // 10.3 min media processing
     shape: "vision-media",
   },
   {
     id: "deep-refactor",
     label: "Deep multi-component refactoring",
-    pattern: /\b(refactor\s+entire|migrate\s+all|across\s+all\s+\d+\s+plugins|rewrite\s+architecture)\b/i,
+    pattern: DEEP_REFACTOR_REGEX,
     addedDurationMs: 660000, // 11 min multi-file refactoring
     shape: "deep-refactor",
   },
@@ -150,10 +162,10 @@ export function classifyAndForecast(
   }
 
   // Work-loop special detection: prompt mentioning diagnose, fix, test, and ship separately
-  const hasDiagnose = /\bdiagnos(e|ing)\b/i.test(content);
-  const hasFix = /\bfix(ing|ed)?\b/i.test(content);
-  const hasTest = /\btest(ing|s)?\b/i.test(content);
-  const hasShip = /\b(ship(ping|ped)?|push(ing)?|pr|pull\s+request)\b/i.test(content);
+  const hasDiagnose = INTENT_DIAGNOSE_REGEX.test(content);
+  const hasFix = INTENT_FIX_REGEX.test(content);
+  const hasTest = INTENT_TEST_REGEX.test(content);
+  const hasShip = INTENT_SHIP_REGEX.test(content);
 
   if (hasDiagnose && hasFix && hasTest && hasShip && !matchedSignatures.includes("work-loop")) {
     matchedSignatures.push("work-loop");
@@ -198,12 +210,14 @@ export function classifyAndForecast(
           primaryShape = "session-recurrent-slow";
         }
       }
-    } else if (timeouts > 0) {
-      historyInfluenced = true;
-      matchedSignatures.push("history-prior-timeouts");
-      baseEstimateMs = Math.max(baseEstimateMs, 620000);
-      if (primaryShape === "quick-query") {
-        primaryShape = "session-recurrent-slow";
+    } else {
+      if (timeouts > 0) {
+        historyInfluenced = true;
+        matchedSignatures.push("history-prior-timeouts");
+        baseEstimateMs = Math.max(baseEstimateMs, 620000);
+        if (primaryShape === "quick-query") {
+          primaryShape = "session-recurrent-slow";
+        }
       }
     }
   }
@@ -213,11 +227,18 @@ export function classifyAndForecast(
   const isNearCap = predictedDurationMs >= warnThresholdMs;
 
   // 5. Confidence calculation
-  let confidence = 0.5;
-  if (matchedSignatures.includes("work-loop")) confidence = 0.92;
-  else if (historyInfluenced && matchedSignatures.length > 1) confidence = 0.95;
-  else if (matchedSignatures.length > 0) confidence = 0.82;
-  else confidence = 0.70;
+  const confidence = (() => {
+    switch (true) {
+      case matchedSignatures.includes("work-loop"):
+        return 0.92;
+      case historyInfluenced && matchedSignatures.length > 1:
+        return 0.95;
+      case matchedSignatures.length > 0:
+        return 0.82;
+      default:
+        return 0.70;
+    }
+  })();
 
   // 6. Formulate advice & recommendations
   let recommendation: ForecastRecommendation = "proceed_normal";

@@ -79,15 +79,22 @@ export function formatPostKillTeachback(
   const tailSnippet = task.result?.outputTail ? `\n\n--- Output Tail ---\n${task.result.outputTail}` : "";
 
   let shippedDescription = "";
-  if (shippedState?.lastCommitSha) {
-    const prPart = shippedState.lastPrNumber ? ` (PR #${shippedState.lastPrNumber})` : "";
-    const branchPart = shippedState.lastPushedBranch ? ` on branch '${shippedState.lastPushedBranch}'` : "";
-    shippedDescription = `\n\nObservable shipped-state: commit ${shippedState.lastCommitSha.slice(0, 7)}${branchPart}${prPart}. Work survived by policy — resume checkpoint from this commit.`;
-    if (shippedState.hasUncommittedChanges) {
-      shippedDescription += ` Note: working tree contains uncommitted changes.`;
+  switch (true) {
+    case Boolean(shippedState?.lastCommitSha): {
+      const prPart = shippedState?.lastPrNumber ? ` (PR #${shippedState.lastPrNumber})` : "";
+      const branchPart = shippedState?.lastPushedBranch ? ` on branch '${shippedState.lastPushedBranch}'` : "";
+      shippedDescription = `\n\nObservable shipped-state: commit ${shippedState!.lastCommitSha!.slice(0, 7)}${branchPart}${prPart}. Work survived by policy — resume checkpoint from this commit.`;
+      if (shippedState?.hasUncommittedChanges) {
+        shippedDescription += ` Note: working tree contains uncommitted changes.`;
+      }
+      break;
     }
-  } else if (shippedState?.hasUncommittedChanges) {
-    shippedDescription = `\n\nObservable shipped-state: working tree contains uncommitted changes. No recent pushed commit observed during this run.`;
+    case Boolean(shippedState?.hasUncommittedChanges): {
+      shippedDescription = `\n\nObservable shipped-state: working tree contains uncommitted changes. No recent pushed commit observed during this run.`;
+      break;
+    }
+    default:
+      break;
   }
 
   const summary = `Killed at ${capSec}s lane cap (${durationSec}s elapsed). Note: this is a lane timeout, not an LLM provider outage. Partial output preserved at handle ${handle}. Re-dispatch with task_dispatch to resume.`;
