@@ -26,10 +26,7 @@ import type {
   SessionRegistration,
 } from "./types.js";
 import type { SessionsMap } from "../../shared/session-cleanup.ts";
-
-/** Matches `agent:<agentId>:telegram:group:<chatId>:topic:<topicId>`. */
-const TOPIC_KEY_RE =
-  /^agent:([^:]+):telegram:group:(-?\d+):topic:(\d+)$/;
+import { TOPIC_SESSION_KEY_REGEX } from "../../shared/regex-library.ts";
 
 /** True when the value looks like a malformed entry (non-object). */
 function isEntry(value: unknown): boolean {
@@ -40,7 +37,7 @@ function isEntry(value: unknown): boolean {
 export function parseTopicSessionKey(
   key: string
 ): { agentId: string; chatId: string; topicId: number } | null {
-  const match = TOPIC_KEY_RE.exec(key);
+  const match = TOPIC_SESSION_KEY_REGEX.exec(key);
   if (!match) return null;
   return { agentId: match[1], chatId: match[2], topicId: Number(match[3]) };
 }

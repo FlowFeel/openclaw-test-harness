@@ -76,9 +76,13 @@ function collectPluginFiles(): Array<{ source: string; target: string }> {
       for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
         const full = path.join(d, entry.name);
         const rel = path.join(base, entry.name);
-        if (entry.isDirectory()) walk(full, rel);
-        else if (entry.name.endsWith(".ts") || entry.name.endsWith(".json"))
+        if (entry.isDirectory()) {
+          walk(full, rel);
+          continue;
+        }
+        if (entry.name.endsWith(".ts") || entry.name.endsWith(".json")) {
           files.push({ source: full, target: `/app/workspace/plugins/${plugin}/${rel}` });
+        }
       }
     };
     walk(dir, ".");
@@ -88,9 +92,13 @@ function collectPluginFiles(): Array<{ source: string; target: string }> {
       for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
         const full = path.join(d, entry.name);
         const rel = path.join(base, entry.name);
-        if (entry.isDirectory()) walk(full, rel);
-        else if (entry.name.endsWith(".ts"))
+        if (entry.isDirectory()) {
+          walk(full, rel);
+          continue;
+        }
+        if (entry.name.endsWith(".ts")) {
           files.push({ source: full, target: `/app/workspace/plugins/shared/${rel}` });
+        }
       }
     };
     walk(SHARED_DIR, ".");

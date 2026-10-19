@@ -19,6 +19,7 @@
  */
 
 import { projectCueLine, resolvePointer, type MemoryNote, type NoteRegistry } from "./memory-recall-logic.js";
+import { TOKEN_SPLIT_REGEX, PHRASE_SPLIT_REGEX } from "../../shared/regex-library.ts";
 
 export type DeliveryPolicy = "hold-once" | "let-run";
 
@@ -75,14 +76,22 @@ function extractEventTextTokens(event: EventPushTriggerEvent): string[] {
   const tokens: string[] = [];
 
   function walk(val: unknown) {
-    if (typeof val === "string") {
-      tokens.push(val.toLowerCase());
-    } else if (Array.isArray(val)) {
-      for (const item of val) walk(item);
-    } else if (typeof val === "object" && val !== null) {
-      for (const v of Object.values(val as Record<string, unknown>)) {
-        walk(v);
-      }
+    if (!val) return;
+    switch (typeof val) {
+      case "string":
+        tokens.push(val.toLowerCase());
+        break;
+      case "object":
+        if (Array.isArray(val)) {
+          for (const item of val) walk(item);
+        } else {
+          for (const v of Object.values(val as Record<string, unknown>)) {
+            walk(v);
+          }
+        }
+        break;
+      default:
+        break;
     }
   }
 
@@ -124,7 +133,7 @@ export function matchesEvent(note: MemoryNote, event: EventPushTriggerEvent): bo
     if (note.frontmatter.kind === "silent_trap" || note.frontmatter.kind === "workaround") {
       const useWhen = note.frontmatter.use_when.toLowerCase();
       // Token match: check if any keyword from use_when appears in the error
-      const words = useWhen.split(/[\s,._-]+/).filter((w) => w.length > 3);
+      const words = useWhen.split(TOKEN_SPLIT_REGEX as RegExp).filter((w) => w.length > 3);
       if (words.some((w) => combinedEventText.includes(w))) {
         return true;
       }
@@ -135,7 +144,7 @@ export function matchesEvent(note: MemoryNote, event: EventPushTriggerEvent): bo
   const useWhen = note.frontmatter.use_when.toLowerCase();
   if (useWhen.length > 0) {
     const triggerPhrases = useWhen
-      .split(/[;,]/)
+      .split(PHRASE_SPLIT_REGEX as RegExp)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
     for (const phrase of triggerPhrases) {

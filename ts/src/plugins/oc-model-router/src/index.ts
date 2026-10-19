@@ -298,7 +298,9 @@ export default definePluginEntry({
       if (!stats) {
         stats = { latencies: [], errors: 0, total: 0, timeouts: 0, provider };
         modelStats.set(model, stats);
-      } else if (provider && !stats.provider) {
+        return stats;
+      }
+      if (provider && !stats.provider) {
         stats.provider = provider;
       }
       return stats;
@@ -343,10 +345,12 @@ export default definePluginEntry({
             stats.total++;
             addBounded(seenCallIds, callId);
           }
-        } else if (stats.total <= 0) {
-          // Legacy no-callId convention: an ended with no correlation id
-          // guarantees at least one call is represented.
-          stats.total = 1;
+        } else {
+          if (stats.total <= 0) {
+            // Legacy no-callId convention: an ended with no correlation id
+            // guarantees at least one call is represented.
+            stats.total = 1;
+          }
         }
 
         if (latencyMs > 0) {

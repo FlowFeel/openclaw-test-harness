@@ -17,6 +17,11 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import {
+  LEADING_SLASH_REGEX,
+  backslashGlobal,
+  edgeSlashes,
+} from "../../shared/regex-library.ts";
 
 export interface RawNoteFile {
   id: string;
@@ -59,7 +64,10 @@ export function readNotesFromDisk(notesDir: string, subdirs: string[] = []): Raw
         if (entry.endsWith(".md")) {
           const rawContent = readFileSync(fullPath, "utf8");
           // id is notesDir-relative and POSIX-normalized so registry keys are stable
-          const relId = fullPath.slice(notesDir.length).replace(/^[/\\]/, "").replace(/\\/g, "/");
+          const relId = fullPath
+            .slice(notesDir.length)
+            .replace(LEADING_SLASH_REGEX as RegExp, "")
+            .replace(backslashGlobal(), "/");
           results.push({
             id: relId.length > 0 ? relId : entry,
             rawContent,
@@ -76,7 +84,7 @@ export function readNotesFromDisk(notesDir: string, subdirs: string[] = []): Raw
   for (const sub of subdirs) {
     // Flat scan of each explicitly enumerated subdirectory — never recursive,
     // so an unexpected tree cannot flood the boot scan.
-    const clean = String(sub ?? "").replace(/^[/\\]+|[/\\]+$/g, "");
+    const clean = String(sub ?? "").replace(edgeSlashes(), "");
     if (clean.length === 0 || clean.includes("..") || clean.includes("/")) continue;
     scan(join(notesDir, clean));
   }

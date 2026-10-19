@@ -128,16 +128,18 @@ export function getAdmissionDecision(
 
   const allowed = activeCount < effectiveMax;
 
-  let reason: string;
-  if (health.status === "critical") {
-    reason = `blocked: event loop ${health.status} (P99 ${Math.round(health.eventLoopP99Ms)}ms, util ${Math.round(health.eventLoopUtilization * 100)}%, heap ${Math.round(health.usedHeapSize / (1024 * 1024))}MB)`;
-  } else if (!allowed) {
-    reason = `blocked: ${activeCount}/${effectiveMax} slots used (effective max ${effectiveMax}/${configuredMaxConcurrent}${health.status === "degraded" ? ", throttled" : ""})`;
-  } else if (health.status === "degraded") {
-    reason = `throttled: effective max ${effectiveMax}/${configuredMaxConcurrent} (P99 ${Math.round(health.eventLoopP99Ms)}ms > ${thresholds.p99HealthyMs}ms)`;
-  } else {
-    reason = `ok: ${activeCount}/${effectiveMax} slots used`;
-  }
+  const reason: string = (() => {
+    switch (true) {
+      case health.status === "critical":
+        return `blocked: event loop ${health.status} (P99 ${Math.round(health.eventLoopP99Ms)}ms, util ${Math.round(health.eventLoopUtilization * 100)}%, heap ${Math.round(health.usedHeapSize / (1024 * 1024))}MB)`;
+      case !allowed:
+        return `blocked: ${activeCount}/${effectiveMax} slots used (effective max ${effectiveMax}/${configuredMaxConcurrent}${health.status === "degraded" ? ", throttled" : ""})`;
+      case health.status === "degraded":
+        return `throttled: effective max ${effectiveMax}/${configuredMaxConcurrent} (P99 ${Math.round(health.eventLoopP99Ms)}ms > ${thresholds.p99HealthyMs}ms)`;
+      default:
+        return `ok: ${activeCount}/${effectiveMax} slots used`;
+    }
+  })();
 
   return {
     allowed,

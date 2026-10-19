@@ -153,12 +153,20 @@ export function interpret(
 ): ToolOutcome {
   if (response.status === 200 || response.status === 202) {
     const state = typeof response.body.state === "string" ? response.body.state : undefined;
-    let verdict: ToolVerdict = "ok";
-    if (state === "pending" || state === "running" || state === "sleeping") {
-      verdict = "pending";
-    } else if (state === "failed" || state === "error" || state === "cancelled") {
-      verdict = "failed";
-    }
+    const verdict: ToolVerdict = (() => {
+      switch (state) {
+        case "pending":
+        case "running":
+        case "sleeping":
+          return "pending";
+        case "failed":
+        case "error":
+        case "cancelled":
+          return "failed";
+        default:
+          return "ok";
+      }
+    })();
     return {
       verdict,
       summary: summarize(response.body, options),

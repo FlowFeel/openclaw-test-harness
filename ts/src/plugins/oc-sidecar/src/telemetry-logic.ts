@@ -72,12 +72,16 @@ export function aggregateSystemHealth(
     readings.reduce((sum, r) => sum + r.cpuRatio, 0) / readings.length;
 
   // Determine status
-  let status: SystemHealth["status"] = "healthy";
-  if (maxP99 > EL_P99_DEGRADED || maxUtil > EL_UTIL_DEGRADED || maxHeap > HEAP_CRITICAL) {
-    status = "critical";
-  } else if (maxP99 > EL_P99_HEALTHY || maxUtil > EL_UTIL_HEALTHY) {
-    status = "degraded";
-  }
+  const status: SystemHealth["status"] = (() => {
+    switch (true) {
+      case maxP99 > EL_P99_DEGRADED || maxUtil > EL_UTIL_DEGRADED || maxHeap > HEAP_CRITICAL:
+        return "critical";
+      case maxP99 > EL_P99_HEALTHY || maxUtil > EL_UTIL_HEALTHY:
+        return "degraded";
+      default:
+        return "healthy";
+    }
+  })();
 
   return {
     status,

@@ -256,12 +256,16 @@ export function formatMergedDocument(merged: MergedResult): string {
       if (citation.year) parts.push(`(${citation.year})`);
       if (citation.title) parts.push(citation.title);
       const line = parts.join(" ");
-      if (citation.url) {
-        sections.push(`- ${line} [${citation.url}]`);
-      } else if (citation.doi) {
-        sections.push(`- ${line} DOI:${citation.doi}`);
-      } else {
-        sections.push(`- ${line}`);
+      switch (true) {
+        case Boolean(citation.url):
+          sections.push(`- ${line} [${citation.url}]`);
+          break;
+        case Boolean(citation.doi):
+          sections.push(`- ${line} DOI:${citation.doi}`);
+          break;
+        default:
+          sections.push(`- ${line}`);
+          break;
       }
     }
   }

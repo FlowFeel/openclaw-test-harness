@@ -37,7 +37,9 @@ function getPluginFiles(): Array<{ source: string; target: string }> {
       const relPath = path.join(base, entry.name);
       if (entry.isDirectory()) {
         walk(fullPath, relPath);
-      } else if (entry.name.endsWith(".ts") || entry.name.endsWith(".json")) {
+        continue;
+      }
+      if (entry.name.endsWith(".ts") || entry.name.endsWith(".json")) {
         files.push({
           source: fullPath,
           target: `/app/plugins/oc-session-guard/${relPath}`,

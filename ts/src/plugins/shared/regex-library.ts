@@ -148,6 +148,118 @@ export const JSON_OBJECT_START: Readonly<RegExp> = Object.freeze(/^\{/);
 export const JSON_ARRAY_START: Readonly<RegExp> = Object.freeze(/^\[/);
 
 // ═══════════════════════════════════════════════════════════════
+// Task Plane command classifier patterns
+// ═══════════════════════════════════════════════════════════════
+
+export const DOCKER_CMD_REGEX: Readonly<RegExp> = Object.freeze(
+  /\bdocker\s+(build|compose\s+(build|up(\s+--build)?))\b/i
+);
+
+export const PKG_INSTALL_CMD_REGEX: Readonly<RegExp> = Object.freeze(
+  /\b(npm\s+(ci|install|rebuild)|yarn(\s+install)?|pnpm\s+install|composer\s+install|cargo\s+build|pip\s+install)\b/i
+);
+
+export const TEST_SUITE_CMD_REGEX: Readonly<RegExp> = Object.freeze(
+  /\b(npm\s+test|vitest(\s+run)?|jest|pytest|cargo\s+test|go\s+test)\b/i
+);
+
+export const DATA_MEDIA_CMD_REGEX: Readonly<RegExp> = Object.freeze(
+  /\b(rsync|ffmpeg|tar\s+-[a-z]*c[a-z]*f|wget|curl\s+-[a-z]*O)\b/i
+);
+
+export const ML_CMD_REGEX: Readonly<RegExp> = Object.freeze(
+  /\bpython\d?\s+.*(train|fine_tune|eval|embed).*\.py\b/i
+);
+
+// ═══════════════════════════════════════════════════════════════
+// Lane Forecaster signature patterns
+// ═══════════════════════════════════════════════════════════════
+
+export const WORK_LOOP_REGEX: Readonly<RegExp> = Object.freeze(
+  /\b(diagnose\b.*\bfix\b.*\btest\b.*\bship\b|work-loop|PR workloop|checkpoint-first|fix.*and\s+run\s+tests.*and\s+push)\b/i
+);
+
+export const TEST_SUITE_FORECAST_REGEX: Readonly<RegExp> = Object.freeze(
+  /\b(npm\s+(test|run\s+test(:ci)?)|vitest\s+run\b|vitest\b(?!\.config)|jest\b(?!\.config)|pytest\b|cargo\s+test\b|go\s+test\b|playwright\b|e2e\s+test)\b/i
+);
+
+export const PROBE_LOOP_REGEX: Readonly<RegExp> = Object.freeze(
+  /\b(while\s+true|until\s+.*\bcurl\b|curl.*\|\s*grep|probe\s+loop|wait-for|retry\s+until|poll\s+status)\b/i
+);
+
+export const VISION_MEDIA_REGEX: Readonly<RegExp> = Object.freeze(
+  /\b(ffmpeg\b|transcode|vision\s+attachment|process\s+image|analyze\s+screenshot|image-to-text|video\s+render)\b/i
+);
+
+export const DEEP_REFACTOR_REGEX: Readonly<RegExp> = Object.freeze(
+  /\b(refactor\s+entire|migrate\s+all|across\s+all\s+\d+\s+plugins|rewrite\s+architecture)\b/i
+);
+
+export const INTENT_DIAGNOSE_REGEX: Readonly<RegExp> = Object.freeze(/\bdiagnos(e|ing)\b/i);
+export const INTENT_FIX_REGEX: Readonly<RegExp> = Object.freeze(/\bfix(ing|ed)?\b/i);
+export const INTENT_TEST_REGEX: Readonly<RegExp> = Object.freeze(/\btest(ing|s)?\b/i);
+export const INTENT_SHIP_REGEX: Readonly<RegExp> = Object.freeze(
+  /\b(ship(ping|ped)?|push(ing)?|pr|pull\s+request)\b/i
+);
+
+// ═══════════════════════════════════════════════════════════════
+// Compaction Helper flush patterns
+// ═══════════════════════════════════════════════════════════════
+
+export const FLUSH_RUNTIME_EVENT_REGEX: Readonly<RegExp> = Object.freeze(
+  /Continue the OpenClaw runtime event/i
+);
+
+export const FLUSH_RUNTIME_PREFIX_REGEX: Readonly<RegExp> = Object.freeze(/^runtime-flush/i);
+export const FLUSH_TURN_PREFIX_REGEX: Readonly<RegExp> = Object.freeze(/^flush-turn/i);
+export const FLUSH_HEARTBEAT_REGEX: Readonly<RegExp> = Object.freeze(/automated heartbeat pulse/i);
+
+// ═══════════════════════════════════════════════════════════════
+// Topic Manager session patterns
+// ═══════════════════════════════════════════════════════════════
+
+export const TOPIC_SESSION_KEY_REGEX: Readonly<RegExp> = Object.freeze(
+  /^agent:([^:]+):telegram:group:(-?\d+):topic:(\d+)$/
+);
+
+// ═══════════════════════════════════════════════════════════════
+// Path & Token splitting patterns
+// ═══════════════════════════════════════════════════════════════
+
+export const TOKEN_SPLIT_REGEX: Readonly<RegExp> = Object.freeze(/[\s,._-]+/);
+export const PHRASE_SPLIT_REGEX: Readonly<RegExp> = Object.freeze(/[;,]/);
+export const LEADING_SLASH_REGEX: Readonly<RegExp> = Object.freeze(/^[/\\]/);
+export function edgeSlashes(): RegExp {
+  return /^[/\\]+|[/\\]+$/g;
+}
+export function backslashGlobal(): RegExp {
+  return /\\/g;
+}
+export function quoteTrimGlobal(): RegExp {
+  return /^["']|["']$/g;
+}
+export const KIND_LINE_REGEX: Readonly<RegExp> = Object.freeze(/^kind\s*:/m);
+export const MARKDOWN_HEADING_REGEX: Readonly<RegExp> = Object.freeze(/^#+\s+(.+)$/m);
+export const MD_EXTENSION_REGEX: Readonly<RegExp> = Object.freeze(/\.md$/);
+export const WHITESPACE_CHAR_REGEX: Readonly<RegExp> = Object.freeze(/\s/);
+export const WHITESPACE_SEQUENCE_REGEX: Readonly<RegExp> = Object.freeze(/\s+/);
+
+// ═══════════════════════════════════════════════════════════════
+// Memory Note grammar and linting patterns
+// ═══════════════════════════════════════════════════════════════
+
+export const PREDICATE_INTERNAL_PERIOD_REGEX: Readonly<RegExp> = Object.freeze(/\.[ \t]+[A-Za-z]/);
+export const IMPERATIVE_MOOD_REGEX: Readonly<RegExp> = Object.freeze(
+  /^(do not|never|always|ensure|make sure|use|avoid|please)\b/i
+);
+export const PATH_SHAPE_REGEX: Readonly<RegExp> = Object.freeze(
+  /^(\.?\.?\/|[\w-]+\/|[a-zA-Z]:\\|[\w-]+\.[a-zA-Z0-9]+$)[\w\-./\\]*$/
+);
+export const ISO_8601_REGEX: Readonly<RegExp> = Object.freeze(
+  /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?)?$/
+);
+
+// ═══════════════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════════════
 

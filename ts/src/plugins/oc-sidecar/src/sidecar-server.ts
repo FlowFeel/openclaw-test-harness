@@ -29,6 +29,7 @@ import { getHeapStatistics } from "node:v8";
 import process from "node:process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sidecarLog } from "../../shared/logger-utils.ts";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import {
   cleanupSessions,
@@ -341,7 +342,7 @@ export async function startServer(opts: SidecarServerOptions) {
 
   return new Promise<{ server: typeof server; pool: WorkerPool; telemetry: TelemetryCollector; shutdown: () => Promise<void> }>((resolve) => {
     server.listen(opts.port, "127.0.0.1", () => {
-      console.log(`[oc-sidecar] Server listening on 127.0.0.1:${opts.port}`);
+      sidecarLog(opts.port);
       resolve({
         server,
         pool,

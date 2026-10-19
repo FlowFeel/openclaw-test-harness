@@ -17,9 +17,17 @@
  * - Zero fixtures, deterministic.
  */
 
+import {
+  DOCKER_CMD_REGEX,
+  PKG_INSTALL_CMD_REGEX,
+  TEST_SUITE_CMD_REGEX,
+  DATA_MEDIA_CMD_REGEX,
+  ML_CMD_REGEX,
+} from "../../shared/regex-library.ts";
+
 export interface LongRunnerPattern {
   category: string;
-  pattern: RegExp;
+  pattern: Readonly<RegExp>;
   description: string;
   suggestedTimeoutMs: number;
 }
@@ -27,31 +35,31 @@ export interface LongRunnerPattern {
 export const KNOWN_LONG_RUNNER_PATTERNS: readonly LongRunnerPattern[] = [
   {
     category: "docker",
-    pattern: /\bdocker\s+(build|compose\s+(build|up(\s+--build)?))\b/i,
+    pattern: DOCKER_CMD_REGEX,
     description: "Docker build or compose build operation",
     suggestedTimeoutMs: 1800000, // 30m
   },
   {
     category: "package-install",
-    pattern: /\b(npm\s+(ci|install|rebuild)|yarn(\s+install)?|pnpm\s+install|composer\s+install|cargo\s+build|pip\s+install)\b/i,
+    pattern: PKG_INSTALL_CMD_REGEX,
     description: "Package manager installation or build step",
     suggestedTimeoutMs: 900000, // 15m
   },
   {
     category: "test-suite",
-    pattern: /\b(npm\s+test|vitest(\s+run)?|jest|pytest|cargo\s+test|go\s+test)\b/i,
+    pattern: TEST_SUITE_CMD_REGEX,
     description: "Full test suite execution",
     suggestedTimeoutMs: 900000, // 15m
   },
   {
     category: "data-media",
-    pattern: /\b(rsync|ffmpeg|tar\s+-[a-z]*c[a-z]*f|wget|curl\s+-[a-z]*O)\b/i,
+    pattern: DATA_MEDIA_CMD_REGEX,
     description: "Data transfer, compression, or media transcoding",
     suggestedTimeoutMs: 1800000, // 30m
   },
   {
     category: "machine-learning",
-    pattern: /\bpython\d?\s+.*(train|fine_tune|eval|embed).*\.py\b/i,
+    pattern: ML_CMD_REGEX,
     description: "Machine learning model training or inference loop",
     suggestedTimeoutMs: 3600000, // 60m
   },

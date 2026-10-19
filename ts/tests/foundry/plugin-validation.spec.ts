@@ -36,7 +36,9 @@ function readPluginTree(pluginDir: string): PluginTree {
       const full = join(dir, entry);
       if (statSync(full).isDirectory()) {
         walk(full);
-      } else if (entry.endsWith(".ts") || entry.endsWith(".json")) {
+        continue;
+      }
+      if (entry.endsWith(".ts") || entry.endsWith(".json")) {
         const rel = relative(absDir, full);
         files.set(rel, readFileSync(full, "utf8"));
       }

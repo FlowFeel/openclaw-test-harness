@@ -21,11 +21,18 @@
  * - Invariant assertions: non-empty summary, reductionPercent > 0 on bloated turns.
  */
 
+import {
+  FLUSH_RUNTIME_EVENT_REGEX,
+  FLUSH_RUNTIME_PREFIX_REGEX,
+  FLUSH_TURN_PREFIX_REGEX,
+  FLUSH_HEARTBEAT_REGEX,
+} from "../../shared/regex-library.ts";
+
 export interface LiterateCompactionOptions {
   /** Max characters to retain in an assistant turn skeleton. Default: 400. */
   maxAssistantSkeletonChars?: number;
   /** Patterns matching runtime-flush echoes to elide. */
-  flushTurnPatterns?: RegExp[];
+  flushTurnPatterns?: Array<Readonly<RegExp>>;
   /** Custom instructions to prepend to the summary. */
   customInstructions?: string;
   /** Previous summary text to roll forward. */
@@ -46,11 +53,11 @@ export interface LiterateCompactionResult {
 
 const DEFAULT_MAX_ASSISTANT_CHARS = 400;
 
-const DEFAULT_FLUSH_PATTERNS = [
-  /Continue the OpenClaw runtime event/i,
-  /^runtime-flush/i,
-  /^flush-turn/i,
-  /automated heartbeat pulse/i,
+const DEFAULT_FLUSH_PATTERNS: readonly (Readonly<RegExp>)[] = [
+  FLUSH_RUNTIME_EVENT_REGEX,
+  FLUSH_RUNTIME_PREFIX_REGEX,
+  FLUSH_TURN_PREFIX_REGEX,
+  FLUSH_HEARTBEAT_REGEX,
 ];
 
 interface RawMessage {
@@ -132,56 +139,67 @@ export function compactLiterate(
     const approxBytes = text.length + JSON.stringify(msg).length;
     originalEstimatedBytes += approxBytes;
 
-    if (role === "user") {
-      const isFlush = flushPatterns.some((pattern) => pattern.test(text));
-      if (isFlush) {
-        elidedFlushTurns++;
-        continue;
-      }
+    switch (role) {
+      case "user": {
+        const isFlush = flushPatterns.some((pattern) => pattern.test(text));
+        if (isFlush) {
+          elidedFlushTurns++;
+          break;
+        }
 
-      const normalized = text.trim();
-      if (seenUserPrompts.has(normalized) && normalized.length > 0) {
-        elidedFlushTurns++;
-        continue;
-      }
-      if (normalized.length > 0) {
-        seenUserPrompts.add(normalized);
-      }
+        const normalized = text.trim();
+        if (seenUserPrompts.has(normalized) && normalized.length > 0) {
+          elidedFlushTurns++;
+          break;
+        }
+        if (normalized.length > 0) {
+          seenUserPrompts.add(normalized);
+        }
 
-      preservedUserTurns++;
-      trajectoryLines.push(`### [User Turn ${preservedUserTurns}]`);
-      trajectoryLines.push(normalized.length > 0 ? normalized : "(empty prompt)");
-      trajectoryLines.push("");
-    } else if (role === "assistant") {
-      const skeleton = createAssistantSkeleton(text, maxAssistantChars);
-      trajectoryLines.push(`### [Assistant Action]`);
-      if (skeleton.length > 0) {
-        trajectoryLines.push(skeleton);
-      }
-
-      if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-        const callsSummary = msg.tool_calls
-          .map((tc) => {
-            const name = tc.function?.name ?? tc.type ?? "tool";
-            return `\`${name}\``;
-          })
-          .join(", ");
-        trajectoryLines.push(`*Invoked tools:* ${callsSummary}`);
-      }
-      trajectoryLines.push("");
-    } else if (role === "tool") {
-      strippedToolResults++;
-      const toolName = msg.name ?? "tool";
-      const byteLen = text.length;
-      trajectoryLines.push(
-        `* [Tool Outcome] ${toolName} completed (${byteLen} bytes response elided).`
-      );
-    } else if (role === "system") {
-      // Retain concise system notices if present
-      if (text.length > 0 && text.length < 300) {
-        trajectoryLines.push(`> System Note: ${text.trim()}`);
+        preservedUserTurns++;
+        trajectoryLines.push(`### [User Turn ${preservedUserTurns}]`);
+        trajectoryLines.push(normalized.length > 0 ? normalized : "(empty prompt)");
         trajectoryLines.push("");
+        break;
       }
+      case "assistant": {
+        const skeleton = createAssistantSkeleton(text, maxAssistantChars);
+        trajectoryLines.push(`### [Assistant Action]`);
+        if (skeleton.length > 0) {
+          trajectoryLines.push(skeleton);
+        }
+
+        if (Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+          const callsSummary = msg.tool_calls
+            .map((tc) => {
+              const name = tc.function?.name ?? tc.type ?? "tool";
+              return `\`${name}\``;
+            })
+            .join(", ");
+          trajectoryLines.push(`*Invoked tools:* ${callsSummary}`);
+        }
+        trajectoryLines.push("");
+        break;
+      }
+      case "tool": {
+        strippedToolResults++;
+        const toolName = msg.name ?? "tool";
+        const byteLen = text.length;
+        trajectoryLines.push(
+          `* [Tool Outcome] ${toolName} completed (${byteLen} bytes response elided).`
+        );
+        break;
+      }
+      case "system": {
+        // Retain concise system notices if present
+        if (text.length > 0 && text.length < 300) {
+          trajectoryLines.push(`> System Note: ${text.trim()}`);
+          trajectoryLines.push("");
+        }
+        break;
+      }
+      default:
+        break;
     }
   }
 
