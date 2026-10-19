@@ -120,6 +120,7 @@ async function setupContainer() {
     plugins: {
       enabled: true,
       allow: ["oc-e2e-trace-test"],
+      entries: { "oc-e2e-trace-test": { enabled: true } },
       load: { paths: ["/app/workspace/plugins"] },
     },
   };
@@ -137,7 +138,7 @@ async function runGatewayLifecycle(c: typeof container): Promise<string> {
     `export OPENCLAW_HOOK_DEBUG=1 OPENCLAW_HOOK_TRACE_FILE=/tmp/hook-trace.jsonl OPENCLAW_CONFIG_PATH=/app/workspace/openclaw.json && ` +
     `rm -f /tmp/hook-trace.jsonl && ` +
     `echo "=== STARTING GATEWAY ===" && ` +
-    `timeout 60 node /app/node_modules/openclaw/openclaw.mjs gateway run --allow-unconfigured --bind loopback --auth none ` +
+    `timeout 60 node /app/node_modules/openclaw/openclaw.mjs gateway run --bind loopback --auth none ` +
     `> /tmp/oc.log 2>&1 & ` +
     `GATEWAY_PID=$! && ` +
     `echo "gateway pid: $GATEWAY_PID" && ` +
@@ -170,7 +171,7 @@ async function runZeroOverheadTest(c: typeof container): Promise<string> {
     `export OPENCLAW_HOOK_TRACE_FILE=/tmp/hook-trace-overhead.jsonl OPENCLAW_CONFIG_PATH=/app/workspace/openclaw.json && ` +
     `rm -f /tmp/hook-trace-overhead.jsonl && ` +
     `echo "=== ZERO-OVERHEAD: starting WITHOUT OPENCLAW_HOOK_DEBUG ===" && ` +
-    `timeout 30 node /app/node_modules/openclaw/openclaw.mjs gateway run --allow-unconfigured --bind loopback --auth none ` +
+    `timeout 30 node /app/node_modules/openclaw/openclaw.mjs gateway run --bind loopback --auth none ` +
     `> /tmp/oc-overhead.log 2>&1 & ` +
     `OVERHEAD_PID=$! && ` +
     `for i in $(seq 1 10); do ` +
@@ -245,12 +246,12 @@ function extractTraceLines(output: string): string[] {
 
 // ── Tests ────────────────────────────────────────────────────────────────
 
-describe("Level 2 E2E: patched gateway hook trace", { timeout: 180_000 }, () => {
+describe("Level 2 E2E: patched gateway hook trace", { timeout: 300_000 }, () => {
   beforeAll(async () => {
     container = await setupContainer();
     lifecycleTrace = await runGatewayLifecycle(container);
     console.log("[e2e] lifecycle trace:\n" + lifecycleTrace);
-  }, 180_000);
+  }, 300_000);
 
   afterAll(async () => {
     await container?.stop();

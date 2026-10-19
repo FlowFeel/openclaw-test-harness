@@ -38,7 +38,6 @@
 import { describe, it, expect } from "vitest"
 import { sessionKeyFor } from "../../src/plugins/oc-topic-manager/src/recovery-plan.js"
 
-const OC_SRC = "../../../oc-source/upstream/src"
 
 // The real forum from the topic-registration-loss war story.
 const CHAT_ID = "-1003842172831"
@@ -46,7 +45,9 @@ const WAR_STORY_TOPICS = [82385, 73239, 73336]
 
 describe("Feature: oc-topic-manager session keys conform to OC's key grammar", () => {
   it("Scenario: keys parse as well-formed agent-namespaced session keys", async () => {
-    const { parseAgentSessionKey } = await import(`${OC_SRC}/sessions/session-key-utils.js`)
+    const { parseAgentSessionKey } = await import(
+      "../../../oc-source/upstream/src/sessions/session-key-utils.ts"
+    )
 
     for (const topicId of WAR_STORY_TOPICS) {
       const key = sessionKeyFor("main", CHAT_ID, topicId)
@@ -58,7 +59,9 @@ describe("Feature: oc-topic-manager session keys conform to OC's key grammar", (
   })
 
   it("Scenario: OC classifies keys as routable telegram group sessions", async () => {
-    const { parseSessionDeliveryRoute } = await import(`${OC_SRC}/sessions/session-key-utils.js`)
+    const { parseSessionDeliveryRoute } = await import(
+      "../../../oc-source/upstream/src/sessions/session-key-utils.ts"
+    )
 
     for (const topicId of WAR_STORY_TOPICS) {
       const route = parseSessionDeliveryRoute(sessionKeyFor("main", CHAT_ID, topicId))
@@ -74,7 +77,7 @@ describe("Feature: oc-topic-manager session keys conform to OC's key grammar", (
 
   it("Scenario: the telegram plugin grammar extracts the exact chat and topic ids", async () => {
     const { parseTelegramTopicConversation } = await import(
-      "../../../oc-source/upstream/extensions/telegram/src/topic-conversation.js"
+      "../../../oc-source/upstream/extensions/telegram/src/topic-conversation.ts"
     )
 
     for (const topicId of WAR_STORY_TOPICS) {
@@ -90,7 +93,9 @@ describe("Feature: oc-topic-manager session keys conform to OC's key grammar", (
   })
 
   it("Scenario: generic thread resolver preserves the key (topic extraction is plugin-owned)", async () => {
-    const { parseSessionThreadInfo } = await import(`${OC_SRC}/config/sessions/thread-info.js`)
+    const { parseSessionThreadInfo } = await import(
+      "../../../oc-source/upstream/src/config/sessions/thread-info.ts"
+    )
 
     const key = sessionKeyFor("main", CHAT_ID, 82385)
     // Without a loaded telegram hook, the generic resolver returns the key
@@ -104,9 +109,11 @@ describe("Feature: oc-topic-manager session keys conform to OC's key grammar", (
   it("Scenario: keys survive round-trip through the full OC pipeline shape", async () => {
     // End-to-end composition: key → agent parse → plugin topic grammar,
     // for a non-default agent (the multi-agent collision case).
-    const { parseAgentSessionKey } = await import(`${OC_SRC}/sessions/session-key-utils.js`)
+    const { parseAgentSessionKey } = await import(
+      "../../../oc-source/upstream/src/sessions/session-key-utils.ts"
+    )
     const { parseTelegramTopicConversation } = await import(
-      "../../../oc-source/upstream/extensions/telegram/src/topic-conversation.js"
+      "../../../oc-source/upstream/extensions/telegram/src/topic-conversation.ts"
     )
 
     const key = sessionKeyFor("research", CHAT_ID, 82385)
@@ -123,10 +130,10 @@ describe("Feature: oc-topic-manager session keys conform to OC's key grammar", (
     // Proves this spec detects drift: a legacy-style key (no :group:/:topic:
     // segments) must not satisfy the contract.
     const { parseAgentSessionKey, parseSessionDeliveryRoute } = await import(
-      `${OC_SRC}/sessions/session-key-utils.js`
+      "../../../oc-source/upstream/src/sessions/session-key-utils.ts"
     )
     const { parseTelegramTopicConversation } = await import(
-      "../../../oc-source/upstream/extensions/telegram/src/topic-conversation.js"
+      "../../../oc-source/upstream/extensions/telegram/src/topic-conversation.ts"
     )
 
     const malformed = `agent:main:telegram:${CHAT_ID}:${82385}`
