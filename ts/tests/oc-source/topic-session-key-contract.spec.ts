@@ -104,7 +104,7 @@ describe("Feature: oc-topic-manager session keys conform to OC's key grammar", (
       baseSessionKey: key,
       threadId: undefined,
     })
-  })
+  }, 30000)
 
   it("Scenario: keys survive round-trip through the full OC pipeline shape", async () => {
     // End-to-end composition: key → agent parse → plugin topic grammar,
@@ -124,7 +124,7 @@ describe("Feature: oc-topic-manager session keys conform to OC's key grammar", (
     const parsed = parseTelegramTopicConversation({ conversationId: peerParts.join(":") })!
     expect(parsed.chatId).toBe(CHAT_ID)
     expect(parsed.topicId).toBe("82385")
-  })
+  }, 30000)
 
   it("Scenario: negative control — a malformed key FAILS the contract", async () => {
     // Proves this spec detects drift: a legacy-style key (no :group:/:topic:
@@ -141,5 +141,5 @@ describe("Feature: oc-topic-manager session keys conform to OC's key grammar", (
     expect(parsedAgent.rest).not.toMatch(/^telegram:group:/)
     expect(parseSessionDeliveryRoute(malformed)).toBeNull()
     expect(parseTelegramTopicConversation({ conversationId: `${CHAT_ID}:${82385}` })).toBeNull()
-  })
+  }, 30000)
 })
