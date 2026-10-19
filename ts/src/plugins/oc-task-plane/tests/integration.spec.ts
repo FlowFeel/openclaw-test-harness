@@ -147,6 +147,7 @@ describe("oc-task-plane integration", () => {
 
     const dispatchTool = tools.get("task_dispatch")!;
     const res = await dispatchTool.execute("call-1", {
+      kind: "exec",
       command: "docker build -t test .",
       owner: "session-42",
     });
@@ -326,6 +327,7 @@ describe("oc-task-plane integration", () => {
     // Dispatch a task with 10s timeout
     const dispatchTool = tools.get("task_dispatch")!;
     const res = await dispatchTool.execute("c-1", {
+      kind: "exec",
       command: "long-running-work-loop",
       timeoutMs: 10000,
     });
@@ -348,5 +350,101 @@ describe("oc-task-plane integration", () => {
     // Clean up
     const stopHook = hooks.get("gateway_stop")!;
     await stopHook({});
+  });
+
+  it("dispatches to durable sidecar when durableSpawner succeeds", async () => {
+    const store = new InMemoryTaskStore();
+    const calls: unknown[] = [];
+    const mockDurableSpawner = async (req: unknown) => {
+      calls.push(req);
+      return { ok: true, task_id: "absurd-task-999", status: "spawned" };
+    };
+
+    const plugin = createTaskPlanePlugin({
+      reader: store.reader,
+      writer: store.writer,
+      appender: store.appender,
+      outputReader: store.outputReader,
+      durableSpawner: mockDurableSpawner,
+    });
+
+    const { api, tools } = createMockPluginApi();
+    plugin.register(api);
+
+    const dispatchTool = tools.get("task_dispatch")!;
+    const res = await dispatchTool.execute("c-durable", {
+      kind: "durable",
+      payload: {
+        task_name: "custom_durable_workflow",
+        params: { foo: "bar" },
+      },
+    });
+
+    const data = JSON.parse(res.content[0].text);
+    expect(data.ok).toBe(true);
+    expect(data.status).toBe("running");
+    expect(data.kind).toBe("durable");
+    expect(data.durable_task_id).toBe("absurd-task-999");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      task_name: "custom_durable_workflow",
+      params: { foo: "bar" },
+      queue: "default",
+    });
+
+    // Check registry state
+    const task = store.registry.tasks[data.taskId];
+    expect(task).toBeDefined();
+    expect(task.status).toBe("running");
+    expect(task.kind).toBe("durable");
+    expect(task.payload.durable_task_id).toBe("absurd-task-999");
+
+    // Output handle received initial line
+    const output = store.outputs.get(task.output_handle);
+    expect(output).toContain("durable task spawned in absurd: absurd-task-999");
+  });
+
+  it("falls back cleanly to exec when sidecar fails or is unreachable", async () => {
+    const store = new InMemoryTaskStore();
+    let processSpawned = false;
+    const mockSpawner: ProcessSpawner = (cmd, opts) => {
+      processSpawned = true;
+      opts.onStdoutChunk?.("exec output line\n");
+      opts.onExit?.(0, null);
+      return { pid: 1234, kill: () => {} };
+    };
+
+    const failingDurableSpawner = async () => {
+      return { ok: false, status: "error", error: "ECONNREFUSED 127.0.0.1:18950" };
+    };
+
+    const plugin = createTaskPlanePlugin({
+      reader: store.reader,
+      writer: store.writer,
+      appender: store.appender,
+      outputReader: store.outputReader,
+      spawner: mockSpawner,
+      durableSpawner: failingDurableSpawner,
+    });
+
+    const { api, tools } = createMockPluginApi();
+    plugin.register(api);
+
+    // Dispatch without specifying kind (defaults to durable)
+    const dispatchTool = tools.get("task_dispatch")!;
+    const res = await dispatchTool.execute("c-fallback", {
+      command: "echo fallback-executed",
+    });
+
+    const data = JSON.parse(res.content[0].text);
+    expect(data.ok).toBe(true);
+    expect(data.kind).toBe("exec");
+    expect(processSpawned).toBe(true);
+
+    // Registry task was completed by the exec process
+    const task = store.registry.tasks[data.taskId];
+    expect(task).toBeDefined();
+    expect(task.kind).toBe("exec");
+    expect(task.status).toBe("done");
   });
 });

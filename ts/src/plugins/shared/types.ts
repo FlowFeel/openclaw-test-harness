@@ -162,7 +162,7 @@ export function definePluginEntry(def: PluginDefinition): PluginDefinition {
 
 // ── TaskPlane Types (Issue #29) ──────────────────────────────────────────
 
-export type TaskPlaneKind = "exec" | "subagent" | "wake" | "cron";
+export type TaskPlaneKind = "durable" | "exec" | "subagent" | "wake" | "cron";
 export type TaskPlaneStatus = "queued" | "running" | "done" | "failed" | "killed";
 
 export interface TaskPlaneTimestamps {
