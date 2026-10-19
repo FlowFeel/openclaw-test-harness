@@ -53,6 +53,47 @@ export type OutputReader = (handlePath: string, options?: { tailLines?: number; 
 export type PidChecker = (pid: number) => boolean;
 export type ShippedStateReader = (cwd?: string) => ShippedState;
 
+export interface DurableSpawnRequest {
+  task_name: string;
+  params: Record<string, unknown>;
+  queue?: string;
+  notify?: Record<string, unknown>;
+}
+
+export interface DurableSpawnResponse {
+  ok: boolean;
+  task_id?: string;
+  status?: string;
+  error?: string;
+}
+
+export type DurableSpawner = (
+  req: DurableSpawnRequest,
+  options?: { endpoint?: string },
+) => Promise<DurableSpawnResponse>;
+
+export const defaultDurableSpawner: DurableSpawner = async (req, options) => {
+  const endpoint = options?.endpoint ?? "http://127.0.0.1:18950/spawn";
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  const data = (await res.json()) as Record<string, unknown>;
+  if (res.status === 200 && data.task_id) {
+    return {
+      ok: true,
+      task_id: String(data.task_id),
+      status: String(data.status ?? "spawned"),
+    };
+  }
+  return {
+    ok: false,
+    status: String(data.status ?? "error"),
+    error: String(data.error ?? `HTTP ${res.status}`),
+  };
+};
+
 export interface SpawnedProcess {
   pid?: number;
   kill: (signal?: NodeJS.Signals | number) => void;

@@ -64,6 +64,8 @@ import {
   type ProcessSpawner,
   type SpawnedProcess,
   type ShippedStateReader,
+  type DurableSpawner,
+  defaultDurableSpawner,
 } from "./task-plane-io.js";
 
 export interface OcTaskPlaneConfig {
@@ -71,6 +73,7 @@ export interface OcTaskPlaneConfig {
   registryPath?: string;
   outputDir?: string;
   supervisorIntervalMs?: number;
+  sidecarEndpoint?: string;
 }
 
 export interface TaskPlaneIoDependencies {
@@ -81,6 +84,7 @@ export interface TaskPlaneIoDependencies {
   pidChecker?: PidChecker;
   spawner?: ProcessSpawner;
   shippedStateReader?: ShippedStateReader;
+  durableSpawner?: DurableSpawner;
   now?: () => number;
 }
 
@@ -93,6 +97,7 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
   const pidChecker = deps.pidChecker ?? isPidAlive;
   const spawner = deps.spawner ?? defaultProcessSpawner;
   const shippedStateReader = deps.shippedStateReader ?? readRepoShippedState;
+  const durableSpawner = deps.durableSpawner ?? defaultDurableSpawner;
   const getNow = deps.now ?? (() => Date.now());
 
   let taskCounter = 0;
@@ -272,78 +277,93 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
             registry = nextReg;
             persist();
 
+            let effectiveKind = kind;
+
             // Durable routing: kind === 'durable' routes to the prime-durable
             // sidecar HTTP API (absurd-backed, checkpointed steps in Postgres).
-            // The task lands in the task-plane registry as 'durable/queued'
-            // and the result surfaces via the notification callback.
-            if (kind === "durable") {
-              const durableTaskName = typeof (payload as Record<string, unknown>).task_name === "string"
-                ? String((payload as Record<string, unknown>).task_name)
+            // When sidecar is unavailable and a command is present, falls back cleanly to local exec.
+            if (effectiveKind === "durable") {
+              const payloadObj = (payload && typeof payload === "object")
+                ? (payload as Record<string, unknown>)
+                : {};
+              const durableTaskName = typeof payloadObj.task_name === "string"
+                ? String(payloadObj.task_name)
                 : "agent_step";
-              const durableParams = typeof (payload as Record<string, unknown>).params === "object"
-                && (payload as Record<string, unknown>).params !== null
-                ? (payload as Record<string, unknown>).params
+              const durableParams = typeof payloadObj.params === "object" && payloadObj.params !== null
+                ? (payloadObj.params as Record<string, unknown>)
                 : { prompt: command };
-              const notify = typeof (payload as Record<string, unknown>).notify === "object"
-                && (payload as Record<string, unknown>).notify !== null
-                ? (payload as Record<string, unknown>).notify
+              const notify = typeof payloadObj.notify === "object" && payloadObj.notify !== null
+                ? (payloadObj.notify as Record<string, unknown>)
                 : undefined;
 
               try {
-                const spawnRes = await fetch("http://127.0.0.1:18950/spawn", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
+                const spawnResult = await durableSpawner(
+                  {
                     task_name: durableTaskName,
                     params: durableParams,
                     queue: "default",
                     ...(notify ? { notify } : {}),
-                  }),
-                });
-                const spawnBody = (await spawnRes.json()) as Record<string, unknown>;
-                if (spawnRes.status === 200 && spawnBody.task_id) {
-                  // record the absurd task_id in the task-plane registry
-                  const done = completeTask(
-                    registry, taskId,
-                    {
-                      exitCode: 0,
-                      outputTail: `durable task spawned: ${String(spawnBody.task_id)}`,
-                    },
-                    { nowMs: getNow() },
-                  );
-                  registry = done.registry;
+                  },
+                  { endpoint: cfg.sidecarEndpoint },
+                );
+
+                if (spawnResult.ok && spawnResult.task_id) {
+                  // Mark task as running in the task-plane registry
+                  const started = startTask(registry, taskId, { nowMs: now });
+                  registry = started.registry;
+                  if (registry.tasks[taskId]) {
+                    registry.tasks[taskId].payload = {
+                      ...registry.tasks[taskId].payload,
+                      durable_task_id: spawnResult.task_id,
+                    };
+                  }
+                  appender(outputHandlePath, `[oc-task-plane] durable task spawned in absurd: ${spawnResult.task_id}\n`);
                   persist();
+
                   return {
                     content: [{
                       type: "text" as const,
                       text: JSON.stringify({
                         ok: true,
                         taskId: task.id,
-                        durable_task_id: spawnBody.task_id,
-                        status: "durable-spawned",
-                        kind,
+                        durable_task_id: spawnResult.task_id,
+                        status: "running",
+                        kind: "durable",
+                        output_handle: outputHandlePath,
                       }, null, 2),
                     }],
                   };
                 }
-                // sidecar rejected or errored: fall through to local exec
+
+                // If sidecar returned non-ok, fall back to exec if command available
                 api.logger?.warn?.(
-                  `[oc-task-plane] durable spawn failed (${spawnRes.status}): ${JSON.stringify(spawnBody)}`,
+                  `[oc-task-plane] durable spawn failed (${spawnResult.status}: ${spawnResult.error}), falling back to exec`,
                 );
+                if (command) {
+                  effectiveKind = "exec";
+                }
               } catch (durableErr) {
                 api.logger?.warn?.(
                   `[oc-task-plane] sidecar unreachable, falling back to exec: ${String(durableErr)}`,
                 );
+                if (command) {
+                  effectiveKind = "exec";
+                }
               }
             }
 
-            // Asynchronously start execution if exec kind
-            if (kind === "exec" && command) {
+            // Asynchronously start execution if exec kind (either direct or fallback from durable)
+            if (effectiveKind === "exec" && command) {
               const started = startTask(registry, taskId, { nowMs: now });
               registry = started.registry;
+              if (registry.tasks[taskId]) {
+                registry.tasks[taskId].kind = "exec";
+              }
               persist();
 
               const proc = spawner(command, {
+                cwd: outputDir,
+                env: process.env,
                 onStdoutChunk(chunk) {
                   appender(outputHandlePath, chunk);
                 },
@@ -385,11 +405,12 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
               }
             }
 
+            const currentTask = registry.tasks[taskId] ?? task;
             const response = {
               ok: true,
               taskId: task.id,
-              status: task.status,
-              kind: task.kind,
+              status: currentTask.status,
+              kind: currentTask.kind,
               output_handle: task.output_handle,
               timeoutMs: task.timeoutMs,
               classification: classification.isLongRunner
