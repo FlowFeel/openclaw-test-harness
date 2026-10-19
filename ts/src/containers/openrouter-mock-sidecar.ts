@@ -127,11 +127,9 @@ const isMainModule = (() => {
   }
 })()
 
-import { openrouterMockLog } from "../plugins/shared/logger-utils.ts"
-
 if (isMainModule) {
   const port = Number(process.env.OPENROUTER_MOCK_PORT ?? "9876")
   const server = new OpenRouterMockServer(port, "0.0.0.0")
   await server.start()
-  openrouterMockLog(port)
+  console.log(`[openrouter-mock] listening on ${port}`)
 }
