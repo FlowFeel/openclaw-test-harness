@@ -235,41 +235,30 @@ def check_plugin_drift(
             continue
 
         if expected_sha is None:
-            results.append(
-                PluginDriftResult(
-                    plugin_id=plugin_id,
-                    status=DriftClassification.UNRECOGNIZED_BUILD,
-                    expected_sha=None,
-                    actual_sha=actual_sha,
-                    runtime_path=target_file,
-                    filename=filename,
-                    details="Unable to resolve expected bundle hash from release",
-                )
-            )
-        elif actual_sha == expected_sha:
-            results.append(
-                PluginDriftResult(
-                    plugin_id=plugin_id,
-                    status=DriftClassification.MATCH,
-                    expected_sha=expected_sha,
-                    actual_sha=actual_sha,
-                    runtime_path=target_file,
-                    filename=filename,
-                    details="Runtime bundle matches release checksum exactly",
-                )
-            )
+            status = DriftClassification.UNRECOGNIZED_BUILD
+            expected_val = None
+            details = "Unable to resolve expected bundle hash from release"
         else:
-            results.append(
-                PluginDriftResult(
-                    plugin_id=plugin_id,
-                    status=DriftClassification.STALE,
-                    expected_sha=expected_sha,
-                    actual_sha=actual_sha,
-                    runtime_path=target_file,
-                    filename=filename,
-                    details="Runtime bundle hash differs from blessed release",
-                )
+            expected_val = expected_sha
+            match actual_sha == expected_sha:
+                case True:
+                    status = DriftClassification.MATCH
+                    details = "Runtime bundle matches release checksum exactly"
+                case False:
+                    status = DriftClassification.STALE
+                    details = "Runtime bundle hash differs from blessed release"
+
+        results.append(
+            PluginDriftResult(
+                plugin_id=plugin_id,
+                status=status,
+                expected_sha=expected_val,
+                actual_sha=actual_sha,
+                runtime_path=target_file,
+                filename=filename,
+                details=details,
             )
+        )
 
     return results
 

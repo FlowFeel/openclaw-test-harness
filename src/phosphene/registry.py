@@ -25,6 +25,7 @@ from .drift_checker import (
     manage_alert_state,
     verify_commit_provenance,
 )
+from .utils import MESSAGES, format_task_line, safe_print
 
 
 @dataclass
@@ -194,16 +195,15 @@ def main() -> None:
     """CLI entrypoint for running registry tasks directly."""
     args = sys.argv[1:]
     if "--list" in args:
-        print("Registered Tasks:")
+        safe_print(MESSAGES["REGISTERED_TASKS_HEADER"])
         for task in list_tasks():
-            pad_name = task.name.ljust(24)
-            print(f"  - {pad_name} [{task.cron}] (timeout: {task.timeout_seconds}s)")
+            safe_print(format_task_line(task.name, task.cron, task.timeout_seconds))
         return
 
     # Default to running drift check
     lines = run_plugin_drift_check()
     for line in lines:
-        print(line)
+        safe_print(line)
 
 
 if __name__ == "__main__":
