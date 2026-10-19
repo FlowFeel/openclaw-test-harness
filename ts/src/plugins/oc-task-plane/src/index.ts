@@ -227,7 +227,7 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
         description: "Dispatches an asynchronous, lock-free task. Returns immediately with a task ID and output handle without holding execution locks.",
         parameters: Type.Object({
           command: Type.Optional(Type.String({ description: "Shell command to execute for exec tasks" })),
-          kind: Type.Optional(Type.String({ description: "Task kind: 'exec', 'subagent', 'wake', or 'cron' (default: 'exec')" })),
+          kind: Type.Optional(Type.String({ description: "Task kind: 'durable', 'exec', 'subagent', 'wake', or 'cron' (default: 'durable')" })),
           payload: Type.Optional(Type.Any({ description: "Arbitrary payload for the task" })),
           timeoutMs: Type.Optional(Type.Number({ description: "Timeout in milliseconds enforced by supervisor" })),
           owner: Type.Optional(Type.String({ description: "Owner session key" })),
@@ -236,7 +236,7 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
           try {
             const now = getNow();
             const command = typeof params.command === "string" ? params.command : "";
-            const kind = (typeof params.kind === "string" ? params.kind : "exec") as TaskPlaneKind;
+            const kind = (typeof params.kind === "string" ? params.kind : "durable") as TaskPlaneKind;
             const owner = typeof params.owner === "string" ? params.owner : "session-main";
             const explicitTimeout = typeof params.timeoutMs === "number" ? params.timeoutMs : undefined;
 
@@ -271,6 +271,71 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
             );
             registry = nextReg;
             persist();
+
+            // Durable routing: kind === 'durable' routes to the prime-durable
+            // sidecar HTTP API (absurd-backed, checkpointed steps in Postgres).
+            // The task lands in the task-plane registry as 'durable/queued'
+            // and the result surfaces via the notification callback.
+            if (kind === "durable") {
+              const durableTaskName = typeof (payload as Record<string, unknown>).task_name === "string"
+                ? String((payload as Record<string, unknown>).task_name)
+                : "agent_step";
+              const durableParams = typeof (payload as Record<string, unknown>).params === "object"
+                && (payload as Record<string, unknown>).params !== null
+                ? (payload as Record<string, unknown>).params
+                : { prompt: command };
+              const notify = typeof (payload as Record<string, unknown>).notify === "object"
+                && (payload as Record<string, unknown>).notify !== null
+                ? (payload as Record<string, unknown>).notify
+                : undefined;
+
+              try {
+                const spawnRes = await fetch("http://127.0.0.1:18950/spawn", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    task_name: durableTaskName,
+                    params: durableParams,
+                    queue: "default",
+                    ...(notify ? { notify } : {}),
+                  }),
+                });
+                const spawnBody = (await spawnRes.json()) as Record<string, unknown>;
+                if (spawnRes.status === 200 && spawnBody.task_id) {
+                  // record the absurd task_id in the task-plane registry
+                  const done = completeTask(
+                    registry, taskId,
+                    {
+                      exitCode: 0,
+                      outputTail: `durable task spawned: ${String(spawnBody.task_id)}`,
+                    },
+                    { nowMs: getNow() },
+                  );
+                  registry = done.registry;
+                  persist();
+                  return {
+                    content: [{
+                      type: "text" as const,
+                      text: JSON.stringify({
+                        ok: true,
+                        taskId: task.id,
+                        durable_task_id: spawnBody.task_id,
+                        status: "durable-spawned",
+                        kind,
+                      }, null, 2),
+                    }],
+                  };
+                }
+                // sidecar rejected or errored: fall through to local exec
+                api.logger?.warn?.(
+                  `[oc-task-plane] durable spawn failed (${spawnRes.status}): ${JSON.stringify(spawnBody)}`,
+                );
+              } catch (durableErr) {
+                api.logger?.warn?.(
+                  `[oc-task-plane] sidecar unreachable, falling back to exec: ${String(durableErr)}`,
+                );
+              }
+            }
 
             // Asynchronously start execution if exec kind
             if (kind === "exec" && command) {

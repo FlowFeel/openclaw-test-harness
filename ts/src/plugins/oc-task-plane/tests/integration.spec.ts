@@ -147,6 +147,7 @@ describe("oc-task-plane integration", () => {
 
     const dispatchTool = tools.get("task_dispatch")!;
     const res = await dispatchTool.execute("call-1", {
+      kind: "exec",
       command: "docker build -t test .",
       owner: "session-42",
     });
@@ -326,6 +327,7 @@ describe("oc-task-plane integration", () => {
     // Dispatch a task with 10s timeout
     const dispatchTool = tools.get("task_dispatch")!;
     const res = await dispatchTool.execute("c-1", {
+      kind: "exec",
       command: "long-running-work-loop",
       timeoutMs: 10000,
     });
