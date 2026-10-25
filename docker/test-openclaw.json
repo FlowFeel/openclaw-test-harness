@@ -4,6 +4,9 @@
       "model": "openrouter/@preset/glm-5-2",
       "contextTokens": 128000,
       "maxConcurrent": 2,
+      "heartbeat": {
+        "every": "0m"
+      },
       "compaction": {
         "mode": "safeguard",
         "maxActiveTranscriptBytes": "5mb"

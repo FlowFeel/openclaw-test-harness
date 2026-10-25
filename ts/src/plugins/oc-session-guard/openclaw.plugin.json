@@ -1,9 +1,10 @@
 {
   "id": "oc-session-guard",
   "name": "OC Session Guard",
-  "description": "Session bloat management — strips bloat fields after compaction and purges stale subagents. No sidecar needed.",
+  "description": "Session bloat management & idle admission guard — strips bloat fields, purges stale subagents, and blocks idle model calls. No sidecar needed.",
   "contracts": {
-    "tools": ["session_health", "session_cleanup"]
+    "tools": ["session_health", "session_cleanup"],
+    "hooks": ["after_compaction", "session_end", "before_agent_run"]
   },
   "activation": {
     "onStartup": true
@@ -14,6 +15,11 @@
     "properties": {
       "maxAgeHours": { "type": "number", "default": 15 },
       "stripBloatFields": { "type": "boolean", "default": true },
+      "suppressIdleHeartbeats": {
+        "type": "boolean",
+        "default": true,
+        "description": "Block automated heartbeat turns when no actionable tasks are due to prevent idle model calls"
+      },
       "bloatFields": {
         "type": "array",
         "items": { "type": "string" },

@@ -72,10 +72,10 @@ function getTool(tools: CapturedTool[], name: string): CapturedTool {
 const NOW = 2_000_000_000;
 
 describe("oc-session-guard wiring", () => {
-  it("registers 2 hooks (after_compaction, session_end) and 2 tools", () => {
+  it("registers 3 hooks (before_agent_run, after_compaction, session_end) and 2 tools", () => {
     const { api, hooks, tools } = createMockApi();
     plugin.register(api as never, {});
-    expect(hooks.map((h) => h.event)).toEqual(["after_compaction", "session_end"]);
+    expect(hooks.map((h) => h.event)).toEqual(["before_agent_run", "after_compaction", "session_end"]);
     expect(tools.map((t) => t.name)).toEqual(["session_health", "session_cleanup"]);
   });
 
@@ -254,4 +254,60 @@ describe("oc-session-guard wiring", () => {
     // Non-bloat field preserved
     expect(result["topic:1"].model).toBe("gpt-4");
   });
+
+  describe("before_agent_run hook integration", () => {
+    it("blocks standard idle heartbeat prompt to prevent model calls", async () => {
+      const { api, hooks, logs } = createMockApi();
+      plugin.register(api as never, {});
+
+      const idlePrompt =
+        "Follow the heartbeat monitor scratch context when provided. " +
+        "Recurring tasks are automations; create or change their schedules with the automations tool, " +
+        "not heartbeat scratch. Do not infer or repeat old tasks from prior chats. " +
+        "If nothing needs attention, reply HEARTBEAT_OK.";
+
+      const decision = await getHook(hooks, "before_agent_run").handler({ prompt: idlePrompt });
+      expect(decision).toEqual({
+        outcome: "block",
+        reason: "Idle heartbeat suppressed — zero model calls when idle",
+      });
+      expect(logs.some((l) => l.includes("Suppressed idle heartbeat turn"))).toBe(true);
+    });
+
+    it("admits interactive user prompt without blocking", async () => {
+      const { api, hooks } = createMockApi();
+      plugin.register(api as never, {});
+
+      const decision = await getHook(hooks, "before_agent_run").handler({
+        prompt: "Run the full vitest test suite and report failures",
+      });
+      expect(decision).toEqual({ outcome: "pass" });
+    });
+
+    it("admits heartbeat turn when scheduled tasks are present", async () => {
+      const { api, hooks } = createMockApi();
+      plugin.register(api as never, {});
+
+      const taskPrompt =
+        "Run the following periodic tasks (only those due based on their intervals):\n" +
+        "- report: generate daily metrics\n" +
+        "After completing all due tasks, reply HEARTBEAT_OK.";
+
+      const decision = await getHook(hooks, "before_agent_run").handler({ prompt: taskPrompt });
+      expect(decision).toEqual({ outcome: "pass" });
+    });
+
+    it("passes through all turns when suppressIdleHeartbeats is false", async () => {
+      const { api, hooks } = createMockApi();
+      plugin.register(api as never, { suppressIdleHeartbeats: false });
+
+      const idlePrompt =
+        "Follow the heartbeat monitor scratch context when provided. " +
+        "If nothing needs attention, reply HEARTBEAT_OK.";
+
+      const decision = await getHook(hooks, "before_agent_run").handler({ prompt: idlePrompt });
+      expect(decision).toEqual({ outcome: "pass" });
+    });
+  });
 });
+

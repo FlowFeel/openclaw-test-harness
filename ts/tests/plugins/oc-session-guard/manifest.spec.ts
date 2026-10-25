@@ -26,6 +26,14 @@ describe("oc-session-guard plugin", () => {
     expect(existsSync(resolve(pluginDir, "src/sessions-io.ts"))).toBe(true);
   });
 
+  it("idle-guard-logic exists", () => {
+    expect(existsSync(resolve(pluginDir, "src/idle-guard-logic.ts"))).toBe(true);
+  });
+
+  it("utils exists", () => {
+    expect(existsSync(resolve(pluginDir, "src/utils.ts"))).toBe(true);
+  });
+
   const manifest = JSON.parse(
     readFileSync(resolve(pluginDir, "openclaw.plugin.json"), "utf8")
   );
@@ -35,9 +43,16 @@ describe("oc-session-guard plugin", () => {
     expect(manifest.contracts.tools).toContain("session_cleanup");
   });
 
-  it("has bloat fields default", () => {
+  it("declares after_compaction, session_end, and before_agent_run hooks", () => {
+    expect(manifest.contracts.hooks).toContain("after_compaction");
+    expect(manifest.contracts.hooks).toContain("session_end");
+    expect(manifest.contracts.hooks).toContain("before_agent_run");
+  });
+
+  it("has bloat fields default and suppressIdleHeartbeats option", () => {
     const props = manifest.configSchema.properties;
     expect(props.bloatFields.default).toContain("compactionCheckpoints");
     expect(props.maxAgeHours.default).toBe(15);
+    expect(props.suppressIdleHeartbeats.default).toBe(true);
   });
 });
