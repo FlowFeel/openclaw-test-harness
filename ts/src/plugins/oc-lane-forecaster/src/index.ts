@@ -143,8 +143,10 @@ export function createLaneForecasterPlugin(deps: ForecasterIoDependencies = {}) 
               `[oc-lane-forecaster] Run ${runId} likely to breach lane cap (${Math.round(prediction.predictedDurationMs / 1000)}s > ${Math.round(laneCapMs / 1000)}s): ${prediction.advice}`
             );
           }
+          return { outcome: "pass" };
         } catch (err) {
           api.logger?.error?.(`[oc-lane-forecaster] before_agent_run failed: ${String(err)}`);
+          return { outcome: "pass" };
         }
       });
 

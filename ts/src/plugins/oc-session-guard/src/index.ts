@@ -1,37 +1,42 @@
 /**
- * OC Session Guard — session bloat management plugin.
+ * OC Session Guard — session bloat and idle admission management plugin.
  *
  * @behavior
- * Hooks into after_compaction and session_end to strip bloat fields
- * and purge stale subagent entries from sessions.json. No sidecar
- * process needed — direct file I/O.
+ * - Hooks into after_compaction and session_end to strip bloat fields
+ *   and purge stale subagent entries from sessions.json.
+ * - Hooks into before_agent_run to intercept and suppress idle heartbeat
+ *   turns, guaranteeing zero model calls when the instance is idle.
  *
  * @invariants
  * - No OC core files modified
- * - All cleanup logic is pure (session-cleanup.ts)
- * - File I/O is in sessions-io.ts (injectable for tests)
- * - Hooks never block agent runs (catch errors, log, continue)
- *
- * @dft
- * - Pure logic tested without file system
- * - Injectable I/O functions
- * - Deterministic timestamps
+ * - Pure logic in idle-guard-logic.ts and session-cleanup.ts
+ * - Regexes, messages, and formatters in utils.ts
+ * - File I/O in sessions-io.ts (injectable for tests)
+ * - Zero auxiliary model calls
  */
 
 import { definePluginEntry, Type, type PluginApi } from "../../shared/types.js";
-import { cleanupSessions, type SessionsMap, type CleanupReport } from "../../shared/session-cleanup.js";
+import { cleanupSessions } from "../../shared/session-cleanup.js";
 import {
   readSessions,
   writeSessions,
   type SessionsReader,
   type SessionsWriter,
 } from "./sessions-io.js";
+import { evaluateAgentRunAdmission } from "./idle-guard-logic.js";
+import {
+  formatCleanupLog,
+  formatPurgeLog,
+  formatHealthReport,
+  MESSAGES,
+} from "./utils.js";
 
 export interface SessionGuardConfig {
   maxAgeHours?: number;
   stripBloatFields?: boolean;
   bloatFields?: string[];
   sessionsPath?: string;
+  suppressIdleHeartbeats?: boolean;
 }
 
 const DEFAULT_BLOAT_FIELDS = [
@@ -46,15 +51,43 @@ const DEFAULT_BLOAT_FIELDS = [
 export default definePluginEntry({
   id: "oc-session-guard",
   name: "OC Session Guard",
-  description: "Session bloat management — strips bloat fields and purges stale subagents.",
+  description:
+    "Session bloat & idle admission guard — strips bloat fields, purges stale subagents, and blocks idle model calls.",
   register(api: PluginApi, config?: Record<string, unknown>) {
     const cfg: SessionGuardConfig = (config as SessionGuardConfig) ?? {};
     const bloatFields = cfg.bloatFields ?? DEFAULT_BLOAT_FIELDS;
     const maxAgeHours = cfg.maxAgeHours ?? 15;
     const sessionsPath = cfg.sessionsPath;
+    const suppressIdle = cfg.suppressIdleHeartbeats ?? true;
 
     const reader: SessionsReader = (path) => readSessions(path ?? sessionsPath);
-    const writer: SessionsWriter = (data, path) => writeSessions(data, path ?? sessionsPath);
+    const writer: SessionsWriter = (data, path) =>
+      writeSessions(data, path ?? sessionsPath);
+
+    // ── Hook: before_agent_run — suppress idle model calls ──
+    api.on("before_agent_run", async (event: unknown, ctx?: unknown) => {
+      if (!suppressIdle) {
+        return { outcome: "pass" };
+      }
+      try {
+        const prompt =
+          event && typeof event === "object" && "prompt" in event
+            ? String((event as { prompt?: unknown }).prompt ?? "")
+            : "";
+        const trigger =
+          ctx && typeof ctx === "object" && "trigger" in ctx
+            ? String((ctx as { trigger?: unknown }).trigger ?? "")
+            : "";
+        const decision = evaluateAgentRunAdmission(prompt, { trigger });
+        if (decision.outcome === "block") {
+          api.logger?.info?.(MESSAGES.IDLE_HEARTBEAT_LOG);
+        }
+        return decision;
+      } catch (err) {
+        api.logger?.error?.(`${MESSAGES.BEFORE_RUN_FAILED_LOG}${String(err)}`);
+        return { outcome: "pass" };
+      }
+    });
 
     // ── Hook: after_compaction — strip bloat fields ─────────
     api.on("after_compaction", async () => {
@@ -67,13 +100,9 @@ export default definePluginEntry({
           nowMs: Date.now(),
         });
         writer(cleaned, sessionsPath);
-        api.logger?.info?.(
-          `[oc-session-guard] Cleanup: ${report.purgedCount} purged, ` +
-          `${report.strippedFieldCount} fields stripped, ` +
-          `${report.reductionPercent}% size reduction`
-        );
+        api.logger?.info?.(formatCleanupLog(report));
       } catch (err) {
-        api.logger?.error?.(`[oc-session-guard] after_compaction failed: ${String(err)}`);
+        api.logger?.error?.(`${MESSAGES.CLEANUP_FAILED_LOG}${String(err)}`);
       }
     });
 
@@ -88,11 +117,9 @@ export default definePluginEntry({
           nowMs: Date.now(),
         });
         writer(cleaned, sessionsPath);
-        api.logger?.info?.(
-          `[oc-session-guard] Purge: ${report.purgedCount} stale entries removed`
-        );
+        api.logger?.info?.(formatPurgeLog(report));
       } catch (err) {
-        api.logger?.error?.(`[oc-session-guard] session_end failed: ${String(err)}`);
+        api.logger?.error?.(`${MESSAGES.PURGE_FAILED_LOG}${String(err)}`);
       }
     });
 
@@ -108,27 +135,36 @@ export default definePluginEntry({
           const raw = reader(sessionsPath);
           if (!raw) {
             return {
-              content: [{ type: "text" as const, text: "sessions.json not found" }],
+              content: [
+                { type: "text" as const, text: MESSAGES.SESSIONS_NOT_FOUND },
+              ],
             };
           }
           const count = Object.keys(raw).length;
-          const subagentCount = Object.keys(raw).filter((k) => k.includes("subagent")).length;
+          const subagentCount = Object.keys(raw).filter((k) =>
+            k.includes("subagent"),
+          ).length;
           const size = JSON.stringify(raw).length;
           return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                ok: true,
-                entryCount: count,
-                subagentCount,
-                sizeBytes: size,
-                sizeKB: Math.round(size / 1024),
-              }, null, 2),
-            }],
+            content: [
+              {
+                type: "text" as const,
+                text: formatHealthReport({
+                  entryCount: count,
+                  subagentCount,
+                  sizeBytes: size,
+                }),
+              },
+            ],
           };
         } catch (err) {
           return {
-            content: [{ type: "text" as const, text: `Health check failed: ${String(err)}` }],
+            content: [
+              {
+                type: "text" as const,
+                text: `${MESSAGES.HEALTH_CHECK_FAILED}${String(err)}`,
+              },
+            ],
           };
         }
       },
@@ -146,7 +182,9 @@ export default definePluginEntry({
           const raw = reader(sessionsPath);
           if (!raw) {
             return {
-              content: [{ type: "text" as const, text: "sessions.json not found" }],
+              content: [
+                { type: "text" as const, text: MESSAGES.SESSIONS_NOT_FOUND },
+              ],
             };
           }
           const { cleaned, report } = cleanupSessions(raw, {
@@ -156,14 +194,21 @@ export default definePluginEntry({
           });
           writer(cleaned, sessionsPath);
           return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify(report, null, 2),
-            }],
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(report, null, 2),
+              },
+            ],
           };
         } catch (err) {
           return {
-            content: [{ type: "text" as const, text: `Cleanup failed: ${String(err)}` }],
+            content: [
+              {
+                type: "text" as const,
+                text: `${MESSAGES.CLEANUP_MANUAL_FAILED}${String(err)}`,
+              },
+            ],
           };
         }
       },
