@@ -25,6 +25,8 @@ import {
   createRegistry,
   hasKindFrontmatter,
   parseNoteFrontmatter,
+  applyKindPredicateDefaults,
+  mergeKindPredicateTable,
   processToolResultForFileRead,
   recordFire,
   recordHit,
@@ -68,6 +70,13 @@ export interface OcMemoryRecallConfig {
   defaultPolicy?: DeliveryPolicy;
   /** Safety ceiling TTL in milliseconds for hold-once records (default: 30 minutes). */
   holdOnceTtlMs?: number;
+  /**
+   * Per-kind default predicate seeds for un-predicated notes (PR-1). Entries
+   * merge over the built-in bench-backed defaults (DEFAULT_KIND_PREDICATES);
+   * an empty string disables the seed for that kind. Notes carrying their own
+   * `predicate:` frontmatter always win.
+   */
+  kindPredicates?: Record<string, string>;
 }
 
 export default definePluginEntry({
@@ -88,6 +97,7 @@ export default definePluginEntry({
     const eventPushEnabled = cfg.eventPushEnabled ?? true;
     const defaultPolicy: DeliveryPolicy = cfg.defaultPolicy ?? "hold-once";
     const holdOnceTtlMs = cfg.holdOnceTtlMs ?? 1_800_000;
+    const kindPredicates = mergeKindPredicateTable(cfg.kindPredicates ?? null);
 
     let registry: NoteRegistry = createRegistry([]);
     let telemetry: RecallTelemetryState = createInitialTelemetry();
@@ -124,9 +134,9 @@ export default definePluginEntry({
       // key reach the parser. Episodic session logs are skipped at O(1) each
       // and never enter the registry (see hasKindFrontmatter).
       const candidates = rawNotes.filter((n) => hasKindFrontmatter(n.rawContent));
-      const parsedNotes: MemoryNote[] = candidates.map((n) =>
-        parseNoteFrontmatter(n.rawContent, n.id),
-      );
+      const parsedNotes: MemoryNote[] = candidates
+        .map((n) => parseNoteFrontmatter(n.rawContent, n.id))
+        .map((n) => applyKindPredicateDefaults(n, kindPredicates));
       registry = createRegistry(parsedNotes);
       const candidateIds = new Set(candidates.map((n) => n.id));
       lastScan = {

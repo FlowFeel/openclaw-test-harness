@@ -252,6 +252,15 @@ export const PREDICATE_INTERNAL_PERIOD_REGEX: Readonly<RegExp> = Object.freeze(/
 export const IMPERATIVE_MOOD_REGEX: Readonly<RegExp> = Object.freeze(
   /^(do not|never|always|ensure|make sure|use|avoid|please)\b/i
 );
+/**
+ * Must-rule framing anywhere inside a predicate (not just the leading token —
+ * IMPERATIVE_MOOD_REGEX already covers leading imperatives). Bench crosswalk
+ * 2026-10-19: imperative/MUST cues read as compliance commands and measure
+ * worse than descriptive predicates; GikiMem field guide Ch2: written rules
+ * don't stop slips, mechanisms do. Lint rejects these at verification time so
+ * a MUST-framed note fails recall_verify instead of silently degrading cues.
+ */
+export const MUST_FRAMING_REGEX: Readonly<RegExp> = Object.freeze(/\bMUST\b/);
 export const PATH_SHAPE_REGEX: Readonly<RegExp> = Object.freeze(
   /^(\.?\.?\/|[\w-]+\/|[a-zA-Z]:\\|[\w-]+\.[a-zA-Z0-9]+$)[\w\-./\\]*$/
 );

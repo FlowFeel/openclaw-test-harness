@@ -33,6 +33,9 @@ import {
   lintNoteSchemaV2,
   isProsePointer,
   resolvePointer,
+  DEFAULT_KIND_PREDICATES,
+  mergeKindPredicateTable,
+  applyKindPredicateDefaults,
   type MemoryNote,
 } from "../src/memory-recall-logic.js";
 import { formatEventPushCue } from "../src/event-push-logic.js";
@@ -898,5 +901,111 @@ describe("resolvePointer (exact-path pointer guarantee)", () => {
     // Pointer token is the exact path; prose source may appear only as demoted context
     expect(cue).toContain("• notes/status — via: Standup Board");
     expect(cue.indexOf("notes/status")).toBeLessThan(cue.indexOf("Standup Board"));
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PR-1: Per-kind default predicate table + MUST-framing lint
+// ═══════════════════════════════════════════════════════════════
+
+describe("PR-1: Per-kind default predicate table", () => {
+  const unpredicated = (kind: string, id = "note.md") =>
+    parseNoteFrontmatter(`---
+kind: ${kind}
+use_when: testing
+does_not_apply_when: none
+provenance: "2026-10-19"
+source: "target.md"
+title: "Test Note"
+---
+Body`, id);
+
+  it("seeds bench-backed defaults for measured kinds", () => {
+    expect(DEFAULT_KIND_PREDICATES.domain_fact).toBe("value changed");
+    expect(DEFAULT_KIND_PREDICATES.authority).toBe("approver changed");
+    expect(DEFAULT_KIND_PREDICATES.user_preference).toBe("owner's choice was revised");
+  });
+
+  it("fills the predicate gap on un-predicated notes of seeded kinds", () => {
+    const seeded = applyKindPredicateDefaults(unpredicated("domain_fact"), DEFAULT_KIND_PREDICATES);
+    expect(seeded.frontmatter.predicate).toBe("value changed");
+    expect(getKindCompression(seeded)).toBe("three_slot");
+  });
+
+  it("projects the seeded predicate through three-slot grammar", () => {
+    const seeded = applyKindPredicateDefaults(unpredicated("authority"), DEFAULT_KIND_PREDICATES);
+    const cue = projectCueLine(seeded, { arm: "file_read" });
+    expect(cue.compression).toBe("three_slot");
+    expect(cue.cueText).toBe("approver changed: Test Note — see target.md");
+  });
+
+  it("never overwrites a note's own predicate", () => {
+    const note = parseNoteFrontmatter(`---
+kind: domain_fact
+use_when: testing
+does_not_apply_when: none
+provenance: "2026-10-19"
+source: "target.md"
+predicate: "the source of this figure was corrected"
+---
+Body`, "note.md");
+    const seeded = applyKindPredicateDefaults(note, DEFAULT_KIND_PREDICATES);
+    expect(seeded).toBe(note);
+    expect(seeded.frontmatter.predicate).toBe("the source of this figure was corrected");
+  });
+
+  it("leaves unseeded kinds and invalid notes untouched", () => {
+    const glossary = applyKindPredicateDefaults(unpredicated("glossary"), DEFAULT_KIND_PREDICATES);
+    expect(glossary.frontmatter.predicate).toBeUndefined();
+    const invalid = parseNoteFrontmatter("no frontmatter", "bad.md");
+    expect(applyKindPredicateDefaults(invalid, DEFAULT_KIND_PREDICATES)).toBe(invalid);
+  });
+
+  it("merges config over defaults and supports empty-string disable", () => {
+    const table = mergeKindPredicateTable({ domain_fact: "the source of this figure was corrected", authority: "" });
+    expect(table.domain_fact).toBe("the source of this figure was corrected");
+    expect(table.authority).toBe("");
+    expect(table.user_preference).toBe("owner's choice was revised");
+    const seeded = applyKindPredicateDefaults(unpredicated("domain_fact"), table);
+    expect(seeded.frontmatter.predicate).toBe("the source of this figure was corrected");
+    const disabled = applyKindPredicateDefaults(unpredicated("authority"), table);
+    expect(disabled.frontmatter.predicate).toBeUndefined();
+  });
+
+  it("empty config falls back to the default table", () => {
+    expect(mergeKindPredicateTable({})).toBe(DEFAULT_KIND_PREDICATES);
+    expect(mergeKindPredicateTable(null)).toBe(DEFAULT_KIND_PREDICATES);
+    expect(mergeKindPredicateTable(undefined)).toBe(DEFAULT_KIND_PREDICATES);
+  });
+});
+
+describe("PR-1: MUST-framing predicate lint", () => {
+  const mustNote = (predicate: string) =>
+    parseNoteFrontmatter(`---
+kind: authority
+use_when: testing
+does_not_apply_when: none
+provenance: "2026-10-19"
+source: "target.md"
+predicate: "${predicate}"
+---
+Body`, "note.md");
+
+  it("rejects mid-clause MUST framing as a lint error", () => {
+    const lint = lintNoteSchemaV2(mustNote("you MUST re-check the approver"));
+    expect(lint.errors.some((e) => e.includes("MUST-rule framing"))).toBe(true);
+  });
+
+  it("accepts descriptive predicates without MUST framing", () => {
+    const lint = lintNoteSchemaV2(mustNote("approver changed"));
+    expect(lint.errors).toEqual([]);
+  });
+
+  it("keeps verification verdict consistent: MUST-framed note counts invalid", () => {
+    const bad = mustNote("you MUST re-check the approver");
+    const good = mustNote("approver changed");
+    const report = verifyNotes([bad, good]);
+    expect(report.validCount).toBe(1);
+    expect(report.invalidCount).toBe(1);
   });
 });

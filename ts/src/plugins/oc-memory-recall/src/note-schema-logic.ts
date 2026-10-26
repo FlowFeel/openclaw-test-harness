@@ -161,6 +161,64 @@ export function parseNoteFrontmatter(
   };
 }
 
+// ═════════════════════════════════════════════════════════
+// Per-kind default predicates (PR-1, bench crosswalk 2026-10-19)
+// ═════════════════════════════════════════════════════════
+
+/**
+ * Per-kind default predicate seeds.
+ *
+ * Bench crosswalk (2026-10-19, Haiku 5.5 medium, one wording per idea)
+ * measured cue predicates per state-change class: "value changed" U 0.96,
+ * "the source of this figure was corrected" 0.95 (provenance-style per-note
+ * override for domain_fact whose *source* changed), "approver changed" 0.93,
+ * "owner's choice was revised" 0.72. A note carrying its own `predicate:`
+ * frontmatter always wins; the seed only fills the gap so an un-predicated
+ * note of a seeded kind projects three_slot instead of plain BIND+POINTER.
+ *
+ * Override via plugin config `kindPredicates`: entries merge over these
+ * defaults per kind; an empty string disables the seed for that kind
+ * (falls back to plain).
+ */
+export const DEFAULT_KIND_PREDICATES: Readonly<Record<string, string>> = Object.freeze({
+  domain_fact: "value changed",
+  authority: "approver changed",
+  user_preference: "owner's choice was revised",
+} as const);
+
+export type KindPredicateTable = Readonly<Record<string, string>>;
+
+/** Merges user config over the default seed table (pure). */
+export function mergeKindPredicateTable(
+  userConfig?: Record<string, string> | null,
+  defaults: KindPredicateTable = DEFAULT_KIND_PREDICATES,
+): KindPredicateTable {
+  if (!userConfig || Object.keys(userConfig).length === 0) return defaults;
+  return Object.freeze({ ...defaults, ...userConfig });
+}
+
+/**
+ * Applies per-kind default predicates at load time (pure).
+ * Only fills the gap: a note's own predicate, or a disabled/absent seed,
+ * leaves the note untouched. Invalid notes are never modified.
+ */
+export function applyKindPredicateDefaults(
+  note: MemoryNote,
+  table: KindPredicateTable,
+): MemoryNote {
+  if (!note.valid) return note;
+  const kind = String(note.frontmatter.kind ?? "").trim();
+  const seed = table[kind];
+  if (!seed || seed.trim().length === 0) return note;
+  if (
+    typeof note.frontmatter.predicate === "string" &&
+    note.frontmatter.predicate.trim().length > 0
+  ) {
+    return note;
+  }
+  return { ...note, frontmatter: { ...note.frontmatter, predicate: seed.trim() } };
+}
+
 /** Lightweight, deterministic YAML key-value / list parser for frontmatter. */
 export function parseSimpleYaml(yamlText: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};

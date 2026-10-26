@@ -16,6 +16,7 @@ import {
 import {
   PREDICATE_INTERNAL_PERIOD_REGEX,
   IMPERATIVE_MOOD_REGEX,
+  MUST_FRAMING_REGEX,
   ISO_8601_REGEX,
 } from "./recall-regex-utils.ts";
 
@@ -142,6 +143,11 @@ export function lintNoteSchemaV2(note: MemoryNote): { errors: string[]; warnings
     const impMatch = pred.match(IMPERATIVE_MOOD_REGEX);
     if (impMatch) {
       errors.push(`Predicate must not use imperative mood ('${impMatch[0]}')`);
+    }
+    if (MUST_FRAMING_REGEX.test(pred)) {
+      errors.push(
+        "Predicate must not use MUST-rule framing (descriptive predicate, not a compliance command)",
+      );
     }
   }
 
