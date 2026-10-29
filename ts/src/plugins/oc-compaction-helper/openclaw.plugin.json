@@ -1,53 +1,28 @@
 {
   "id": "oc-compaction-helper",
   "name": "OC Compaction Helper",
-  "description": "Transcript compaction helper — warns on large transcripts before compaction, strips bloat fields after compaction, and reports transcript size estimates.",
-  "contracts": {
-    "tools": ["compact_check", "compact_delta"]
-  },
+  "description": "Transcript compaction helper — warns on large transcripts before compaction, strips bloat fields after compaction, reports transcript size estimates, and provides in-situ transcript sanitization.",
   "activation": {
     "onStartup": true
   },
+  "contracts": {
+    "tools": [
+      "compact_check",
+      "compact_delta",
+      "sanitize_transcript"
+    ]
+  },
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
     "properties": {
-      "maxTranscriptMb": {
-        "type": "number",
-        "default": 5
-      },
-      "autoCompactionThresholdMb": {
-        "type": "number",
-        "default": 2
-      },
-      "autoCompactionEnabled": {
-        "type": "boolean",
-        "default": true
-      },
-      "compactionProvider": {
-        "type": "string",
-        "default": "literate"
-      },
-      "cooldownMs": {
-        "type": "number",
-        "default": 120000
-      },
-      "trackResumeDeltas": {
-        "type": "boolean",
-        "default": true
-      },
-      "watchPaths": {
-        "type": "array",
-        "items": {
-          "type": "string"
-        },
-        "default": []
-      },
+      "maxTranscriptMb": { "type": "number", "default": 5 },
+      "autoCompactionThresholdMb": { "type": "number", "default": 2 },
+      "autoCompactionEnabled": { "type": "boolean", "default": true },
+      "compactionProvider": { "type": "string", "default": "literate" },
+      "cooldownMs": { "type": "number", "default": 120000 },
       "bloatFields": {
         "type": "array",
-        "items": {
-          "type": "string"
-        },
+        "items": { "type": "string" },
         "default": [
           "compactionCheckpoints",
           "systemPromptReport",
@@ -56,7 +31,10 @@
           "usageFamilySessionIds",
           "lastHeartbeatText"
         ]
-      }
-    }
+      },
+      "trackResumeDeltas": { "type": "boolean", "default": true },
+      "watchPaths": { "type": "array", "items": { "type": "string" }, "default": [] }
+    },
+    "additionalProperties": false
   }
 }

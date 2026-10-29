@@ -70,6 +70,18 @@ import {
   readPathMtimes,
   type PathMtimeReader,
 } from "./resume-delta-io.js";
+import {
+  sanitizeTranscriptLines,
+  type SanitizeOptions,
+} from "./transcript-sanitizer-logic.js";
+import {
+  resolveSessionTranscriptPath,
+  readTranscriptLines,
+  writeTranscriptLines,
+  type TranscriptReader,
+  type TranscriptWriter,
+  type SessionPathResolver,
+} from "./transcript-sanitizer-io.js";
 
 export interface CompactionHelperConfig {
   maxTranscriptMb?: number;
@@ -97,6 +109,9 @@ export interface CompactionHelperConfig {
   watchPaths?: string[];
   /** Injectable file stat reader for DFT conformance. */
   statReader?: PathMtimeReader;
+  transcriptReader?: TranscriptReader;
+  transcriptWriter?: TranscriptWriter;
+  sessionPathResolver?: SessionPathResolver;
 }
 
 const DEFAULT_BLOAT_FIELDS = [
@@ -135,6 +150,9 @@ export default definePluginEntry({
     const trackResumeDeltas = cfg.trackResumeDeltas ?? true;
     const watchPaths = cfg.watchPaths ?? [];
     const statReader: PathMtimeReader = cfg.statReader ?? readPathMtimes;
+    const transcriptReader: TranscriptReader = cfg.transcriptReader ?? readTranscriptLines;
+    const transcriptWriter: TranscriptWriter = cfg.transcriptWriter ?? writeTranscriptLines;
+    const sessionPathResolver: SessionPathResolver = cfg.sessionPathResolver ?? resolveSessionTranscriptPath;
 
     let latestCompactionSnapshot: CompactionSnapshot | null = null;
     let lastEmittedDeltaHash: string | undefined = undefined;
@@ -694,6 +712,80 @@ export default definePluginEntry({
           return {
             content: [
               { type: "text" as const, text: `compact_delta failed: ${String(err)}` },
+            ],
+          };
+        }
+      },
+    });
+
+    // ── Tool: sanitize_transcript (T-575) ──────────────────────
+    api.registerTool({
+      name: "sanitize_transcript",
+      description:
+        "In-situ transcript sanitizer — inspects an active or frozen topic transcript (.jsonl), " +
+        "collapses zero-delta poll spam, deduplicates repeated errors, and applies head/tail elision idempotently.",
+      parameters: Type.Object({
+        sessionKey: Type.String({ description: "Session key or UUID of the topic transcript" }),
+        dryRun: Type.Optional(Type.Boolean({ description: "If true, simulates sanitization without modifying file" })),
+      }),
+      async execute(_id: string, params: Record<string, unknown>) {
+        try {
+          const sessionKey = String(params.sessionKey ?? "").trim();
+          const dryRun = Boolean(params.dryRun);
+
+          if (!sessionKey) {
+            return {
+              content: [
+                { type: "text" as const, text: "Error: sessionKey parameter is required." },
+              ],
+            };
+          }
+
+          const transcriptPath = sessionPathResolver(sessionKey);
+          if (!transcriptPath) {
+            return {
+              content: [
+                { type: "text" as const, text: `Error: transcript file not found for session key "${sessionKey}".` },
+              ],
+            };
+          }
+
+          const rawLines = transcriptReader(transcriptPath);
+          if (!rawLines) {
+            return {
+              content: [
+                { type: "text" as const, text: `Error: could not read transcript lines from ${transcriptPath}.` },
+              ],
+            };
+          }
+
+          const { sanitizedLines, report } = sanitizeTranscriptLines(rawLines);
+
+          if (!dryRun) {
+            transcriptWriter(transcriptPath, sanitizedLines);
+          }
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(
+                  {
+                    ok: true,
+                    dryRun,
+                    path: transcriptPath,
+                    report,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        } catch (err) {
+          return {
+            content: [
+              { type: "text" as const, text: `sanitize_transcript failed: ${String(err)}` },
             ],
           };
         }
