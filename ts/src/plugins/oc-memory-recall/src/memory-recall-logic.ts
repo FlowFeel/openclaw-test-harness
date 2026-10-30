@@ -47,6 +47,10 @@ export {
   hasKindFrontmatter,
   parseNoteFrontmatter,
   parseSimpleYaml,
+  DEFAULT_KIND_PREDICATES,
+  type KindPredicateTable,
+  mergeKindPredicateTable,
+  applyKindPredicateDefaults,
 } from "./note-schema-logic.ts";
 
 // Registry indexing & path queries

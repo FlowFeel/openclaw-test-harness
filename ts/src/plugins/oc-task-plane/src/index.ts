@@ -45,6 +45,11 @@ import {
   type ClassificationResult,
 } from "./classifier-logic.js";
 import { formatPostKillTeachback } from "./teachback-logic.js";
+import {
+  defaultGatewayWakeSender,
+  formatTaskWakeMessage,
+  type GatewayWakeSender,
+} from "./task-plane-wake.js";
 import { reconcileRestartState } from "./recovery-logic.js";
 import {
   readTaskRegistry,
@@ -85,6 +90,7 @@ export interface TaskPlaneIoDependencies {
   spawner?: ProcessSpawner;
   shippedStateReader?: ShippedStateReader;
   durableSpawner?: DurableSpawner;
+  wakeSender?: GatewayWakeSender;
   now?: () => number;
 }
 
@@ -98,6 +104,7 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
   const spawner = deps.spawner ?? defaultProcessSpawner;
   const shippedStateReader = deps.shippedStateReader ?? readRepoShippedState;
   const durableSpawner = deps.durableSpawner ?? defaultDurableSpawner;
+  const wakeSender = deps.wakeSender ?? defaultGatewayWakeSender;
   const getNow = deps.now ?? (() => Date.now());
 
   let taskCounter = 0;
@@ -125,8 +132,21 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
         }
       }
 
-      function handleWake(wake: TaskWakeEvent | { targetSessionKey: string; message: string; taskId: string }) {
+      async function handleWake(wake: TaskWakeEvent | { targetSessionKey: string; message?: string; taskId: string }) {
+        const text = formatTaskWakeMessage(wake);
         api.logger?.info?.(`[oc-task-plane] Wake dispatched to session ${wake.targetSessionKey} for task ${wake.taskId}`);
+        try {
+          const res = await wakeSender({
+            mode: "now",
+            sessionKey: wake.targetSessionKey,
+            text,
+          });
+          if (!res.ok) {
+            api.logger?.warn?.(`[oc-task-plane] wake RPC returned non-ok for session ${wake.targetSessionKey}: ${res.error ?? "unknown error"}`);
+          }
+        } catch (err) {
+          api.logger?.error?.(`[oc-task-plane] Failed to send wake RPC to ${wake.targetSessionKey}: ${String(err)}`);
+        }
       }
 
       // ── Hook: gateway_start ──────────────────────────────────────────

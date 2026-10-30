@@ -1,31 +1,52 @@
 {
   "id": "oc-session-guard",
   "name": "OC Session Guard",
-  "description": "Session bloat management & idle admission guard — strips bloat fields, purges stale subagents, and blocks idle model calls. No sidecar needed.",
-  "contracts": {
-    "tools": ["session_health", "session_cleanup"],
-    "hooks": ["after_compaction", "session_end", "before_agent_run"]
-  },
+  "description": "Session bloat, idle admission guard & tool result hygiene — strips bloat fields, purges stale subagents, blocks idle model calls, truncates oversized tool outputs, and collapses poll loops.",
   "activation": {
     "onStartup": true
   },
+  "contracts": {
+    "tools": [
+      "session_health",
+      "session_cleanup"
+    ],
+    "hooks": [
+      "tool_result_persist",
+      "before_message_write",
+      "after_compaction",
+      "session_end",
+      "before_agent_run"
+    ]
+  },
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
     "properties": {
-      "maxAgeHours": { "type": "number", "default": 15 },
       "stripBloatFields": { "type": "boolean", "default": true },
+      "bloatFields": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": [
+          "compactionCheckpoints",
+          "systemPromptReport",
+          "skillsSnapshot",
+          "contextBudgetStatus",
+          "usageFamilySessionIds",
+          "lastHeartbeatText"
+        ]
+      },
+      "maxAgeHours": { "type": "number", "default": 15 },
+      "sessionsPath": { "type": "string", "description": "Override path to sessions.json" },
       "suppressIdleHeartbeats": {
         "type": "boolean",
         "default": true,
         "description": "Block automated heartbeat turns when no actionable tasks are due to prevent idle model calls"
       },
-      "bloatFields": {
-        "type": "array",
-        "items": { "type": "string" },
-        "default": ["compactionCheckpoints", "systemPromptReport", "skillsSnapshot", "contextBudgetStatus", "usageFamilySessionIds", "lastHeartbeatText"]
-      },
-      "sessionsPath": { "type": "string", "description": "Override path to sessions.json" }
-    }
+      "headChars": { "type": "number", "default": 800, "description": "Number of characters to preserve from the head of tool outputs" },
+      "tailChars": { "type": "number", "default": 800, "description": "Number of characters to preserve from the tail of tool outputs" },
+      "maxToolResultChars": { "type": "number", "default": 1600, "description": "Max threshold before truncating tool outputs" },
+      "exemptTools": { "type": "array", "items": { "type": "string" }, "description": "Tools exempt from truncation" },
+      "enablePollDeduplication": { "type": "boolean", "default": true, "description": "Enable collapse and suppression of zero-delta poll frames" }
+    },
+    "additionalProperties": false
   }
 }

@@ -6,10 +6,13 @@
  *   and purge stale subagent entries from sessions.json.
  * - Hooks into before_agent_run to intercept and suppress idle heartbeat
  *   turns, guaranteeing zero model calls when the instance is idle.
+ * - Hooks into tool_result_persist to truncate oversized tool results
+ *   (head 800 + tail 800 elision with omission notice) and compact zero-delta poll frames.
+ * - Hooks into before_message_write to suppress consecutive identical poll frames.
  *
  * @invariants
  * - No OC core files modified
- * - Pure logic in idle-guard-logic.ts and session-cleanup.ts
+ * - Pure logic in idle-guard-logic.ts, tool-result-hygiene-logic.ts, poll-hygiene-logic.ts, and session-cleanup.ts
  * - Regexes, messages, and formatters in utils.ts
  * - File I/O in sessions-io.ts (injectable for tests)
  * - Zero auxiliary model calls
@@ -25,18 +28,29 @@ import {
 } from "./sessions-io.js";
 import { evaluateAgentRunAdmission } from "./idle-guard-logic.js";
 import {
+  applyToolResultTruncation,
+  type TruncationOptions,
+} from "./tool-result-hygiene-logic.js";
+import {
+  compactZeroDeltaPollMessage,
+  evaluateMessageWriteSuppression,
+  createInitialPollDeduplicationState,
+  type PollDeduplicationState,
+} from "./poll-hygiene-logic.js";
+import {
   formatCleanupLog,
   formatPurgeLog,
   formatHealthReport,
   MESSAGES,
 } from "./utils.js";
 
-export interface SessionGuardConfig {
+export interface SessionGuardConfig extends TruncationOptions {
   maxAgeHours?: number;
   stripBloatFields?: boolean;
   bloatFields?: string[];
   sessionsPath?: string;
   suppressIdleHeartbeats?: boolean;
+  enablePollDeduplication?: boolean;
 }
 
 const DEFAULT_BLOAT_FIELDS = [
@@ -52,17 +66,92 @@ export default definePluginEntry({
   id: "oc-session-guard",
   name: "OC Session Guard",
   description:
-    "Session bloat & idle admission guard — strips bloat fields, purges stale subagents, and blocks idle model calls.",
+    "Session bloat, idle admission guard & tool result hygiene — strips bloat fields, purges stale subagents, blocks idle model calls, truncates oversized tool outputs, and collapses poll loops.",
   register(api: PluginApi, config?: Record<string, unknown>) {
     const cfg: SessionGuardConfig = (config as SessionGuardConfig) ?? {};
     const bloatFields = cfg.bloatFields ?? DEFAULT_BLOAT_FIELDS;
     const maxAgeHours = cfg.maxAgeHours ?? 15;
     const sessionsPath = cfg.sessionsPath;
     const suppressIdle = cfg.suppressIdleHeartbeats ?? true;
+    const enablePollDedup = cfg.enablePollDeduplication ?? true;
+
+    const truncationOptions: TruncationOptions = {
+      headChars: cfg.headChars,
+      tailChars: cfg.tailChars,
+      maxToolResultChars: cfg.maxToolResultChars,
+      exemptTools: cfg.exemptTools,
+    };
+
+    let pollDedupState: PollDeduplicationState = createInitialPollDeduplicationState();
 
     const reader: SessionsReader = (path) => readSessions(path ?? sessionsPath);
     const writer: SessionsWriter = (data, path) =>
       writeSessions(data, path ?? sessionsPath);
+
+    // ── Hook: tool_result_persist — head/tail truncation & poll compaction ──
+    api.on("tool_result_persist", (event: unknown, ctx?: unknown) => {
+      try {
+        if (!event || typeof event !== "object" || !("message" in event)) {
+          return event;
+        }
+
+        const ev = event as { message: Record<string, unknown>; toolName?: string };
+        const toolName = ev.toolName ?? (ev.message?.toolName as string | undefined);
+
+        // 1. First check zero-delta poll compaction
+        const pollResult = compactZeroDeltaPollMessage(ev.message, toolName);
+        let currentMessage = pollResult.changed ? pollResult.message : ev.message;
+
+        // 2. Apply head/tail truncation
+        const truncResult = applyToolResultTruncation(currentMessage, toolName, truncationOptions);
+        if (truncResult.changed) {
+          currentMessage = truncResult.message;
+        }
+
+        return { message: currentMessage };
+      } catch (err) {
+        api.logger?.error?.(`[oc-session-guard] tool_result_persist error: ${String(err)}`);
+        return event;
+      }
+    });
+
+    // ── Hook: before_message_write — zero-delta poll frame suppression ──
+    api.on("before_message_write", (event: unknown) => {
+      if (!enablePollDedup) {
+        return event;
+      }
+      try {
+        if (!event || typeof event !== "object" || !("message" in event)) {
+          return event;
+        }
+        const ev = event as { message: Record<string, unknown> };
+        const msg = ev.message;
+
+        // Only process toolResult messages for poll suppression
+        if (msg.role !== "toolResult") {
+          pollDedupState = createInitialPollDeduplicationState();
+          return event;
+        }
+
+        const toolName = msg.toolName as string | undefined;
+        const suppression = evaluateMessageWriteSuppression(msg, pollDedupState, toolName);
+        pollDedupState = suppression.nextState;
+
+        if (suppression.block) {
+          api.logger?.debug?.(`[oc-session-guard] suppressed consecutive zero-delta poll frame (count=${pollDedupState.suppressedPollCount})`);
+          return { block: true };
+        }
+
+        if (suppression.message) {
+          return { message: suppression.message };
+        }
+
+        return event;
+      } catch (err) {
+        api.logger?.error?.(`[oc-session-guard] before_message_write error: ${String(err)}`);
+        return event;
+      }
+    });
 
     // ── Hook: before_agent_run — suppress idle model calls ──
     api.on("before_agent_run", async (event: unknown, ctx?: unknown) => {
