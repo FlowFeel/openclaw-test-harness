@@ -27,8 +27,14 @@ import { parseTopics } from "./parse-topics.js";
 import { detectOrphans } from "./detect-orphans.js";
 import { decideArchival } from "./archival-policy.js";
 import { buildRecoveryPlan, sessionKeyFor } from "./recovery-plan.js";
-import { readRegistrations, writeRecoveryPlan } from "./registry-io.js";
+import {
+  readRegistrations,
+  readRegistry,
+  readTranscriptSizes,
+  writeRecoveryPlan,
+} from "./registry-io.js";
 import { auditPrecheck } from "./audit-precheck.js";
+import { evaluateTopicsHealth } from "./health-logic.js";
 import type {
   RecoveryApplication,
   SessionRegistration,
@@ -91,14 +97,16 @@ export default definePluginEntry({
         sessionsPath: Type.Optional(
           Type.String({ description: "Override path to sessions.json (defaults to the active agent's registry)" })
         ),
+        health: Type.Optional(
+          Type.Boolean({ description: "Include topic health telemetry & zombie detector analysis (default: true)" })
+        ),
       }),
       async execute(_id: string, params: Record<string, unknown>) {
         const topics = parseTopics(params.topics);
+        const sessionsPath = typeof params.sessionsPath === "string" ? params.sessionsPath : undefined;
         const registrations: SessionRegistration[] = Array.isArray(params.registrations)
           ? asRegistrations(params.registrations)
-          : readRegistrations(
-              typeof params.sessionsPath === "string" ? params.sessionsPath : undefined
-            );
+          : readRegistrations(sessionsPath);
 
         // Issue #31: refuse to audit an empty topic set. Every registered
         // session diffed against zero topics gets reported "unregistered"
@@ -116,6 +124,14 @@ export default definePluginEntry({
           ...detectOrphans(topics, registrations),
           archivalDecisions: topics.map((t) => decideArchival(t, Date.now(), thresholds)),
         };
+
+        const healthEnabled = params.health !== false;
+        if (healthEnabled) {
+          const sessionsMap = readRegistry(sessionsPath) ?? {};
+          const fileSizes = readTranscriptSizes(sessionsMap, sessionsPath);
+          report.health = evaluateTopicsHealth(sessionsMap, fileSizes, Date.now());
+        }
+
         return textResponse(report);
       },
     });

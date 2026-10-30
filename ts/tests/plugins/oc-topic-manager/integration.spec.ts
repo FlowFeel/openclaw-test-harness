@@ -210,5 +210,68 @@ describe("oc-topic-manager tools", () => {
       const registry = readRegistry();
       expect(registry["agent:main:telegram:group:-1003842172831:topic:82385"]).toBeDefined();
     });
+
+    it("Scenario: topic_audit includes health summary when health is enabled", async () => {
+      const bloatedTranscriptPath = join(dir, "bloated.jsonl");
+      writeFileSync(bloatedTranscriptPath, "x".repeat(3 * 1024 * 1024)); // 3 MB file
+
+      writeFileSync(
+        registryPath,
+        JSON.stringify({
+          "agent:main:telegram:group:-1003842172831:topic:100": {
+            status: "killed",
+            contextTokens: 250_000,
+            sessionFile: bloatedTranscriptPath,
+            updatedAt: Date.now() - 3600_000,
+          },
+          "agent:main:telegram:group:-1003842172831:topic:200": {
+            status: "running",
+            updatedAt: Date.now() - (30 * 60 * 1000), // zombie (30m)
+          },
+          "agent:main:telegram:group:-1003842172831:topic:300": {
+            status: "done",
+            contextTokens: 20_000,
+            updatedAt: Date.now() - 1000,
+          },
+        })
+      );
+
+      const { audit } = capture();
+      const res = (await audit.execute("test", {
+        topics: [
+          { message_thread_id: 100, title: "Topic 100", message_count: 5 },
+          { message_thread_id: 200, title: "Topic 200", message_count: 5 },
+          { message_thread_id: 300, title: "Topic 300", message_count: 5 },
+        ],
+        sessionsPath: registryPath,
+        health: true,
+      })) as { content: Array<{ type: string; text: string }> };
+
+      const report = JSON.parse(res.content[0].text);
+      expect(report.health).toBeDefined();
+      expect(report.health.totalScanned).toBe(3);
+      expect(report.health.flaggedCount).toBe(2);
+      expect(report.health.byIssue.CRITICAL_CONTEXT_CEILING).toBe(1);
+      expect(report.health.byIssue.DEAD_TOPIC).toBe(1);
+      expect(report.health.byIssue.UNCOMPACTED_BLOAT).toBe(1);
+      expect(report.health.byIssue.ZOMBIE_RUNNING).toBe(1);
+
+      const t100 = report.health.evaluations.find((e: { topicId: number }) => e.topicId === 100);
+      expect(t100.remedy).toBe("materialize_successor");
+
+      const t200 = report.health.evaluations.find((e: { topicId: number }) => e.topicId === 200);
+      expect(t200.remedy).toBe("sanitize_transcript");
+
+      // Verify health=false omits health section
+      const resNoHealth = (await audit.execute("test", {
+        topics: [
+          { message_thread_id: 100, title: "Topic 100", message_count: 5 },
+        ],
+        sessionsPath: registryPath,
+        health: false,
+      })) as { content: Array<{ type: string; text: string }> };
+      const reportNoHealth = JSON.parse(resNoHealth.content[0].text);
+      expect(reportNoHealth.health).toBeUndefined();
+    });
   });
 });
