@@ -5,6 +5,12 @@
  * - Resolves session JSONL file path from sessionKey or sessionId.
  * - Reads transcript lines from disk.
  * - Writes sanitized lines using crash-safe atomic write (backup -> tmp -> rename).
+ *
+ * @dft
+ * - All I/O confined to this seam; logic lives in transcript-sanitizer-logic.ts (pure)
+ * - Paths injectable / derivable from explicit arguments
+ * - Missing files return empty/null results, not thrown errors
+ * - Atomic write keeps a backup so sanitization is reversible
  */
 
 import {
