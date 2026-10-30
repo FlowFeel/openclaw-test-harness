@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   truncateHeadTail,
+  truncateJsonResult,
+  parseJsonToolResult,
   applyToolResultTruncation,
   formatOmissionNotice,
   OMISSION_NOTICE_PREFIX,
@@ -160,5 +162,81 @@ describe("T-572: zero-delta poll de-duplication & frame suppression", () => {
     decision = evaluateMessageWriteSuppression(pollMessage, state, "process");
     state = decision.nextState;
     expect(decision.block).toBe(false);
+  });
+});
+
+describe("T-582: recursive structured JSON truncation", () => {
+  const bigString = (n: number, fill = "x") => fill.repeat(n);
+
+  it("parses JSON objects/arrays but rejects plain scalars and invalid JSON", () => {
+    expect(parseJsonToolResult('{"a":1}')).toEqual({ a: 1 });
+    expect(parseJsonToolResult('[1,2,3]')).toEqual([1, 2, 3]);
+    expect(parseJsonToolResult("plain ok")).toBeNull();
+    expect(parseJsonToolResult("{broken")).toBeNull();
+    expect(parseJsonToolResult('{"a":1} trailing garbage')).toBeNull();
+  });
+
+  it("truncates large arrays by element count (first 3 + last 2) with marker", () => {
+    const arr = Array.from({ length: 40 }, (_, i) => ({ index: i, data: "row" }));
+    const res = truncateJsonResult(arr);
+    expect(res).not.toBeNull();
+    expect(res!.changed).toBe(true);
+    expect(res!.omittedItems).toBe(35);
+    const out = res!.value as unknown[];
+    expect(out.length).toBe(6); // 3 head + 1 marker + 2 tail
+    expect(out[0]).toEqual({ index: 0, data: "row" });
+    expect(out[3]).toHaveProperty("_omitted", 35);
+    expect(out[5]).toEqual({ index: 39, data: "row" });
+  });
+
+  it("elides oversized string fields inside objects while preserving structure", () => {
+    const obj = { small: "ok", huge: bigString(3000), nested: { deep: bigString(2000, "y") } };
+    const res = truncateJsonResult(obj);
+    expect(res).not.toBeNull();
+    const out = res!.value as Record<string, unknown>;
+    expect(out.small).toBe("ok");
+    expect(String(out.huge)).toContain("characters truncated by oc-session-guard");
+    expect(String((out.nested as Record<string, unknown>).deep)).toContain("oc-session-guard");
+  });
+
+  it("round-trip invariant: every elided output remains valid JSON", () => {
+    const payloads = [
+      Array.from({ length: 50 }, (_, i) => ({ i, blob: bigString(900, String(i % 10)) })),
+      { a: bigString(1500), b: { c: [bigString(1200), 42, true] } },
+      [1, "two", { three: bigString(2500) }],
+    ];
+    for (const payload of payloads) {
+      const res = truncateJsonResult(payload);
+      if (res) {
+        expect(() => JSON.parse(JSON.stringify(res.value))).not.toThrow();
+      }
+    }
+  });
+
+  it("routes oversized JSON content blocks through the JSON path in applyToolResultTruncation", () => {
+    const json = JSON.stringify(
+      Array.from({ length: 30 }, (_, i) => ({ index: i, blob: bigString(200) })),
+    );
+    const message = { role: "tool", toolName: "web_search", content: [{ type: "text", text: json }] };
+    const { message: next, changed } = applyToolResultTruncation(message, "web_search");
+    expect(changed).toBe(true);
+    const text = (next.content as Array<{ text: string }>)[0].text;
+    expect(() => JSON.parse(text)).not.toThrow(); // still parseable
+    expect(text).toContain("items omitted by oc-session-guard");
+  });
+
+  it("falls back to head/tail string elision for oversized invalid JSON", () => {
+    const broken = `{"a":"${bigString(5000)}"`; // malformed JSON
+    const message = { role: "tool", content: [{ type: "text", text: broken }] };
+    const { message: next, changed } = applyToolResultTruncation(message);
+    expect(changed).toBe(true);
+    const text = (next.content as Array<{ text: string }>)[0].text;
+    expect(text).toContain("characters truncated by oc-session-guard");
+  });
+
+  it("does not touch small JSON payloads", () => {
+    const small = JSON.stringify({ ok: true, count: 3 });
+    const { changed } = applyToolResultTruncation({ role: "tool", content: small });
+    expect(changed).toBe(false);
   });
 });
