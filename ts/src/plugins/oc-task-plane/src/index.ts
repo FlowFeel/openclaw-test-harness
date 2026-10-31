@@ -52,6 +52,14 @@ import {
 } from "./task-plane-wake.js";
 import { reconcileRestartState } from "./recovery-logic.js";
 import {
+  validatePipelineSpec,
+  decideStepExecution,
+  summarizePipelineRun,
+  type NormalizedPipelineSpec,
+  type PipelineStepResult,
+  type StepOutcome,
+} from "./exec-pipeline-logic.js";
+import {
   readTaskRegistry,
   writeTaskRegistry,
   appendTaskOutput,
@@ -79,6 +87,61 @@ export interface OcTaskPlaneConfig {
   outputDir?: string;
   supervisorIntervalMs?: number;
   sidecarEndpoint?: string;
+}
+
+/**
+ * Runs one pipeline step through the injected spawner and awaits its exit.
+ * Wiring-layer helper: collects nothing itself — the caller captures stdout/
+ * stderr chunks via the callbacks and receives only the exit status here.
+ * A per-step timeout kills the process (SIGKILL) and resolves with timedOut.
+ */
+function runPipelineStep(
+  spawner: ProcessSpawner,
+  command: string,
+  opts: {
+    cwd?: string;
+    input?: string;
+    timeoutMs?: number;
+    onStdoutChunk?: (chunk: string) => void;
+    onStderrChunk?: (chunk: string) => void;
+  },
+): Promise<StepOutcome> {
+  return new Promise((resolve) => {
+    let timedOut = false;
+    let timer: NodeJS.Timeout | null = null;
+    let settled = false;
+    const settle = (outcome: StepOutcome) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(outcome);
+    };
+    const proc = spawner(command, {
+      cwd: opts.cwd,
+      env: process.env,
+      input: opts.input,
+      onStdoutChunk: opts.onStdoutChunk,
+      onStderrChunk: opts.onStderrChunk,
+      onExit: (code) => settle({ exitCode: code, timedOut }),
+      onError: (err) => settle({ exitCode: null, timedOut, error: err.message }),
+    });
+    if (opts.timeoutMs && opts.timeoutMs > 0) {
+      timer = setTimeout(() => {
+        timedOut = true;
+        try {
+          proc.kill("SIGKILL");
+        } catch {}
+      }, opts.timeoutMs);
+    }
+  });
+}
+
+/** Cap per-step captured output embedded in the tool response. */
+const STEP_TAIL_CHARS = 800;
+
+function capStepText(text: string): string {
+  if (text.length <= STEP_TAIL_CHARS) return text;
+  return `${text.slice(0, STEP_TAIL_CHARS)}\n[... ${text.length - STEP_TAIL_CHARS} characters truncated ...]`;
 }
 
 export interface TaskPlaneIoDependencies {
@@ -556,6 +619,207 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
           } catch (err) {
             return {
               content: [{ type: "text" as const, text: `task_output failed: ${String(err)}` }],
+            };
+          }
+        },
+      });
+
+      // ── Tool: exec_pipeline (T-583) ─────────────────────────────────
+      // Multi-command pipeline with a pure logic seam: validation, per-step
+      // conditional decisions, and run summarization live in
+      // exec-pipeline-logic.ts; this wiring only spawns processes through the
+      // I/O Protocol and records results into the task registry.
+      api.registerTool({
+        name: "exec_pipeline",
+        description:
+          "Runs an ordered pipeline of shell commands with sequential or piped " +
+          "data flow and per-step conditionals. In 'sequential' mode each step's " +
+          "output is captured separately; in 'piped' mode each step's stdout is " +
+          "fed into the next step's stdin. Conditions: 'always' (default), " +
+          "'on_success' (run only if the previous step succeeded, like &&), " +
+          "'on_failure' (run only if the previous step failed, like ||). " +
+          "Returns a per-step report and records the run as a TaskPlane task.",
+        parameters: Type.Object({
+          steps: Type.Array(
+            Type.Object({
+              command: Type.String({ description: "Shell command to run for this step" }),
+              condition: Type.Optional(Type.String({ description: "'always' (default), 'on_success', or 'on_failure' relative to the previous step's exit code" })),
+            }),
+            { description: "Ordered pipeline steps (minimum 1)" },
+          ),
+          mode: Type.Optional(Type.String({ description: "'sequential' (default) captures each step's output separately; 'piped' feeds each step's stdout into the next step's stdin" })),
+          stopOnFailure: Type.Optional(Type.Boolean({ description: "Skip all later steps after a failed step (default true)" })),
+          stepTimeoutMs: Type.Optional(Type.Number({ description: "Per-step timeout in milliseconds; the step process is killed on expiry" })),
+          cwd: Type.Optional(Type.String({ description: "Working directory for the pipeline steps" })),
+        }),
+        async execute(_id: string, params: Record<string, unknown>) {
+          try {
+            const now = getNow();
+            const validation = validatePipelineSpec({
+              steps: params.steps,
+              mode: params.mode,
+              stopOnFailure: params.stopOnFailure,
+            });
+            if (!validation.ok) {
+              return {
+                content: [{
+                  type: "text" as const,
+                  text: JSON.stringify({ ok: false, error: validation.error }, null, 2),
+                }],
+              };
+            }
+            const spec: NormalizedPipelineSpec = validation.spec;
+            const stepTimeoutMs =
+              typeof params.stepTimeoutMs === "number" && params.stepTimeoutMs > 0
+                ? params.stepTimeoutMs
+                : undefined;
+            const cwd = typeof params.cwd === "string" ? params.cwd : outputDir;
+
+            // Record the pipeline run as a TaskPlane task for observability.
+            const taskId = `pipeline-${now}-${++taskCounter}`;
+            const outputHandlePath = `${outputDir}/${taskId}.log`;
+            const dispatched = dispatchTask(
+              registry,
+              {
+                id: taskId,
+                kind: "exec",
+                payload: { pipeline: spec },
+                owner: "session-main",
+                output_handle: outputHandlePath,
+              },
+              { nowMs: now },
+            );
+            registry = dispatched.registry;
+            const started = startTask(registry, taskId, { nowMs: getNow() });
+            registry = started.registry;
+            persist();
+            appender(
+              outputHandlePath,
+              `[oc-task-plane] exec_pipeline: ${spec.steps.length} step(s), mode=${spec.mode}, stopOnFailure=${spec.stopOnFailure}\n`,
+            );
+
+            const results: PipelineStepResult[] = [];
+            let previous: StepOutcome | null = null;
+            let aborted = false;
+            let previousInputTail = "";
+            const stepOutputs = new Map<number, { stdout: string; stderr: string }>();
+
+            for (let i = 0; i < spec.steps.length; i++) {
+              const step = spec.steps[i];
+              const decision = decideStepExecution(step.condition, previous);
+              if (!decision.run) {
+                results.push({
+                  index: i,
+                  command: step.command,
+                  executed: false,
+                  skipped: true,
+                  skipReason: decision.reason,
+                });
+                continue;
+              }
+              if (aborted) {
+                results.push({
+                  index: i,
+                  command: step.command,
+                  executed: false,
+                  skipped: true,
+                  skipReason: "skipped: earlier step failed (stopOnFailure)",
+                });
+                continue;
+              }
+
+              const stdoutChunks: string[] = [];
+              const stderrChunks: string[] = [];
+              const input =
+                spec.mode === "piped" && previous ? previousInputTail : undefined;
+              const outcome = await runPipelineStep(spawner, step.command, {
+                cwd,
+                input,
+                timeoutMs: stepTimeoutMs,
+                onStdoutChunk: (chunk) => {
+                  stdoutChunks.push(chunk);
+                  appender(outputHandlePath, chunk);
+                },
+                onStderrChunk: (chunk) => {
+                  stderrChunks.push(chunk);
+                  appender(outputHandlePath, chunk);
+                },
+              });
+              const stdout = stdoutChunks.join("");
+              const stderr = stderrChunks.join("");
+              previous = outcome;
+              previousInputTail = stdout;
+
+              results.push({
+                index: i,
+                command: step.command,
+                executed: true,
+                exitCode: outcome.exitCode,
+                timedOut: outcome.timedOut,
+                error: outcome.error,
+              });
+              stepOutputs.set(i, { stdout, stderr });
+
+              const failed =
+                outcome.error !== undefined ||
+                outcome.timedOut === true ||
+                (outcome.exitCode ?? 1) !== 0;
+              if (failed && spec.stopOnFailure) {
+                aborted = true;
+              }
+            }
+
+            const summary = summarizePipelineRun(spec, results);
+            const tail = outputReader(outputHandlePath, { tailLines: 20 });
+
+            if (summary.ok) {
+              const comp = completeTask(
+                registry,
+                taskId,
+                { exitCode: 0, outputTail: tail },
+                { nowMs: getNow() },
+              );
+              registry = comp.registry;
+              persist();
+              if (comp.wake) handleWake(comp.wake);
+            } else {
+              const reason = summary.failedStepIndex !== null
+                ? `Pipeline failed at step ${summary.failedStepIndex}: ${spec.steps[summary.failedStepIndex]?.command ?? ""}`
+                : "Pipeline failed";
+              const fail = failTask(registry, taskId, reason, {
+                nowMs: getNow(),
+                exitCode: summary.finalExitCode ?? undefined,
+                outputTail: tail,
+              });
+              registry = fail.registry;
+              persist();
+              if (fail.wake) handleWake(fail.wake);
+            }
+
+            const stepReports = results.map((r) => {
+              const out = stepOutputs.get(r.index);
+              return {
+                ...r,
+                stdoutTail: out ? capStepText(out.stdout) : undefined,
+                stderrTail: out ? capStepText(out.stderr) : undefined,
+              };
+            });
+
+            return {
+              content: [{
+                type: "text" as const,
+                text: JSON.stringify({
+                  ok: summary.ok,
+                  taskId,
+                  output_handle: outputHandlePath,
+                  report: summary,
+                  steps: stepReports,
+                }, null, 2),
+              }],
+            };
+          } catch (err) {
+            return {
+              content: [{ type: "text" as const, text: `exec_pipeline failed: ${String(err)}` }],
             };
           }
         },

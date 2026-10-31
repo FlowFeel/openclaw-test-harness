@@ -1,13 +1,14 @@
 {
   "id": "oc-task-plane",
   "name": "OcTaskPlane",
-  "description": "TaskPlane: lock-free task abstraction with auto-background, wake-on-completion, per-task timeouts, and crash-safe task registry",
+  "description": "TaskPlane: lock-free task abstraction with auto-background, wake-on-completion, per-task timeouts, and crash-safe task registry. Adds exec_pipeline (T-583): ordered multi-command pipelines with sequential/piped modes, per-step conditionals, and per-step timeouts.",
   "contracts": {
     "tools": [
       "task_dispatch",
       "task_status",
       "task_output",
-      "task_cancel"
+      "task_cancel",
+      "exec_pipeline"
     ],
     "hooks": [
       "gateway_start",
