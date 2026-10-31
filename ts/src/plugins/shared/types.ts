@@ -80,6 +80,7 @@ export interface PluginApi {
     info?: (msg: string) => void;
     error?: (msg: string) => void;
     warn?: (msg: string) => void;
+    debug?: (msg: string) => void;
   };
   /**
    * Register a TYPED lifecycle hook (gateway_start, session_end, etc.).

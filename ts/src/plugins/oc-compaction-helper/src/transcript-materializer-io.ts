@@ -150,7 +150,7 @@ export function materializeSuccessorForSession(
     lines.pop();
   }
 
-  const detectOpts: DetectOptions = opts?.minLinesBeforeKept
+  const detectOpts = opts?.minLinesBeforeKept
     ? { minLinesBeforeKept: opts.minLinesBeforeKept }
     : undefined;
   const detection = detectUnrotatedCompaction(lines, detectOpts);
