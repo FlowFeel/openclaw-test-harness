@@ -82,6 +82,10 @@ import {
   type TranscriptWriter,
   type SessionPathResolver,
 } from "./transcript-sanitizer-io.js";
+import {
+  sweepUnrotatedSessions,
+  type MaterializeResult,
+} from "./transcript-materializer-io.js";
 
 export interface CompactionHelperConfig {
   maxTranscriptMb?: number;
@@ -112,6 +116,12 @@ export interface CompactionHelperConfig {
   transcriptReader?: TranscriptReader;
   transcriptWriter?: TranscriptWriter;
   sessionPathResolver?: SessionPathResolver;
+  /** T-581: auto-materialize unrotated compaction successors. Default: true. */
+  enableMaterializer?: boolean;
+  /** T-581 race guard: "running" is treated as a zombie after this ms of staleness. Default: 900000 (15m). */
+  materializerStalenessMs?: number;
+  /** T-581: max successor materializations per sweep. Default: 3. */
+  materializerSweepCap?: number;
 }
 
 const DEFAULT_BLOAT_FIELDS = [
@@ -145,6 +155,31 @@ export default definePluginEntry({
     const cooldownMs = cfg.cooldownMs ?? DEFAULT_TRIGGER_COOLDOWN_MS;
     const compactionProviderId = cfg.compactionProvider ?? "literate";
     const sessionsPath = cfg.sessionsPath;
+    const enableMaterializer = cfg.enableMaterializer ?? true;
+    const materializerStalenessMs = cfg.materializerStalenessMs ?? 900_000;
+    const materializerSweepCap = cfg.materializerSweepCap ?? 3;
+
+    const runMaterializerSweep = async (trigger: string) => {
+      if (!enableMaterializer) return;
+      try {
+        const sweep = sweepUnrotatedSessions({
+          sessionsPath,
+          stalenessMs: materializerStalenessMs,
+          maxMaterializations: materializerSweepCap,
+        });
+        for (const res of sweep.results as MaterializeResult[]) {
+          if (res.materialized) {
+            api.logger?.info?.(
+              `[oc-compaction-helper] Auto-materialized unrotated compaction successor for sessionKey=${res.sessionKey}: ${res.oldLines} -> ${res.newLines} lines (${res.savedBytes} bytes saved) [${trigger}]`,
+            );
+          }
+        }
+      } catch (err) {
+        api.logger?.error?.(
+          `[oc-compaction-helper] materializer sweep (${trigger}) failed: ${String(err)}`,
+        );
+      }
+    };
     const throttleMs = cfg.throttleMs ?? DEFAULT_THROTTLE_MS;
     const bloatThresholdBytes = cfg.bloatThresholdBytes ?? DEFAULT_BLOAT_THRESHOLD;
     const trackResumeDeltas = cfg.trackResumeDeltas ?? true;
@@ -533,8 +568,21 @@ export default definePluginEntry({
             `[oc-compaction-helper] after_compaction failed: ${String(err)}`
           );
         }
+        // ── T-581: sweep for unrotated compaction zombies ──
+        // Race-guarded inside the IO seam: only touches sessions that are
+        // not actively running (or stale-running zombies). Post-hoc cleanup
+        // only — never intervenes in an in-flight turn.
+        await runMaterializerSweep("after_compaction");
       }
     );
+
+    // ── Hook: agent_turn_prepare — sweep before each new turn ──
+    // Second materializer trigger: catches zombies that recovered to a new
+    // turn while the previous turn's compaction never rotated. The race
+    // guard skips anything the gateway is actively writing.
+    api.on("agent_turn_prepare", async () => {
+      await runMaterializerSweep("agent_turn_prepare");
+    });
 
     // ── Tool: compact_check ──────────────────────────────────
     api.registerTool({

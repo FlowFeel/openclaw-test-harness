@@ -136,10 +136,16 @@ export function detectUnrotatedCompaction(
  *
  * If line 0 is a session header (`type === "session"`), its `id` and `timestamp`
  * are replaced with `meta.newSessionId` and `meta.timestamp`, retaining other fields.
- * If line 0 is not a session header, returns compaction entry + kept lines without a header.
+ * If line 0 is not a session header, the successor has no header (warning set).
  *
- * Succeeding lines contain the compaction entry as-is from the source, followed by all
- * original lines from `firstKeptIndex` to end of file, verbatim.
+ * Retained range semantics (verified against append-only upstream layout):
+ * the successor is the session header followed by all original lines from
+ * `firstKeptIndex` to end of file, verbatim. The compaction entry itself is
+ * INSIDE that range in the real layout (entries with ids >= firstKeptEntryId
+ * precede the compaction entry physically, since the transcript is append-only).
+ * Only when the compaction entry falls OUTSIDE the retained range (kept entries
+ * all post-date it) is it re-inserted right after the header, so the summary
+ * is never lost. Duplicates are never emitted.
  */
 export function buildSuccessorLines(
   lines: string[],
@@ -177,11 +183,15 @@ export function buildSuccessorLines(
     warning = "First line is not a session header; header omitted from successor transcript";
   }
 
-  // Followed by the compaction entry line (as-is from the source)
+  // Retained range: all lines from firstKeptIndex to EOF, verbatim.
+  // The compaction entry may sit inside this range (real append-only shape);
+  // if it does not, re-insert it right after the header so the summary survives.
   const compactionLine = lines[detection.compactionIndex];
-  resultLines.push(compactionLine);
+  const compactionInsideRange = detection.compactionIndex >= detection.firstKeptIndex;
+  if (!compactionInsideRange) {
+    resultLines.push(compactionLine);
+  }
 
-  // Followed by all original lines from firstKeptIndex to end of file, verbatim
   for (let i = detection.firstKeptIndex; i < lines.length; i++) {
     resultLines.push(lines[i]);
   }

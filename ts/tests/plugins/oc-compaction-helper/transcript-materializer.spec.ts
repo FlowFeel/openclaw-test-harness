@@ -172,16 +172,16 @@ describe("buildSuccessorLines", () => {
     expect(parsedHeader.version).toBe(3);
     expect(parsedHeader.cwd).toBe("/home/node/.openclaw/workspace");
 
-    // Line 1: Compaction entry verbatim
-    expect(successor.lines[1]).toBe(compLine);
-
-    // Kept lines: indices 110 to 121 (110..120 are messages, 121 is the compaction entry)
-    // From firstKeptIndex (110) to lines.length - 1 (121) is 12 lines.
-    // Total successor lines = 1 (header) + 1 (compaction) + 12 = 14 lines.
-    expect(successor.lines.length).toBe(14);
+    // Retained range = lines[110..121] (msgs 110..120 + compaction entry, which
+    // sits INSIDE the range in the real append-only shape). No duplicate compaction.
+    // Total successor lines = 1 (header) + 12 = 13 lines.
+    expect(successor.lines.length).toBe(13);
     for (let i = 0; i < 12; i++) {
-      expect(successor.lines[2 + i]).toBe(lines[110 + i]);
+      expect(successor.lines[1 + i]).toBe(lines[110 + i]);
     }
+    // compaction entry appears exactly once, at its natural position (last)
+    expect(successor.lines.filter((l) => l === compLine).length).toBe(1);
+    expect(successor.lines[12]).toBe(compLine);
 
     // Verify round-trip JSON.parse on every successor line
     for (const l of successor.lines) {
@@ -211,10 +211,43 @@ describe("buildSuccessorLines", () => {
 
     expect(successor.hasSessionHeader).toBe(false);
     expect(successor.warning).toBeDefined();
-    // Line 0 is compaction entry
-    expect(successor.lines[0]).toBe(lines[2]);
-    // Line 1 is msg-2
-    expect(successor.lines[1]).toBe(lines[1]);
+    // compaction entry (index 2) is inside the retained range [1..2]:
+    // successor = lines[1..2] verbatim (msg-2 then compaction)
+    expect(successor.lines.length).toBe(2);
+    expect(successor.lines[0]).toBe(lines[1]);
+    expect(successor.lines[1]).toBe(lines[2]);
+  });
+
+  it("re-inserts the compaction entry when kept entries all post-date it (shape B)", () => {
+    const header = makeSessionHeader("sess-old", "2026-10-01T00:00:00.000Z");
+    const lines: string[] = [header];
+    for (let i = 1; i <= 113; i++) {
+      lines.push(makeMessageEntry(i.toString(16).padStart(8, "0"), "0", `Msg ${i}`));
+    }
+    // compaction appended mid-file; kept entry (msg 120) comes AFTER it
+    const firstKeptId = (120).toString(16).padStart(8, "0");
+    const compLine = makeCompactionEntry("comp-1", "0", firstKeptId);
+    lines.push(compLine); // index 114
+    for (let i = 115; i <= 120; i++) {
+      lines.push(makeMessageEntry(i.toString(16).padStart(8, "0"), "0", `Msg ${i}`));
+    }
+
+    const detection = detectUnrotatedCompaction(lines, { minLinesBeforeKept: 50 });
+    expect(detection.unrotated).toBe(true);
+    expect(detection.compactionIndex).toBe(114);
+    expect(detection.firstKeptIndex).toBe(120);
+
+    const successor = buildSuccessorLines(lines, detection, {
+      newSessionId: "sess-new-shapeb",
+      timestamp: "2026-10-31T03:00:00.000Z",
+    });
+    // compaction OUTSIDE range -> reinserted right after the header
+    expect(successor.lines.length).toBe(3);
+    expect(successor.lines[1]).toBe(compLine);
+    expect(successor.lines[2]).toBe(lines[120]);
+    for (const l of successor.lines) expect(() => JSON.parse(l)).not.toThrow();
+    const reDetection = detectUnrotatedCompaction(successor.lines);
+    expect(reDetection.unrotated).toBe(false);
   });
 });
 
