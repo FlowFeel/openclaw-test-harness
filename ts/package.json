@@ -26,6 +26,9 @@
   "devDependencies": {
     "@eslint/js": "^9.0.0",
     "@openclaw/fs-safe": "^0.5.0",
+    "@openclaw/proxyline": "^0.3.3",
+    "dotenv": "17.4.2",
+    "ws": "8.21.0",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "2.1.9",
