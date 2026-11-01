@@ -1,3 +1,16 @@
+import {
+  evaluateTurnPollBudget,
+  createInitialTurnPollState,
+  type TurnPollState,
+  type PollBudgetConfig,
+} from "./poll-hygiene-logic.js";
+import {
+  evaluatePreToolCallCircuitBreaker,
+  recordToolCallOutcome,
+  createInitialCircuitBreakerState,
+  type CircuitBreakerState,
+  type CircuitBreakerConfig,
+} from "./tool-result-hygiene-logic.js";
 /**
  * OC Session Guard — session bloat and idle admission management plugin.
  *
@@ -67,6 +80,12 @@ export interface SessionGuardConfig extends TruncationOptions {
   rollupTransientTools?: string[];
   /** T-583: tail characters preserved from the final result of a squashed burst. */
   rollupTailChars?: number;
+  /** T-585: Turn-level cumulative polling budget in milliseconds (default: 90000). */
+  turnPollBudgetMs?: number;
+  enableTurnPollBudget?: boolean;
+  /** T-586: Max consecutive identical errors before tripping circuit breaker (default: 2). */
+  maxConsecutiveIdenticalErrors?: number;
+  enableErrorCircuitBreaker?: boolean;
 }
 
 const DEFAULT_BLOAT_FIELDS = [
@@ -110,6 +129,20 @@ export default definePluginEntry({
     };
 
     let pollDedupState: PollDeduplicationState = createInitialPollDeduplicationState();
+    // T-585: Turn-level polling budget state (reset on before_agent_run)
+    let turnPollState: TurnPollState = createInitialTurnPollState();
+    const pollBudgetConfig: PollBudgetConfig = {
+      turnPollBudgetMs: cfg.turnPollBudgetMs,
+      enableTurnPollBudget: cfg.enableTurnPollBudget,
+    };
+
+    // T-586: Parameter circuit breaker state
+    let circuitBreakerState: CircuitBreakerState = createInitialCircuitBreakerState();
+    const circuitBreakerConfig: CircuitBreakerConfig = {
+      maxConsecutiveIdenticalErrors: cfg.maxConsecutiveIdenticalErrors,
+      enableErrorCircuitBreaker: cfg.enableErrorCircuitBreaker,
+    };
+
 
     const reader: SessionsReader = (path) => readSessions(path ?? sessionsPath);
     const writer: SessionsWriter = (data, path) =>
@@ -195,6 +228,7 @@ export default definePluginEntry({
 
     // ── Hook: before_agent_run — suppress idle model calls ──
     api.on("before_agent_run", async (event: unknown, ctx?: unknown) => {
+      turnPollState = createInitialTurnPollState();
       if (!suppressIdle) {
         return { outcome: "pass" };
       }
