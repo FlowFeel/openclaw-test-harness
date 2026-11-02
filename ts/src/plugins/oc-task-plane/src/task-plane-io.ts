@@ -102,6 +102,8 @@ export interface SpawnedProcess {
 export interface SpawnOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /** Optional stdin payload. T-583 exec_pipeline piped mode feeds the previous step's stdout here. */
+  input?: string;
   onStdoutChunk?: (chunk: string) => void;
   onStderrChunk?: (chunk: string) => void;
   onExit?: (code: number | null, signal: string | null) => void;
@@ -246,6 +248,10 @@ export function defaultProcessSpawner(
   child.on("error", (err) => {
     options.onError?.(err);
   });
+
+  // Always close stdin: writes the optional input payload first (T-583 piped
+  // mode), then ends the stream so commands reading stdin cannot hang.
+  child.stdin?.end(options.input);
 
     return {
       pid: child.pid,

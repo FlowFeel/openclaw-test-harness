@@ -1,7 +1,7 @@
 {
   "id": "oc-session-guard",
   "name": "OC Session Guard",
-  "description": "Session bloat, idle admission guard & tool result hygiene — strips bloat fields, purges stale subagents, blocks idle model calls, truncates oversized tool outputs, and collapses poll loops.",
+  "description": "Session bloat, idle admission guard & tool result hygiene \u2014 strips bloat fields, purges stale subagents, blocks idle model calls, truncates oversized tool outputs, and collapses poll loops. Squashes large intermediate discovery/inspection tool-result bursts into atomic summaries at turn end (T-583).",
   "activation": {
     "onStartup": true
   },
@@ -15,16 +15,22 @@
       "before_message_write",
       "after_compaction",
       "session_end",
-      "before_agent_run"
+      "before_agent_run",
+      "agent_end"
     ]
   },
   "configSchema": {
     "type": "object",
     "properties": {
-      "stripBloatFields": { "type": "boolean", "default": true },
+      "stripBloatFields": {
+        "type": "boolean",
+        "default": true
+      },
       "bloatFields": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "default": [
           "compactionCheckpoints",
           "systemPromptReport",
@@ -34,18 +40,68 @@
           "lastHeartbeatText"
         ]
       },
-      "maxAgeHours": { "type": "number", "default": 15 },
-      "sessionsPath": { "type": "string", "description": "Override path to sessions.json" },
+      "maxAgeHours": {
+        "type": "number",
+        "default": 15
+      },
+      "sessionsPath": {
+        "type": "string",
+        "description": "Override path to sessions.json"
+      },
       "suppressIdleHeartbeats": {
         "type": "boolean",
         "default": true,
         "description": "Block automated heartbeat turns when no actionable tasks are due to prevent idle model calls"
       },
-      "headChars": { "type": "number", "default": 800, "description": "Number of characters to preserve from the head of tool outputs" },
-      "tailChars": { "type": "number", "default": 800, "description": "Number of characters to preserve from the tail of tool outputs" },
-      "maxToolResultChars": { "type": "number", "default": 1600, "description": "Max threshold before truncating tool outputs" },
-      "exemptTools": { "type": "array", "items": { "type": "string" }, "description": "Tools exempt from truncation" },
-      "enablePollDeduplication": { "type": "boolean", "default": true, "description": "Enable collapse and suppression of zero-delta poll frames" }
+      "headChars": {
+        "type": "number",
+        "default": 800,
+        "description": "Number of characters to preserve from the head of tool outputs"
+      },
+      "tailChars": {
+        "type": "number",
+        "default": 800,
+        "description": "Number of characters to preserve from the tail of tool outputs"
+      },
+      "maxToolResultChars": {
+        "type": "number",
+        "default": 1600,
+        "description": "Max threshold before truncating tool outputs"
+      },
+      "exemptTools": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Tools exempt from truncation"
+      },
+      "enablePollDeduplication": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable collapse and suppression of zero-delta poll frames"
+      },
+      "rollupTransientSteps": {
+        "type": "boolean",
+        "default": true,
+        "description": "Squash large intermediate discovery/inspection tool-result bursts into one atomic summary at turn end (agent_end), without interrupting reasoning mid-turn"
+      },
+      "rollupMinBurstSize": {
+        "type": "number",
+        "default": 6,
+        "description": "Minimum consecutive transient tool results before a burst is squashed"
+      },
+      "rollupTransientTools": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Tool names treated as transient discovery/inspection steps"
+      },
+      "rollupTailChars": {
+        "type": "number",
+        "default": 240,
+        "description": "Tail characters preserved from the final result of a squashed burst"
+      }
     },
     "additionalProperties": false
   }

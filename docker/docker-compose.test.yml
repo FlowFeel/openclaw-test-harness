@@ -27,9 +27,12 @@ services:
         npm run validate:foundry &&
         npm run build:plugins &&
         for p in patches/*.patch; do
-          [ -f \"$p\" ] || continue;
-          echo \"Verifying patch $p against oc-source\";
-          (cd /app/oc-source/upstream && patch --dry-run --fuzz=0 -p1 < /app/ts/\"$p\") ||
+          # $$p — compose escapes $$ to a literal $; without it, compose
+          # interpolates $p to an empty string at parse time and the
+          # verification loop silently skips every patch.
+          [ -f \"$$p\" ] || continue;
+          echo \"Verifying patch $$p against oc-source\";
+          (cd /app/oc-source/upstream && patch --dry-run --fuzz=0 -p1 < /app/ts/\"$$p\") ||
             { echo 'FATAL: patch does not apply to pinned OC source' >&2; exit 1; };
         done &&
         npx vitest run --config vitest.config.docker.ts --reporter=verbose

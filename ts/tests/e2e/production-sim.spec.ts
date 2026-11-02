@@ -48,11 +48,11 @@ const OC_VERSION = "2026.7.1"; // must match docker/Dockerfile ARG OC_VERSION
 const HOOK_COUNTS: Record<string, number> = {
   "oc-subagent-orchestrator": 8,
   "oc-sidecar": 2,
-  "oc-compaction-helper": 4, // added before_prompt_build + agent_end
+  "oc-compaction-helper": 5, // before_prompt_build, agent_end, before_compaction, after_compaction, agent_turn_prepare (T-581 materializer)
   "oc-context-cache": 3,
   "oc-stream-relay": 3,
 };
-const TOTAL_HOOKS = Object.values(HOOK_COUNTS).reduce((a, b) => a + b, 0); // 20
+const TOTAL_HOOKS = Object.values(HOOK_COUNTS).reduce((a, b) => a + b, 0); // 21
 
 function dirSha256(dir: string): string {
   const hash = crypto.createHash("sha256");
@@ -657,7 +657,7 @@ describe("Production Simulation: Real OC + Plugin (Testcontainers)", () => {
         const plugins = [
           { name: 'oc-subagent-orchestrator', expected: 8 },
           { name: 'oc-sidecar', expected: 2 },
-          { name: 'oc-compaction-helper', expected: 4 }, // 4 hooks: before_prompt_build, agent_end, before_compaction, after_compaction
+          { name: 'oc-compaction-helper', expected: 5 }, // 5 hooks: before_prompt_build, agent_end, before_compaction, after_compaction, agent_turn_prepare
           { name: 'oc-context-cache', expected: 3 },
           { name: 'oc-stream-relay', expected: 3 },
         ];

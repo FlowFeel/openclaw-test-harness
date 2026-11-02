@@ -30,10 +30,14 @@ export interface OrphanReport {
   unregistered: SessionRegistration[];
 }
 
-/** Full topic_audit output: registry mismatches plus per-topic archival decisions. */
+import type { TopicHealthSummary } from "./health-types.js";
+
+/** Full topic_audit output: registry mismatches, archival decisions, and optional health summary. */
 export interface TopicAuditReport extends OrphanReport {
   /** Archival policy decision for every topic in the forum payload. */
   archivalDecisions: ArchivalDecision[];
+  /** Structured topic health telemetry & zombie detector summary (T-584). */
+  health?: TopicHealthSummary;
 }
 
 /** Thresholds governing the archival policy. */

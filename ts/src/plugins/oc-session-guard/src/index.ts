@@ -43,6 +43,14 @@ import {
   formatHealthReport,
   MESSAGES,
 } from "./utils.js";
+import {
+  createTurnBurstTracker,
+  recordToolResultForRollup,
+  finalizeTurnRollup,
+  rollupTransientSteps,
+  type RollupOptions,
+  type TurnBurstTracker,
+} from "./rollup-logic.js";
 
 export interface SessionGuardConfig extends TruncationOptions {
   maxAgeHours?: number;
@@ -51,6 +59,14 @@ export interface SessionGuardConfig extends TruncationOptions {
   sessionsPath?: string;
   suppressIdleHeartbeats?: boolean;
   enablePollDeduplication?: boolean;
+  /** T-583: squash large intermediate discovery/inspection bursts into atomic summaries at turn end. */
+  rollupTransientSteps?: boolean;
+  /** T-583: minimum consecutive transient results before a burst is squashed. */
+  rollupMinBurstSize?: number;
+  /** T-583: tool names treated as transient discovery/inspection steps. */
+  rollupTransientTools?: string[];
+  /** T-583: tail characters preserved from the final result of a squashed burst. */
+  rollupTailChars?: number;
 }
 
 const DEFAULT_BLOAT_FIELDS = [
@@ -74,6 +90,17 @@ export default definePluginEntry({
     const sessionsPath = cfg.sessionsPath;
     const suppressIdle = cfg.suppressIdleHeartbeats ?? true;
     const enablePollDedup = cfg.enablePollDeduplication ?? true;
+    const rollupEnabled = cfg.rollupTransientSteps ?? true;
+    const rollupOptions: RollupOptions = {
+      transientTools: cfg.rollupTransientTools,
+      minBurstSize: cfg.rollupMinBurstSize,
+      tailChars: cfg.rollupTailChars,
+    };
+
+    // T-583: per-session turn burst trackers. During the turn, tool results
+    // persist normally (reasoning is never interrupted mid-turn); the
+    // agent_end hook finalizes each session's tracker and squashes bursts.
+    const rollupTrackers = new Map<string, TurnBurstTracker>();
 
     const truncationOptions: TruncationOptions = {
       headChars: cfg.headChars,
@@ -106,6 +133,19 @@ export default definePluginEntry({
         const truncResult = applyToolResultTruncation(currentMessage, toolName, truncationOptions);
         if (truncResult.changed) {
           currentMessage = truncResult.message;
+        }
+
+        // 3. T-583: record the transient step for the turn rollup WITHOUT
+        //    modifying the message — results stay intact mid-turn so reasoning
+        //    is never interrupted; squashing happens only at agent_end.
+        if (rollupEnabled && toolName) {
+          const sessionKey =
+            ctx && typeof ctx === "object" && "sessionId" in ctx && typeof (ctx as { sessionId?: unknown }).sessionId === "string"
+              ? (ctx as { sessionId: string }).sessionId
+              : "default";
+          const tracker = rollupTrackers.get(sessionKey) ?? createTurnBurstTracker();
+          const { tracker: nextTracker } = recordToolResultForRollup(tracker, toolName, rollupOptions);
+          rollupTrackers.set(sessionKey, nextTracker);
         }
 
         return { message: currentMessage };
@@ -209,6 +249,53 @@ export default definePluginEntry({
         api.logger?.info?.(formatPurgeLog(report));
       } catch (err) {
         api.logger?.error?.(`${MESSAGES.PURGE_FAILED_LOG}${String(err)}`);
+      }
+    });
+
+    // ── Hook: agent_end — turn-finalization transient-step rollup (T-583) ──
+    // Fires when the conversation turn completes. If the event carries a
+    // `messages` transcript slice, qualifying bursts of consecutive transient
+    // discovery/inspection tool results are squashed into ONE atomic summary
+    // entry each and the rolled transcript + report are returned. Otherwise,
+    // the per-session burst tracker is finalized and the rollup outcome is
+    // logged. Mid-turn results are never touched.
+    api.on("agent_end", async (event: unknown, ctx?: unknown) => {
+      if (!rollupEnabled) return event;
+      try {
+        const sessionKey =
+          ctx && typeof ctx === "object" && "sessionId" in ctx && typeof (ctx as { sessionId?: unknown }).sessionId === "string"
+            ? (ctx as { sessionId: string }).sessionId
+            : "default";
+        const tracker = rollupTrackers.get(sessionKey) ?? createTurnBurstTracker();
+        rollupTrackers.delete(sessionKey);
+        const turnStats = finalizeTurnRollup(tracker, rollupOptions);
+
+        const eventRec = (event && typeof event === "object" ? event : null) as Record<string, unknown> | null;
+        const messages = eventRec && Array.isArray(eventRec.messages) ? (eventRec.messages as unknown[]) : undefined;
+
+        if (messages) {
+          const rolled = rollupTransientSteps(messages, rollupOptions);
+          if (rolled.report.changed) {
+            api.logger?.info?.(
+              `[oc-session-guard] agent_end rollup: ${rolled.report.burstsRolled} burst(s) squashed, ` +
+              `${rolled.report.entriesRemoved} entries removed, ` +
+              `${rolled.report.charsBefore} → ${rolled.report.charsAfter} chars`
+            );
+          }
+          return { messages: rolled.entries, report: rolled.report };
+        }
+
+        if (turnStats.shouldRollup) {
+          api.logger?.info?.(
+            `[oc-session-guard] agent_end rollup: ${turnStats.qualifyingBurstSizes.length} qualifying burst(s) ` +
+            `(sizes: ${turnStats.qualifyingBurstSizes.join(", ")}) of ${turnStats.totalTransient} ` +
+            `transient discovery/inspection results this turn`
+          );
+        }
+        return event;
+      } catch (err) {
+        api.logger?.error?.(`[oc-session-guard] agent_end rollup failed: ${String(err)}`);
+        return event;
       }
     });
 

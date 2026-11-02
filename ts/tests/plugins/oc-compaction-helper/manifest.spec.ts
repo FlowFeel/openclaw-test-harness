@@ -129,7 +129,7 @@ describe("oc-compaction-helper source structure", () => {
     // Every hook should have a try/catch
     const hookBlocks = source.match(/api\.on\(/g) ?? [];
     const catchBlocks = source.match(/catch \(err\)/g) ?? [];
-    expect(hookBlocks.length).toBe(4); // 4 hooks
+    expect(hookBlocks.length).toBe(5); // 5 hooks (incl. agent_turn_prepare materializer sweep)
     expect(catchBlocks.length).toBeGreaterThanOrEqual(4); // at least 4 catch blocks
   });
 

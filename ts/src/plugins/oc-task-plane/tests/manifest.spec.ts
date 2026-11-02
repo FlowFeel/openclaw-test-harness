@@ -25,7 +25,7 @@ describe("oc-task-plane plugin", () => {
     readFileSync(resolve(pluginDir, "openclaw.plugin.json"), "utf8")
   );
 
-  it("declares expected tools", () => {
-    expect(manifest.contracts.tools).toEqual(["task_dispatch","task_status","task_output","task_cancel"]);
+  it("declares expected tools (including exec_pipeline, T-583)", () => {
+    expect(manifest.contracts.tools).toEqual(["task_dispatch","task_status","task_output","task_cancel","exec_pipeline"]);
   });
 });

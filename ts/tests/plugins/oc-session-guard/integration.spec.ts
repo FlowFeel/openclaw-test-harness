@@ -72,7 +72,7 @@ function getTool(tools: CapturedTool[], name: string): CapturedTool {
 const NOW = 2_000_000_000;
 
 describe("oc-session-guard wiring", () => {
-  it("registers 5 hooks (tool_result_persist, before_message_write, before_agent_run, after_compaction, session_end) and 2 tools", () => {
+  it("registers 6 hooks (tool_result_persist, before_message_write, before_agent_run, after_compaction, session_end, agent_end) and 2 tools", () => {
     const { api, hooks, tools } = createMockApi();
     plugin.register(api as never, {});
     expect(hooks.map((h) => h.event)).toEqual([
@@ -81,6 +81,7 @@ describe("oc-session-guard wiring", () => {
       "before_agent_run",
       "after_compaction",
       "session_end",
+      "agent_end",
     ]);
     expect(tools.map((t) => t.name)).toEqual(["session_health", "session_cleanup"]);
   });

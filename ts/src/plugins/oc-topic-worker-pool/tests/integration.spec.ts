@@ -11,6 +11,11 @@ import plugin from "../src/index.js";
 
 describe("oc-topic-worker-pool plugin wiring", () => {
   it("is disabled by default when neither config nor env enables it", () => {
+    // Hermetic: neutralize a leaked host env var (the live gateway runs with
+    // the plugin enabled) so the test exercises the default-off path only.
+    const prev = process.env.OPENCLAW_ENABLE_TOPIC_WORKER_POOL;
+    delete process.env.OPENCLAW_ENABLE_TOPIC_WORKER_POOL;
+    try {
     const hooks: string[] = [];
     const logs: string[] = [];
     const api = {
@@ -28,6 +33,10 @@ describe("oc-topic-worker-pool plugin wiring", () => {
 
     expect(hooks.length).toBe(0);
     expect(logs.some((l) => l.includes("disabled by default"))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.OPENCLAW_ENABLE_TOPIC_WORKER_POOL;
+      else process.env.OPENCLAW_ENABLE_TOPIC_WORKER_POOL = prev;
+    }
   });
 
   it("registers all 7 expected hooks when enabled: true", () => {

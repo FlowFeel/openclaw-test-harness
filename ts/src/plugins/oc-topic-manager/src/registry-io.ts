@@ -13,6 +13,8 @@
  */
 
 import { readSessions, writeSessions } from "../../shared/sessions-io.ts";
+import { statSync, existsSync } from "node:fs";
+import { resolve, dirname } from "node:path";
 import {
   applyRecoveryPlan,
   registrationsFromSessions,
@@ -39,6 +41,41 @@ export function readRegistrations(path?: string): SessionRegistration[] {
 /** Read the full registry (null when the file is missing). */
 export function readRegistry(path?: string): SessionsMap | null {
   return readSessions(path);
+}
+
+/**
+ * Resolve transcript file sizes for session entries in the registry.
+ * Inspects `entry.sessionFile` if present, falling back to `{dir}/{sessionId}.jsonl`.
+ */
+export function readTranscriptSizes(
+  sessions: SessionsMap,
+  sessionsPath?: string
+): Record<string, number> {
+  const sizes: Record<string, number> = {};
+  const baseDir = sessionsPath ? dirname(sessionsPath) : undefined;
+
+  for (const [key, entry] of Object.entries(sessions)) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const rec = entry as { sessionFile?: unknown; sessionId?: unknown };
+    let filePath: string | undefined;
+
+    if (typeof rec.sessionFile === "string" && rec.sessionFile) {
+      filePath = rec.sessionFile;
+    } else if (typeof rec.sessionId === "string" && rec.sessionId && baseDir) {
+      filePath = resolve(baseDir, `${rec.sessionId}.jsonl`);
+    }
+
+    if (filePath && existsSync(filePath)) {
+      try {
+        const st = statSync(filePath);
+        sizes[key] = st.size;
+      } catch {
+        // Ignore unreadable files defensively
+      }
+    }
+  }
+
+  return sizes;
 }
 
 /**
