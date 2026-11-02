@@ -188,3 +188,85 @@ export function evaluateMessageWriteSuppression(
     },
   };
 }
+
+// ── T-585: Turn-Level Polling Budget ─────────────────────────────
+
+export interface TurnPollState {
+  cumulativePollMs: number;
+  pollCount: number;
+}
+
+export interface PollBudgetConfig {
+  turnPollBudgetMs?: number;
+  enableTurnPollBudget?: boolean;
+}
+
+export const DEFAULT_POLL_BUDGET_MS = 90000;
+
+export interface PollBudgetVerdict {
+  allowed: boolean;
+  cumulativePollMs: number;
+  requestedTimeoutMs: number;
+  budgetMs: number;
+  nextState: TurnPollState;
+  error?: {
+    error: "POLL_BUDGET_EXHAUSTED";
+    message: string;
+  };
+}
+
+export function createInitialTurnPollState(): TurnPollState {
+  return {
+    cumulativePollMs: 0,
+    pollCount: 0,
+  };
+}
+
+export function evaluateTurnPollBudget(
+  state: TurnPollState,
+  requestedTimeoutMs: number,
+  config?: PollBudgetConfig,
+): PollBudgetVerdict {
+  const enabled = config?.enableTurnPollBudget ?? true;
+  const budgetMs = config?.turnPollBudgetMs ?? DEFAULT_POLL_BUDGET_MS;
+  const timeout = Math.max(0, requestedTimeoutMs);
+
+  if (!enabled) {
+    return {
+      allowed: true,
+      cumulativePollMs: state.cumulativePollMs + timeout,
+      requestedTimeoutMs: timeout,
+      budgetMs,
+      nextState: {
+        cumulativePollMs: state.cumulativePollMs + timeout,
+        pollCount: state.pollCount + 1,
+      },
+    };
+  }
+
+  if (state.cumulativePollMs + timeout > budgetMs) {
+    return {
+      allowed: false,
+      cumulativePollMs: state.cumulativePollMs,
+      requestedTimeoutMs: timeout,
+      budgetMs,
+      nextState: state,
+      error: {
+        error: "POLL_BUDGET_EXHAUSTED",
+        message: `Cumulative synchronous polling in this turn has reached ${Math.round(budgetMs / 1000)}s (requested: ${Math.round(timeout / 1000)}s, accumulated: ${Math.round(state.cumulativePollMs / 1000)}s). Further synchronous wait is blocked to protect the 600s lane cap. Release turn now and check status via background task, cron wake, or next conversational turn.`,
+      },
+    };
+  }
+
+  const nextCumulative = state.cumulativePollMs + timeout;
+  return {
+    allowed: true,
+    cumulativePollMs: nextCumulative,
+    requestedTimeoutMs: timeout,
+    budgetMs,
+    nextState: {
+      cumulativePollMs: nextCumulative,
+      pollCount: state.pollCount + 1,
+    },
+  };
+}

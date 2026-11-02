@@ -244,3 +244,145 @@ export function applyToolResultTruncation(
 
   return { message: changed ? nextMessage : message, changed };
 }
+
+// ── T-586: Tool Parameter Circuit Breaker ────────────────────────
+
+export interface ToolErrorSignature {
+  toolName: string;
+  paramHash: string;
+  lastError: string;
+  consecutiveCount: number;
+}
+
+export interface CircuitBreakerState {
+  lastFailure?: ToolErrorSignature;
+}
+
+export interface CircuitBreakerConfig {
+  maxConsecutiveIdenticalErrors?: number;
+  enableErrorCircuitBreaker?: boolean;
+}
+
+export const DEFAULT_MAX_CONSECUTIVE_ERRORS = 2;
+
+export interface CircuitBreakerVerdict {
+  blocked: boolean;
+  consecutiveCount: number;
+  nextState: CircuitBreakerState;
+  error?: {
+    error: "IDENTICAL_ARGUMENT_ERROR_LOOP";
+    message: string;
+  };
+}
+
+/**
+ * Deterministically hash an arbitrary parameter object by recursively sorting keys.
+ */
+export function hashToolParams(params: unknown): string {
+  if (params === null || typeof params !== "object") {
+    return String(params);
+  }
+  if (Array.isArray(params)) {
+    return "[" + params.map(hashToolParams).join(",") + "]";
+  }
+  const obj = params as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  const pairs = keys.map((k) => `${JSON.stringify(k)}:${hashToolParams(obj[k])}`);
+  return "{" + pairs.join(",") + "}";
+}
+
+export function createInitialCircuitBreakerState(): CircuitBreakerState {
+  return {};
+}
+
+/**
+ * Evaluates whether an upcoming tool invocation with the given arguments should be blocked
+ * based on prior identical failures.
+ */
+export function evaluatePreToolCallCircuitBreaker(
+  state: CircuitBreakerState,
+  toolName: string,
+  params: unknown,
+  config?: CircuitBreakerConfig,
+): CircuitBreakerVerdict {
+  const enabled = config?.enableErrorCircuitBreaker ?? true;
+  const threshold = config?.maxConsecutiveIdenticalErrors ?? DEFAULT_MAX_CONSECUTIVE_ERRORS;
+
+  if (!enabled || !state.lastFailure) {
+    return { blocked: false, consecutiveCount: 0, nextState: state };
+  }
+
+  const currentHash = hashToolParams(params);
+  if (
+    state.lastFailure.toolName === toolName &&
+    state.lastFailure.paramHash === currentHash
+  ) {
+    if (state.lastFailure.consecutiveCount >= threshold) {
+      return {
+        blocked: true,
+        consecutiveCount: state.lastFailure.consecutiveCount,
+        nextState: state,
+        error: {
+          error: "IDENTICAL_ARGUMENT_ERROR_LOOP",
+          message: `Blocked execution: Tool '${toolName}' failed with identical arguments on ${state.lastFailure.consecutiveCount} consecutive prior calls (last error: '${state.lastFailure.lastError}'). Halting loop to prevent stuck execution. Stop and inspect the parameter schema before retrying.`,
+        },
+      };
+    }
+  }
+
+  return { blocked: false, consecutiveCount: 0, nextState: state };
+}
+
+/**
+ * Records a failure or success outcome to update the circuit breaker state.
+ */
+export function recordToolCallOutcome(
+  state: CircuitBreakerState,
+  toolName: string,
+  params: unknown,
+  outcome: { isError: boolean; errorMessage?: string },
+  config?: CircuitBreakerConfig,
+): { state: CircuitBreakerState; tripped: boolean } {
+  const enabled = config?.enableErrorCircuitBreaker ?? true;
+  const threshold = config?.maxConsecutiveIdenticalErrors ?? DEFAULT_MAX_CONSECUTIVE_ERRORS;
+
+  if (!enabled) {
+    return { state: {}, tripped: false };
+  }
+
+  if (!outcome.isError) {
+    // A successful call resets the circuit breaker
+    return { state: {}, tripped: false };
+  }
+
+  const currentHash = hashToolParams(params);
+  const errMsg = outcome.errorMessage || "Unknown error";
+
+  if (
+    state.lastFailure &&
+    state.lastFailure.toolName === toolName &&
+    state.lastFailure.paramHash === currentHash
+  ) {
+    const nextCount = state.lastFailure.consecutiveCount + 1;
+    const nextState: CircuitBreakerState = {
+      lastFailure: {
+        toolName,
+        paramHash: currentHash,
+        lastError: errMsg,
+        consecutiveCount: nextCount,
+      },
+    };
+    return { state: nextState, tripped: nextCount >= threshold };
+  }
+
+  // First failure for these params
+  const nextState: CircuitBreakerState = {
+    lastFailure: {
+      toolName,
+      paramHash: currentHash,
+      lastError: errMsg,
+      consecutiveCount: 1,
+    },
+  };
+  return { state: nextState, tripped: 1 >= threshold };
+}

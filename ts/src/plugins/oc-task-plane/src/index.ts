@@ -1,3 +1,10 @@
+import {
+  evaluateRevisionMatch,
+} from "./staging-verify-logic.js";
+import {
+  defaultFetchStagingRevision,
+  type RevisionFetcher,
+} from "./staging-verify-io.js";
 /**
  * OcTaskPlane — plugin entry point (wiring layer).
  *
@@ -145,6 +152,7 @@ function capStepText(text: string): string {
 }
 
 export interface TaskPlaneIoDependencies {
+  fetchRevision?: RevisionFetcher;
   reader?: TaskRegistryReader;
   writer?: TaskRegistryWriter;
   appender?: OutputAppender;
@@ -169,6 +177,7 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
   const durableSpawner = deps.durableSpawner ?? defaultDurableSpawner;
   const wakeSender = deps.wakeSender ?? defaultGatewayWakeSender;
   const getNow = deps.now ?? (() => Date.now());
+  const revisionFetcher = deps.fetchRevision ?? defaultFetchStagingRevision;
 
   let taskCounter = 0;
 
@@ -820,6 +829,68 @@ export function createTaskPlanePlugin(deps: TaskPlaneIoDependencies = {}) {
           } catch (err) {
             return {
               content: [{ type: "text" as const, text: `exec_pipeline failed: ${String(err)}` }],
+            };
+          }
+        },
+      });
+
+
+      // ── Tool: staging_verify (T-587) ──────────────────────────────
+      api.registerTool({
+        name: "staging_verify",
+        description: "Verify that a staging deployment endpoint is actively serving the expected git commit SHA rather than a stale container bake.",
+        parameters: Type.Object({
+          url: Type.String({ description: "Staging revision endpoint (e.g. /Special:Version, version.json, siteinfo)" }),
+          expectedSha: Type.String({ description: "Target git commit SHA that was deployed" }),
+          timeoutMs: Type.Optional(Type.Number({ description: "HTTP timeout in milliseconds (default: 10000)" })),
+        }),
+        async execute(_id: string, params: Record<string, unknown>) {
+          try {
+            const url = String(params.url ?? "");
+            const expectedSha = String(params.expectedSha ?? "");
+            const timeoutMs = typeof params.timeoutMs === "number" ? params.timeoutMs : 10000;
+
+            const fetcher = revisionFetcher;
+            const res = await fetcher(url, timeoutMs);
+
+            if (!res.ok) {
+              return {
+                content: [
+                  {
+                    type: "text" as const,
+                    text: JSON.stringify(
+                      {
+                        verified: false,
+                        status: "fetch_failed",
+                        expectedSha,
+                        error: res.error || `HTTP ${res.status}`,
+                        message: `Failed to fetch revision from ${url}: ${res.error || `HTTP ${res.status}`}`,
+                      },
+                      null,
+                      2
+                    ),
+                  },
+                ],
+              };
+            }
+
+            const verdict = evaluateRevisionMatch(res.payload, expectedSha);
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify(verdict, null, 2),
+                },
+              ],
+            };
+          } catch (err) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({ verified: false, status: "error", error: String(err) }, null, 2),
+                },
+              ],
             };
           }
         },

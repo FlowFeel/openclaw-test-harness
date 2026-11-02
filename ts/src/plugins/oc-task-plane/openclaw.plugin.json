@@ -8,7 +8,8 @@
       "task_status",
       "task_output",
       "task_cancel",
-      "exec_pipeline"
+      "exec_pipeline",
+      "staging_verify"
     ],
     "hooks": [
       "gateway_start",
