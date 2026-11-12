@@ -11,6 +11,17 @@ import {
   type CircuitBreakerState,
   type CircuitBreakerConfig,
 } from "./tool-result-hygiene-logic.js";
+import {
+  initTurnEnergy,
+  applyEnergyAction,
+  evaluateTurnEfficiencyScore,
+  resolveTierFromTes,
+  updateSessionReputation,
+  formatEnergyEnvelopeHeader,
+  type TurnEnergyState,
+  type SessionTier,
+  type SessionReputation,
+} from "../../shared/efficiency-energy-logic.js";
 /**
  * OC Session Guard — session bloat and idle admission management plugin.
  *
@@ -86,6 +97,9 @@ export interface SessionGuardConfig extends TruncationOptions {
   /** T-586: Max consecutive identical errors before tripping circuit breaker (default: 2). */
   maxConsecutiveIdenticalErrors?: number;
   enableErrorCircuitBreaker?: boolean;
+  /** Phase 2: Dynamic energy budgeting & soft landing */
+  enableEnergyBudget?: boolean;
+  initialSessionTier?: SessionTier;
 }
 
 const DEFAULT_BLOAT_FIELDS = [
@@ -143,12 +157,70 @@ export default definePluginEntry({
       enableErrorCircuitBreaker: cfg.enableErrorCircuitBreaker,
     };
 
+    // Phase 2: Turn Energy & Session Reputation State
+    const enableEnergyBudget = cfg.enableEnergyBudget ?? true;
+    const initialSessionTier: SessionTier = cfg.initialSessionTier ?? "standard";
+    const sessionReputations = new Map<string, SessionReputation>();
+    const sessionTurnEnergy = new Map<string, TurnEnergyState>();
+    const sessionTurnStartTimes = new Map<string, number>();
+    const sessionLastToolTimes = new Map<string, number>();
 
     const reader: SessionsReader = (path) => readSessions(path ?? sessionsPath);
     const writer: SessionsWriter = (data, path) =>
       writeSessions(data, path ?? sessionsPath);
 
-    // ── Hook: tool_result_persist — head/tail truncation & poll compaction ──
+    // ── Hook: before_tool_call — turn energy budgeting & circuit breaker ──
+    api.on("before_tool_call", (event: unknown, ctx?: unknown) => {
+      try {
+        if (!event || typeof event !== "object") return event;
+        const ev = event as { toolName?: string; params?: Record<string, unknown> };
+        const toolName = ev.toolName ?? "";
+        const params = ev.params ?? {};
+
+        const sessionKey =
+          ctx && typeof ctx === "object" && "sessionId" in ctx && typeof (ctx as { sessionId?: unknown }).sessionId === "string"
+            ? (ctx as { sessionId: string }).sessionId
+            : "default";
+
+        // 1. Evaluate Circuit Breaker
+        const cbVerdict = evaluatePreToolCallCircuitBreaker(circuitBreakerState, toolName, params, circuitBreakerConfig);
+        if (cbVerdict.blocked) {
+          api.logger?.warn?.(`[oc-session-guard] circuit breaker blocked ${toolName}: ${cbVerdict.error?.message}`);
+          return {
+            block: true,
+            blockReason: cbVerdict.error?.message ?? "Tool call blocked by parameter circuit breaker",
+          };
+        }
+
+        // 2. Evaluate Turn Energy Budget
+        if (enableEnergyBudget) {
+          let energyState = sessionTurnEnergy.get(sessionKey);
+          if (!energyState) {
+            const rep = sessionReputations.get(sessionKey);
+            const tier = rep ? rep.tier : initialSessionTier;
+            energyState = initTurnEnergy(tier);
+            sessionTurnEnergy.set(sessionKey, energyState);
+          }
+
+          if (energyState.isGated) {
+            const blockReason =
+              "🛑 Turn energy budget exhausted. Synthesize your visible reply with findings and next steps immediately.";
+            api.logger?.warn?.(`[oc-session-guard] energy budget exhausted for ${sessionKey}, gating ${toolName}`);
+            return {
+              block: true,
+              blockReason,
+            };
+          }
+        }
+
+        return event;
+      } catch (err) {
+        api.logger?.error?.(`[oc-session-guard] before_tool_call error: ${String(err)}`);
+        return event;
+      }
+    });
+
+    // ── Hook: tool_result_persist — head/tail truncation, poll compaction & energy deduction ──
     api.on("tool_result_persist", (event: unknown, ctx?: unknown) => {
       try {
         if (!event || typeof event !== "object" || !("message" in event)) {
@@ -168,14 +240,82 @@ export default definePluginEntry({
           currentMessage = truncResult.message;
         }
 
+        const sessionKey =
+          ctx && typeof ctx === "object" && "sessionId" in ctx && typeof (ctx as { sessionId?: unknown }).sessionId === "string"
+            ? (ctx as { sessionId: string }).sessionId
+            : "default";
+
+        // Phase 2: Deduct turn energy and award habit points
+        if (enableEnergyBudget && toolName) {
+          let energyState = sessionTurnEnergy.get(sessionKey);
+          if (!energyState) {
+            const rep = sessionReputations.get(sessionKey);
+            const tier = rep ? rep.tier : initialSessionTier;
+            energyState = initTurnEnergy(tier);
+          }
+
+          const now = Date.now();
+          const lastTime = sessionLastToolTimes.get(sessionKey) ?? sessionTurnStartTimes.get(sessionKey) ?? now;
+          const durationMs = Math.max(0, now - lastTime);
+          sessionLastToolTimes.set(sessionKey, now);
+
+          let payloadBytes = 0;
+          try {
+            payloadBytes = JSON.stringify(currentMessage).length;
+          } catch {
+            payloadBytes = 0;
+          }
+
+          const isDelegation =
+            toolName === "sessions_spawn" ||
+            toolName === "task_dispatch" ||
+            toolName === "durable_spawn";
+          const isPoll = toolName === "process" || toolName === "task_status";
+          const isZeroDelta = pollResult.isZeroDelta;
+          const isTargetedRead =
+            toolName === "read" ||
+            toolName === "memory_search" ||
+            toolName === "memory_get";
+
+          const nextEnergyState = applyEnergyAction(energyState, {
+            toolName,
+            durationMs,
+            payloadBytes,
+            isDelegation,
+            isPoll,
+            isZeroDelta,
+            isTargetedRead,
+          });
+          sessionTurnEnergy.set(sessionKey, nextEnergyState);
+
+          // If advisory threshold crossed or gated, inject notice into message content
+          if (nextEnergyState.advisoryEmitted || nextEnergyState.isGated) {
+            const header = formatEnergyEnvelopeHeader(nextEnergyState);
+            const notice = nextEnergyState.isGated
+              ? `\n\n${header}\n🛑 [oc-session-guard] Turn energy budget exhausted. Synthesize visible answer immediately.`
+              : `\n\n${header}\n⚡ [oc-session-guard] Energy advisory: wrap up tool execution and begin synthesis.`;
+
+            if (Array.isArray(currentMessage.content)) {
+              currentMessage = {
+                ...currentMessage,
+                content: [
+                  ...currentMessage.content,
+                  { type: "text", text: notice },
+                ],
+              };
+            } else if (typeof currentMessage.content === "string") {
+              currentMessage = {
+                ...currentMessage,
+                content: currentMessage.content + notice,
+              };
+            }
+          }
+        }
+
         // 3. T-583: record the transient step for the turn rollup WITHOUT
         //    modifying the message — results stay intact mid-turn so reasoning
         //    is never interrupted; squashing happens only at agent_end.
         if (rollupEnabled && toolName) {
-          const sessionKey =
-            ctx && typeof ctx === "object" && "sessionId" in ctx && typeof (ctx as { sessionId?: unknown }).sessionId === "string"
-              ? (ctx as { sessionId: string }).sessionId
-              : "default";
           const tracker = rollupTrackers.get(sessionKey) ?? createTurnBurstTracker();
           const { tracker: nextTracker } = recordToolResultForRollup(tracker, toolName, rollupOptions);
           rollupTrackers.set(sessionKey, nextTracker);
@@ -226,9 +366,25 @@ export default definePluginEntry({
       }
     });
 
-    // ── Hook: before_agent_run — suppress idle model calls ──
+    // ── Hook: before_agent_run — suppress idle model calls & initialize turn energy ──
     api.on("before_agent_run", async (event: unknown, ctx?: unknown) => {
       turnPollState = createInitialTurnPollState();
+
+      const sessionKey =
+        ctx && typeof ctx === "object" && "sessionId" in ctx && typeof (ctx as { sessionId?: unknown }).sessionId === "string"
+          ? (ctx as { sessionId: string }).sessionId
+          : "default";
+
+      if (enableEnergyBudget) {
+        const now = Date.now();
+        sessionTurnStartTimes.set(sessionKey, now);
+        sessionLastToolTimes.set(sessionKey, now);
+
+        const rep = sessionReputations.get(sessionKey);
+        const tier = rep ? rep.tier : initialSessionTier;
+        sessionTurnEnergy.set(sessionKey, initTurnEnergy(tier));
+      }
+
       if (!suppressIdle) {
         return { outcome: "pass" };
       }
@@ -326,6 +482,27 @@ export default definePluginEntry({
             `transient discovery/inspection results this turn`
           );
         }
+
+        // Phase 2: Finalize Turn Efficiency Score and update Session Reputation
+        if (enableEnergyBudget) {
+          const energyState = sessionTurnEnergy.get(sessionKey);
+          if (energyState) {
+            const turnTes = evaluateTurnEfficiencyScore(energyState);
+            const currentRep: SessionReputation = sessionReputations.get(sessionKey) ?? {
+              rollingTes: 50,
+              tier: initialSessionTier,
+              maxSubagentSlots: 3,
+              queuePriority: "normal",
+            };
+            const updatedRep = updateSessionReputation(currentRep, turnTes);
+            sessionReputations.set(sessionKey, updatedRep);
+
+            api.logger?.info?.(
+              `[oc-session-guard] turn efficiency: TES=${turnTes}, rollingTES=${updatedRep.rollingTes}, tier=${updatedRep.tier.toUpperCase()}, points=+${energyState.habitPoints}P`
+            );
+          }
+        }
+
         return event;
       } catch (err) {
         api.logger?.error?.(`[oc-session-guard] agent_end rollup failed: ${String(err)}`);

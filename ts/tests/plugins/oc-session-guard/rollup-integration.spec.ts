@@ -53,10 +53,11 @@ function burst(toolName: string, n: number) {
 }
 
 describe("oc-session-guard turn-finalization rollup (T-583)", () => {
-  it("registers the agent_end hook alongside the existing five hooks", () => {
+  it("registers the agent_end hook alongside the existing hooks", () => {
     const { api, hooks, tools } = createMockApi();
     plugin.register(api as never, {});
     expect(hooks.map((h) => h.event)).toEqual([
+      "before_tool_call",
       "tool_result_persist",
       "before_message_write",
       "before_agent_run",

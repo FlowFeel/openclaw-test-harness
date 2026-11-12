@@ -12,6 +12,7 @@
     ],
     "hooks": [
       "tool_result_persist",
+      "before_tool_call",
       "before_message_write",
       "after_compaction",
       "session_end",
