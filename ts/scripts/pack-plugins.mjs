@@ -27,14 +27,26 @@ const pluginsDir = join(tsRoot, "src", "plugins");
 const outDir = join(tsRoot, "dist-plugins");
 
 function listPluginDirs() {
-  return readdirSync(pluginsDir)
+  const v1 = readdirSync(pluginsDir)
     .filter((name) => name.startsWith("oc-"))
     .filter((name) => {
       const dir = join(pluginsDir, name);
       return statSync(dir).isDirectory() && existsSync(join(dir, "package.json"));
     })
-    .sort()
     .map((name) => join(pluginsDir, name));
+
+  const v2Dir = join(pluginsDir, "v2");
+  const v2 = existsSync(v2Dir)
+    ? readdirSync(v2Dir)
+        .filter((name) => name.startsWith("oc-"))
+        .filter((name) => {
+          const dir = join(v2Dir, name);
+          return statSync(dir).isDirectory() && existsSync(join(dir, "package.json"));
+        })
+        .map((name) => join(v2Dir, name))
+    : [];
+
+  return [...v1, ...v2].sort();
 }
 
 function sha256File(filePath) {
