@@ -99,4 +99,32 @@ describe("E2E BDD: Plugins v2 Efficiency & Energy Budgeting in Real Container", 
     expect(parsed.hooks).toContain("agent_end");
     expect(parsed.tools).toContain("session_health");
   });
+
+  it("Scenario: Hypothetico-axiomatic empirical calibration dynamically adjusts parameters in container runtime", async () => {
+    const result = await container.exec([
+      "node", "--experimental-strip-types", "-e",
+      `import { DEFAULT_ENERGY_CONFIG, calibrateEconomicParameters } from '/app/ts/src/plugins/shared/efficiency-energy-logic.ts';
+       const baseline = DEFAULT_ENERGY_CONFIG;
+       const empirical = {
+         p99YieldLatencySec: 48,
+         zeroDeltaBurstRate: 0.20,
+         delegationOffloadRatio: 0.22,
+         criticalCeilingHitRate: 0.30,
+         meanTurnTes: 60,
+       };
+       const calibrated = calibrateEconomicParameters(baseline, empirical);
+       console.log(JSON.stringify({
+         advisoryThreshold: calibrated.advisoryThreshold,
+         delegationRebate: calibrated.rates.delegationRebate,
+         zeroDeltaPenaltyDrain: calibrated.rates.zeroDeltaPenaltyDrain,
+       }));`,
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.output.trim().split("\n").pop()!);
+    // Verified dynamic elevation against empirical stress
+    expect(parsed.advisoryThreshold).toBe(250);
+    expect(parsed.delegationRebate).toBe(250);
+    expect(parsed.zeroDeltaPenaltyDrain).toBe(150);
+  });
 });
