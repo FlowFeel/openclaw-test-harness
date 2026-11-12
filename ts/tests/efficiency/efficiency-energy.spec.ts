@@ -6,6 +6,7 @@ import {
   resolveTierFromTes,
   updateSessionReputation,
   formatEnergyEnvelopeHeader,
+  formatHabitTelemetryCard,
   SessionReputation,
 } from "../../src/plugins/shared/efficiency-energy-logic.js";
 
@@ -173,11 +174,30 @@ describe("efficiency-energy-logic (Pure Foundry DFT Tests)", () => {
     });
   });
 
-  describe("formatEnergyEnvelopeHeader", () => {
+  describe("formatEnergyEnvelopeHeader and formatHabitTelemetryCard", () => {
     it("renders compact formatted header", () => {
       const state = initTurnEnergy("sovereign");
       const header = formatEnergyEnvelopeHeader(state);
       expect(header).toBe("[⚡ Energy: 1200/1200 (100%) | Tier: SOVEREIGN | Habits: +0P]");
+    });
+
+    it("renders multi-line habit telemetry card", () => {
+      const card = formatHabitTelemetryCard({
+        tier: "sovereign",
+        rollingTes: 85,
+        remainingEnergy: 1100,
+        initialEnergy: 1200,
+        habitPoints: 150,
+        penalties: 0,
+        actionsCount: 2,
+        delegationCount: 1,
+        maxSubagentSlots: 6,
+        queuePriority: "high",
+      });
+
+      expect(card).toContain("Session Efficiency: Tier 3 (SOVEREIGN) · Rolling TES 85/100");
+      expect(card).toContain("⚡ Energy Pool: 1100/1200 (92%) | Max Subagents: 6 | Priority: high");
+      expect(card).toContain("🎯 Habits: +150P | Penalties: -0P | Offload Ratio: 50% (1/2 tools)");
     });
   });
 });

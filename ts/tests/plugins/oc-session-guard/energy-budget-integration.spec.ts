@@ -139,4 +139,57 @@ describe("Phase 2: oc-session-guard Energy Budget & Soft Landing Integration", (
 
     expect(logs.some((l) => l.includes("turn efficiency: TES="))).toBe(true);
   });
+
+  it("Phase 3: injects cognitive envelope header when enableEnergyEnvelopeHeaders is true", async () => {
+    const { api, hooks } = createMockApi();
+    plugin.register(api as never, {
+      initialSessionTier: "sovereign",
+      enableEnergyEnvelopeHeaders: true,
+    });
+
+    const beforeRun = getHook(hooks, "before_agent_run");
+    const persistTool = getHook(hooks, "tool_result_persist");
+    const ctx = { sessionId: "session-headers" };
+
+    await beforeRun.handler({ prompt: "Investigate" }, ctx);
+
+    const persistRes = (await persistTool.handler(
+      {
+        toolName: "read",
+        message: { role: "toolResult", toolName: "read", content: [{ type: "text", text: "data" }] },
+      },
+      ctx,
+    )) as { message: { content: Array<{ type: string; text: string }> } };
+
+    expect(
+      persistRes.message.content.some((c) =>
+        c.text.includes("[⚡ Energy: ") && c.text.includes("Tier: SOVEREIGN") && c.text.includes("Habits: +50P"),
+      ),
+    ).toBe(true);
+  });
+
+  it("Phase 3: session_health includes habit telemetry card and reputation", async () => {
+    const { api, tools } = createMockApi();
+    const sessionsPath = "/tmp/mock-sessions-health.json";
+    const fs = await import("node:fs");
+    fs.writeFileSync(sessionsPath, JSON.stringify({ "session-1": { model: "test" } }));
+
+    plugin.register(api as never, {
+      sessionsPath,
+      initialSessionTier: "sovereign",
+    });
+
+    const healthTool = tools.find((t) => t.name === "session_health");
+    expect(healthTool).toBeDefined();
+
+    const result = (await healthTool!.execute("id-1", {})) as {
+      content: Array<{ type: string; text: string }>;
+    };
+
+    expect(result.content[0].text).toContain("efficiencyCard");
+    expect(result.content[0].text).toContain("SOVEREIGN");
+    expect(result.content[0].text).toContain("Session Efficiency: Tier 3");
+
+    fs.rmSync(sessionsPath, { force: true });
+  });
 });

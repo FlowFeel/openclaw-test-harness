@@ -73,16 +73,26 @@ export function formatHealthReport(params: {
   entryCount: number;
   subagentCount: number;
   sizeBytes: number;
+  efficiencyCard?: string;
+  reputation?: {
+    tier: string;
+    rollingTes: number;
+    maxSubagentSlots: number;
+    queuePriority: string;
+  };
 }): string {
-  return JSON.stringify(
-    {
-      ok: true,
-      entryCount: params.entryCount,
-      subagentCount: params.subagentCount,
-      sizeBytes: params.sizeBytes,
-      sizeKB: Math.round(params.sizeBytes / 1024),
-    },
-    null,
-    2,
-  );
+  const base: Record<string, unknown> = {
+    ok: true,
+    entryCount: params.entryCount,
+    subagentCount: params.subagentCount,
+    sizeBytes: params.sizeBytes,
+    sizeKB: Math.round(params.sizeBytes / 1024),
+  };
+  if (params.reputation) {
+    base.reputation = params.reputation;
+  }
+  if (params.efficiencyCard) {
+    base.efficiencyCard = params.efficiencyCard;
+  }
+  return JSON.stringify(base, null, 2);
 }

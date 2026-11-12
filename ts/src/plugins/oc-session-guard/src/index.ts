@@ -18,6 +18,7 @@ import {
   resolveTierFromTes,
   updateSessionReputation,
   formatEnergyEnvelopeHeader,
+  formatHabitTelemetryCard,
   type TurnEnergyState,
   type SessionTier,
   type SessionReputation,
@@ -97,8 +98,9 @@ export interface SessionGuardConfig extends TruncationOptions {
   /** T-586: Max consecutive identical errors before tripping circuit breaker (default: 2). */
   maxConsecutiveIdenticalErrors?: number;
   enableErrorCircuitBreaker?: boolean;
-  /** Phase 2: Dynamic energy budgeting & soft landing */
+  /** Phase 2/3: Dynamic energy budgeting & soft landing */
   enableEnergyBudget?: boolean;
+  enableEnergyEnvelopeHeaders?: boolean;
   initialSessionTier?: SessionTier;
 }
 
@@ -157,8 +159,9 @@ export default definePluginEntry({
       enableErrorCircuitBreaker: cfg.enableErrorCircuitBreaker,
     };
 
-    // Phase 2: Turn Energy & Session Reputation State
+    // Phase 2/3: Turn Energy & Session Reputation State
     const enableEnergyBudget = cfg.enableEnergyBudget ?? true;
+    const enableEnergyHeaders = cfg.enableEnergyEnvelopeHeaders ?? false;
     const initialSessionTier: SessionTier = cfg.initialSessionTier ?? "standard";
     const sessionReputations = new Map<string, SessionReputation>();
     const sessionTurnEnergy = new Map<string, TurnEnergyState>();
@@ -288,13 +291,18 @@ export default definePluginEntry({
           });
           sessionTurnEnergy.set(sessionKey, nextEnergyState);
 
-          // If advisory threshold crossed or gated, inject notice into message content
-          if (nextEnergyState.advisoryEmitted || nextEnergyState.isGated) {
-            const header = formatEnergyEnvelopeHeader(nextEnergyState);
-            const notice = nextEnergyState.isGated
-              ? `\n\n${header}\n🛑 [oc-session-guard] Turn energy budget exhausted. Synthesize visible answer immediately.`
-              : `\n\n${header}\n⚡ [oc-session-guard] Energy advisory: wrap up tool execution and begin synthesis.`;
+          // Phase 3: Cognitive envelope header & advisory in toolResult
+          const header = formatEnergyEnvelopeHeader(nextEnergyState);
+          let notice = "";
+          if (nextEnergyState.isGated) {
+            notice = `\n\n${header}\n🛑 [oc-session-guard] Turn energy budget exhausted. Synthesize visible answer immediately.`;
+          } else if (nextEnergyState.advisoryEmitted) {
+            notice = `\n\n${header}\n⚡ [oc-session-guard] Energy advisory: wrap up tool execution and begin synthesis.`;
+          } else if (enableEnergyHeaders) {
+            notice = `\n\n${header}`;
+          }
 
+          if (notice) {
             if (Array.isArray(currentMessage.content)) {
               currentMessage = {
                 ...currentMessage,
@@ -532,6 +540,28 @@ export default definePluginEntry({
             k.includes("subagent"),
           ).length;
           const size = JSON.stringify(raw).length;
+
+          // Phase 3: Include Habit Telemetry Card in health report
+          const defaultRep: SessionReputation = sessionReputations.get("default") ?? {
+            rollingTes: 50,
+            tier: initialSessionTier,
+            maxSubagentSlots: 3,
+            queuePriority: "normal",
+          };
+          const currentEnergy = sessionTurnEnergy.get("default") ?? initTurnEnergy(defaultRep.tier);
+          const efficiencyCard = formatHabitTelemetryCard({
+            tier: defaultRep.tier,
+            rollingTes: defaultRep.rollingTes,
+            remainingEnergy: currentEnergy.remainingEnergy,
+            initialEnergy: currentEnergy.initialEnergy,
+            habitPoints: currentEnergy.habitPoints,
+            penalties: currentEnergy.penalties,
+            actionsCount: currentEnergy.actionsCount,
+            delegationCount: currentEnergy.delegationCount,
+            maxSubagentSlots: defaultRep.maxSubagentSlots,
+            queuePriority: defaultRep.queuePriority,
+          });
+
           return {
             content: [
               {
@@ -540,6 +570,13 @@ export default definePluginEntry({
                   entryCount: count,
                   subagentCount,
                   sizeBytes: size,
+                  efficiencyCard,
+                  reputation: {
+                    tier: defaultRep.tier,
+                    rollingTes: defaultRep.rollingTes,
+                    maxSubagentSlots: defaultRep.maxSubagentSlots,
+                    queuePriority: defaultRep.queuePriority,
+                  },
                 }),
               },
             ],

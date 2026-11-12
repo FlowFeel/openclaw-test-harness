@@ -220,3 +220,36 @@ export function formatEnergyEnvelopeHeader(state: TurnEnergyState): string {
   const remainingPercent = Math.round((state.remainingEnergy / state.initialEnergy) * 100);
   return `[⚡ Energy: ${Math.round(state.remainingEnergy)}/${state.initialEnergy} (${remainingPercent}%) | Tier: ${state.tier.toUpperCase()} | Habits: +${state.habitPoints}P]`;
 }
+
+export interface HabitTelemetryCardData {
+  tier: SessionTier;
+  rollingTes: number;
+  lastTurnTes?: number;
+  remainingEnergy: number;
+  initialEnergy: number;
+  habitPoints: number;
+  penalties: number;
+  actionsCount: number;
+  delegationCount: number;
+  maxSubagentSlots: number;
+  queuePriority: string;
+}
+
+/**
+ * Pure function to format a habit telemetry card for session_health or status displays.
+ */
+export function formatHabitTelemetryCard(data: HabitTelemetryCardData): string {
+  const energyPct = Math.round((data.remainingEnergy / data.initialEnergy) * 100);
+  const tierName = data.tier.toUpperCase();
+  const offloadRatio =
+    data.actionsCount > 0
+      ? Math.round((data.delegationCount / data.actionsCount) * 100)
+      : 0;
+
+  return [
+    `📊 Session Efficiency: Tier ${tierName === "SOVEREIGN" ? "3" : tierName === "STANDARD" ? "2" : "1"} (${tierName}) · Rolling TES ${data.rollingTes}/100`,
+    `⚡ Energy Pool: ${Math.round(data.remainingEnergy)}/${data.initialEnergy} (${energyPct}%) | Max Subagents: ${data.maxSubagentSlots} | Priority: ${data.queuePriority}`,
+    `🎯 Habits: +${data.habitPoints}P | Penalties: -${data.penalties}P | Offload Ratio: ${offloadRatio}% (${data.delegationCount}/${data.actionsCount} tools)`,
+  ].join("\n");
+}
+
