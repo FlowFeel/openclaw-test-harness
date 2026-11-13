@@ -1,0 +1,118 @@
+{
+  "id": "oc-lane-supervisor",
+  "name": "OC Lane Supervisor",
+  "description": "Unified Lane Supervisor (Plugins v2) — consolidates turn energy budgeting, habit economics, soft-landing gating, topic admission control, zero-delta frame collapsing, transient tool rollups, and topic registry recovery.",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "session_health",
+      "session_cleanup",
+      "lane_forecast",
+      "topic_audit",
+      "topic_recover"
+    ],
+    "hooks": [
+      "before_dispatch",
+      "before_agent_run",
+      "before_tool_call",
+      "tool_result_persist",
+      "before_message_write",
+      "agent_end",
+      "subagent_spawning",
+      "subagent_ended",
+      "after_compaction",
+      "session_end"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "sessionsPath": {
+        "type": "string",
+        "description": "Override path to sessions.json"
+      },
+      "maxAgeHours": {
+        "type": "number",
+        "default": 15
+      },
+      "stripBloatFields": {
+        "type": "boolean",
+        "default": true
+      },
+      "bloatFields": {
+        "type": "array",
+        "items": { "type": "string" },
+        "default": [
+          "compactionCheckpoints",
+          "systemPromptReport",
+          "skillsSnapshot",
+          "contextBudgetStatus",
+          "usageFamilySessionIds",
+          "lastHeartbeatText"
+        ]
+      },
+      "suppressIdleHeartbeats": {
+        "type": "boolean",
+        "default": true
+      },
+      "enablePollDeduplication": {
+        "type": "boolean",
+        "default": true
+      },
+      "rollupTransientSteps": {
+        "type": "boolean",
+        "default": true
+      },
+      "rollupMinBurstSize": {
+        "type": "number",
+        "default": 4
+      },
+      "turnPollBudgetMs": {
+        "type": "number",
+        "default": 90000
+      },
+      "enableTurnPollBudget": {
+        "type": "boolean",
+        "default": true
+      },
+      "maxConsecutiveIdenticalErrors": {
+        "type": "number",
+        "default": 2
+      },
+      "enableErrorCircuitBreaker": {
+        "type": "boolean",
+        "default": true
+      },
+      "enableEnergyBudget": {
+        "type": "boolean",
+        "default": true
+      },
+      "enableEnergyEnvelopeHeaders": {
+        "type": "boolean",
+        "default": false
+      },
+      "initialSessionTier": {
+        "type": "string",
+        "default": "standard"
+      },
+      "laneCapMs": {
+        "type": "number",
+        "default": 600000
+      },
+      "warningThresholdRatio": {
+        "type": "number",
+        "default": 0.80
+      },
+      "maxIdleDays": {
+        "type": "number",
+        "default": 14
+      },
+      "maxMessages": {
+        "type": "number",
+        "default": 2000
+      }
+    }
+  }
+}

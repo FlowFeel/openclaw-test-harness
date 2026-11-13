@@ -222,6 +222,35 @@ export const TOPIC_SESSION_KEY_REGEX: Readonly<RegExp> = Object.freeze(
   /^agent:([^:]+):telegram:group:(-?\d+):topic:(\d+)$/
 );
 
+/**
+ * Matches topic conversation substrings formatted as chatId:topic:topicId.
+ */
+export const TOPIC_CHAT_AND_THREAD_REGEX: Readonly<RegExp> = Object.freeze(
+  /(-?\d+):topic:(\d+)/
+);
+
+/**
+ * Extracts process PID from diagnostic or poll output (e.g. "pid: 12345" or "pid=12345").
+ */
+export const PID_PARSE_REGEX: Readonly<RegExp> = Object.freeze(/pid[:=\s]+(\d+)/i);
+
+/**
+ * Extracts session ID from diagnostic or poll output.
+ */
+export const SESSION_ID_PARSE_REGEX: Readonly<RegExp> = Object.freeze(/sessionId[:=\s]+([a-zA-Z0-9_-]+)/i);
+
+/**
+ * Matches git commit SHA hex strings (7 to 40 hex digits bounded by word boundaries).
+ */
+export const GIT_SHA_HEX_REGEX: Readonly<RegExp> = Object.freeze(/\b([0-9a-f]{7,40})\b/i);
+
+/**
+ * Factory for timestamp delimiter replacement (colons and dots) in filenames.
+ */
+export function filenameTimestampDelim(): RegExp {
+  return /[:.]/g;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // Path & Token splitting patterns
 // ═══════════════════════════════════════════════════════════════

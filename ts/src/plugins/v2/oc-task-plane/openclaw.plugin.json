@@ -1,0 +1,71 @@
+{
+  "id": "oc-task-plane",
+  "name": "OC Task Plane",
+  "description": "Unified Task Plane Engine (Plugins v2) — consolidates lock-free async dispatch, multi-step pipeline execution, staging verification, durable postgres sidecar proxying, subagent work queueing, and watchdog lifecycle tracking.",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "task_dispatch",
+      "task_status",
+      "task_output",
+      "task_cancel",
+      "exec_pipeline",
+      "staging_verify",
+      "subagent_health",
+      "queue_work",
+      "queue_status",
+      "queue_results",
+      "merge_results",
+      "durable_spawn",
+      "durable_status",
+      "durable_result",
+      "durable_wait",
+      "durable_retry",
+      "durable_tasks",
+      "durable_list"
+    ],
+    "hooks": [
+      "gateway_start",
+      "gateway_stop"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "registryPath": {
+        "type": "string",
+        "description": "Path to tasks.json"
+      },
+      "outputDir": {
+        "type": "string",
+        "description": "Directory for task output files"
+      },
+      "defaultTimeoutMs": {
+        "type": "number",
+        "default": 600000
+      },
+      "supervisorIntervalMs": {
+        "type": "number",
+        "default": 1000
+      },
+      "sidecarBaseUrl": {
+        "type": "string",
+        "default": "http://127.0.0.1:18950"
+      },
+      "sidecarTimeoutMs": {
+        "type": "number",
+        "default": 180000
+      },
+      "maxConcurrentSubagents": {
+        "type": "number",
+        "default": 6
+      },
+      "subagentTimeoutSeconds": {
+        "type": "number",
+        "default": 300
+      }
+    }
+  }
+}

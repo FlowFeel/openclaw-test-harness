@@ -1,0 +1,15 @@
+{
+  "name": "@flowfeel/oc-task-plane",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "minGatewayVersion": "2026.6.8",
+      "pluginApi": ">=2026.6.8"
+    }
+  }
+}

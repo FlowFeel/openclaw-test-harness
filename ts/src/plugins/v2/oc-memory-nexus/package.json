@@ -1,0 +1,21 @@
+{
+  "name": "@flowfeel/oc-memory-nexus",
+  "version": "0.2.0",
+  "description": "Unified Memory Nexus Engine (Plugins v2) for OpenClaw",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "node ../../../scripts/build-plugins.mjs"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "minGatewayVersion": "2026.6.8",
+      "pluginApi": ">=2026.6.8"
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

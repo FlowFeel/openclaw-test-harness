@@ -1,0 +1,35 @@
+{
+  "id": "oc-model-nexus",
+  "name": "OC Model Nexus",
+  "description": "Unified Model Nexus Engine (Plugins v2) — consolidates active model routing & failover, sidecar stream relay, event-loop telemetry monitoring, and prompt context caching.",
+  "contracts": {
+    "tools": [
+      "model_health",
+      "stream_relay_health",
+      "event_loop_health",
+      "context_cache_stats"
+    ],
+    "hooks": [
+      "model_call_started",
+      "model_call_ended",
+      "gateway_stop"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "p99ThresholdMs": { "type": "number", "default": 15000 },
+      "errorRateThreshold": { "type": "number", "default": 0.1 },
+      "minSamples": { "type": "number", "default": 5 },
+      "maxSamples": { "type": "number", "default": 100 },
+      "cacheMaxEntries": { "type": "number", "default": 100 },
+      "cacheTtlMs": { "type": "number", "default": 300000 },
+      "collectIntervalMs": { "type": "number", "default": 30000 },
+      "sidecarPort": { "type": "number", "default": 18900 }
+    },
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  }
+}

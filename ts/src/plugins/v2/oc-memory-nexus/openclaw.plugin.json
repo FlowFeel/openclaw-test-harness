@@ -1,0 +1,38 @@
+{
+  "id": "oc-memory-nexus",
+  "name": "OC Memory Nexus",
+  "description": "Unified Memory Nexus Engine (Plugins v2) — consolidates transcript sanitization & compaction, memory note delivery arms & telemetry, and off-loop CPU sidecar workers.",
+  "contracts": {
+    "hooks": [
+      "gateway_start",
+      "gateway_stop",
+      "after_tool_call",
+      "before_agent_reply",
+      "before_compaction"
+    ],
+    "tools": [
+      "compact_check",
+      "compact_delta",
+      "sanitize_transcript",
+      "sidecar_health",
+      "sidecar_exec",
+      "recall_status",
+      "recall_verify",
+      "recall_catalogue"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "autoCompactionEnabled": { "type": "boolean", "default": true },
+      "autoCompactionThresholdMb": { "type": "number", "default": 2 },
+      "maxTranscriptMb": { "type": "number", "default": 5 },
+      "notesDir": { "type": "string", "default": "memory" },
+      "sidecarPort": { "type": "number", "default": 18900 }
+    },
+    "additionalProperties": false
+  },
+  "activation": {
+    "onStartup": true
+  }
+}
