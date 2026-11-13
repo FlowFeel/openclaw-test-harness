@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import pluginDef from "../../../src/plugins/v2/oc-task-plane/src/index.js";
 import type { PluginApi, ToolDefinition } from "../../../src/plugins/shared/types.js";
 import type { SidecarResponse } from "../../../src/plugins/v2/oc-task-plane/src/durable-sidecar-logic.js";
-import type { StagingFetchResult } from "../../../src/plugins/v2/oc-task-plane/src/staging-verify-io.js";
+import type { FetchRevisionResult } from "../../../src/plugins/v2/oc-task-plane/src/staging-verify-io.js";
 
 describe("Unified Engine: oc-task-plane (Plugins v2)", () => {
   function createTestApi() {
@@ -13,10 +13,11 @@ describe("Unified Engine: oc-task-plane (Plugins v2)", () => {
       registerTool(tool: ToolDefinition) {
         tools.set(tool.name, tool);
       },
-      on(hookName: string, handler: (...args: unknown[]) => Promise<unknown>) {
+      on(hookName: string, handler: (event: any, ctx?: any) => unknown) {
         if (!hooks.has(hookName)) hooks.set(hookName, []);
-        hooks.get(hookName)!.push(handler);
+        hooks.get(hookName)!.push(handler as any);
       },
+      registerHook: vi.fn(),
       logger: {
         info: vi.fn(),
         warn: vi.fn(),
@@ -107,7 +108,7 @@ describe("Unified Engine: oc-task-plane (Plugins v2)", () => {
       ok: true,
       status: 200,
       payload: { sha: "a1b2c3d4e5f6789012345678901234567890abcd" },
-    } as StagingFetchResult);
+    } as FetchRevisionResult);
 
     const { api, tools } = createTestApi();
     pluginDef.register(api, {
