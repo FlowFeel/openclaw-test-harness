@@ -8,6 +8,11 @@
       "stream_relay_health",
       "event_loop_health",
       "context_cache_stats"
+    ],
+    "hooks": [
+      "model_call_started",
+      "model_call_ended",
+      "gateway_stop"
     ]
   },
   "configSchema": {

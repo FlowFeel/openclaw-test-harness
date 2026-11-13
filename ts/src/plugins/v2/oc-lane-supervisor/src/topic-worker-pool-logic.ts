@@ -24,6 +24,8 @@
  * - No filesystem, no clock — fully deterministic.
  */
 
+import { TOPIC_CHAT_AND_THREAD_REGEX } from "../../../shared/regex-library.js";
+
 // ════════════════════════════════════════════════════════════════════════
 // Part 1: Semaphore (admission control)
 // ════════════════════════════════════════════════════════════════════════
@@ -245,7 +247,7 @@ export function parseTopicSessionKey(sessionKey: string): ParsedTopicSession | n
     return null;
   }
 
-  const match = sessionKey.match(/(-?\d+):topic:(\d+)/);
+  const match = sessionKey.match(TOPIC_CHAT_AND_THREAD_REGEX as RegExp);
   if (!match || !match[1] || !match[2]) {
     return null;
   }

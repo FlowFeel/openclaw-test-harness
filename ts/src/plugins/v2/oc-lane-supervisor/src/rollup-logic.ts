@@ -23,6 +23,8 @@
  * - Fully deterministic: no clock, no randomness.
  */
 
+import { WHITESPACE_SEQUENCE_REGEX } from "../../../shared/regex-library.js";
+
 export const DEFAULT_TRANSIENT_TOOLS: readonly string[] = [
   "exec",
   "bash",
@@ -182,7 +184,7 @@ export function formatToolCounts(entries: unknown[]): string {
 
 /** Collapses whitespace so a result tail fits on one summary line. */
 function flattenText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return text.replace(WHITESPACE_SEQUENCE_REGEX as RegExp, " ").trim();
 }
 
 /**

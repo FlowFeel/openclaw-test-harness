@@ -27,7 +27,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const pluginsDir = resolve(__dirname, "..", "..", "src", "plugins");
 
 function listBundledPlugins(): Array<{ name: string; path: string }> {
-  return readdirSync(pluginsDir)
+  const v1 = readdirSync(pluginsDir)
     .filter((name) => name.startsWith("oc-"))
     .filter((name) => {
       const distPath = join(pluginsDir, name, "dist", "index.js");
@@ -37,6 +37,22 @@ function listBundledPlugins(): Array<{ name: string; path: string }> {
       name,
       path: join(pluginsDir, name, "dist", "index.js"),
     }));
+
+  const v2Dir = join(pluginsDir, "v2");
+  const v2 = existsSync(v2Dir)
+    ? readdirSync(v2Dir)
+        .filter((name) => name.startsWith("oc-"))
+        .filter((name) => {
+          const distPath = join(v2Dir, name, "dist", "index.js");
+          return existsSync(distPath);
+        })
+        .map((name) => ({
+          name: `v2/${name}`,
+          path: join(v2Dir, name, "dist", "index.js"),
+        }))
+    : [];
+
+  return [...v1, ...v2];
 }
 
 const bundledPlugins = listBundledPlugins();

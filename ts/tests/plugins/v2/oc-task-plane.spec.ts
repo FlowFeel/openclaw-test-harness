@@ -3,6 +3,8 @@ import pluginDef from "../../../src/plugins/v2/oc-task-plane/src/index.js";
 import type { PluginApi, ToolDefinition } from "../../../src/plugins/shared/types.js";
 import type { SidecarResponse } from "../../../src/plugins/v2/oc-task-plane/src/durable-sidecar-logic.js";
 import type { FetchRevisionResult } from "../../../src/plugins/v2/oc-task-plane/src/staging-verify-io.js";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
 
 describe("Unified Engine: oc-task-plane (Plugins v2)", () => {
   function createTestApi() {
@@ -29,7 +31,25 @@ describe("Unified Engine: oc-task-plane (Plugins v2)", () => {
     return { api, tools, hooks };
   }
 
-  it("registers all 11 consolidated tools and lifecycle hooks", () => {
+  it("conforms bidirectionally with openclaw.plugin.json manifest contracts", () => {
+    const manifestPath = resolve(
+      __dirname,
+      "../../../src/plugins/v2/oc-task-plane/openclaw.plugin.json"
+    );
+    expect(existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+    const { api, tools, hooks } = createTestApi();
+    pluginDef.register(api, {});
+
+    const registeredHooks = Array.from(hooks.keys()).sort();
+    const registeredTools = Array.from(tools.keys()).sort();
+
+    expect(manifest.contracts.hooks.sort()).toEqual(registeredHooks);
+    expect(manifest.contracts.tools.sort()).toEqual(registeredTools);
+  });
+
+  it("registers all 18 consolidated tools and lifecycle hooks", () => {
     const { api, tools, hooks } = createTestApi();
     pluginDef.register(api, {
       registryPath: "/tmp/mock-tasks.json",

@@ -55,6 +55,16 @@ import {
   type MemoryNotesLoader,
   type RawNoteFile,
 } from "./memory-recall-io.js";
+import {
+  createInitialSessionHoldState,
+  cleanExpiredSessionHolds,
+  evaluateEventPush,
+  type SessionHoldState,
+} from "./event-push-logic.js";
+import {
+  lintAgentReply,
+  applyReplyLintCorrection,
+} from "./reply-linter-logic.js";
 
 // ── Sidecar Seams ───────────────────────────────────────────────────
 import { createSidecarClient, type SidecarClient } from "./sidecar-client.js";
@@ -111,6 +121,93 @@ export default definePluginEntry({
         api.logger?.info?.(`[oc-memory-nexus] scanned ${scanned} files, indexed ${reg.notes.size} memory notes (${candidates} candidates).`);
       } catch (err) {
         api.logger?.warn?.(`[oc-memory-nexus] note indexing failed: ${String(err)}`);
+      }
+    });
+
+    api.on("gateway_stop", async () => {
+      try {
+        api.logger?.info?.("[oc-memory-nexus] engine shutdown cleanly.");
+      } catch (err) {
+        api.logger?.warn?.(`[oc-memory-nexus] gateway_stop error: ${String(err)}`);
+      }
+    });
+
+    // ── Memory Delivery Hooks ───────────────────────────────────────
+    let sessionHolds: SessionHoldState = createInitialSessionHoldState();
+
+    api.on("after_tool_call", async (event: HookEvent, ctx?: HookContext) => {
+      try {
+        if (!registry || registry.notes.size === 0) reloadRegistry();
+        const nowMs = typeof (ctx as any)?.nowMs === "number" ? (ctx as any).nowMs : Date.now();
+        const toolName = String(event?.toolName ?? (ctx as any)?.toolName ?? "");
+        const sessionKey = String((ctx as any)?.sessionKey ?? event?.sessionKey ?? "default-session");
+        const params = (event?.params as Record<string, unknown>) ?? {};
+        const result = event?.result;
+        const error = typeof event?.error === "string" ? event.error : undefined;
+
+        sessionHolds = cleanExpiredSessionHolds(sessionHolds, nowMs, 1_800_000);
+
+        const decision = evaluateEventPush(
+          registry,
+          { toolName, params, result, error, sessionKey },
+          sessionHolds,
+          nowMs,
+          { defaultPolicy: "hold-once", holdOnceTtlMs: 1_800_000 }
+        );
+
+        sessionHolds = decision.newHoldState;
+        if (!decision.shouldPush) return;
+
+        for (const item of decision.notesToPush) {
+          const enqueueInjection =
+            (api as any).session?.workflow?.enqueueNextTurnInjection ??
+            (api as any).enqueueNextTurnInjection;
+          if (typeof enqueueInjection === "function") {
+            await enqueueInjection({
+              sessionKey,
+              text: item.cueText,
+              idempotencyKey: item.idempotencyKey,
+            });
+          }
+
+          telemetry = recordFire(telemetry, item.note.frontmatter.kind, "M1");
+          telemetry = recordHit(telemetry, item.note.frontmatter.kind, "M1");
+        }
+      } catch (err) {
+        api.logger?.warn?.(`[oc-memory-nexus] after_tool_call event push error: ${String(err)}`);
+      }
+    });
+
+    api.on("before_agent_reply", async (event: HookEvent) => {
+      try {
+        if (!registry || registry.notes.size === 0) reloadRegistry();
+        const cleanedBody = typeof (event as any)?.cleanedBody === "string" ? (event as any).cleanedBody : "";
+        if (!cleanedBody) return undefined;
+
+        const lint = lintAgentReply(cleanedBody, registry);
+        if (lint.valid) return undefined;
+
+        for (const item of lint.missingSignposts) {
+          telemetry = recordFire(telemetry, item.kind, "M4");
+          telemetry = recordHit(telemetry, item.kind, "M4");
+        }
+
+        const corrected = applyReplyLintCorrection(cleanedBody, lint);
+        return {
+          handled: true,
+          reply: { text: corrected, body: corrected },
+        };
+      } catch (err) {
+        api.logger?.warn?.(`[oc-memory-nexus] before_agent_reply lint error: ${String(err)}`);
+        return undefined;
+      }
+    });
+
+    api.on("before_compaction", async () => {
+      try {
+        api.logger?.info?.("[oc-memory-nexus] pre-compaction transcript verification triggered.");
+      } catch (err) {
+        api.logger?.warn?.(`[oc-memory-nexus] before_compaction error: ${String(err)}`);
       }
     });
 

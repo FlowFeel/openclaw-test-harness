@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import pluginDef from "../../../src/plugins/v2/oc-memory-nexus/src/index.js";
 import type { PluginApi, ToolDefinition } from "../../../src/plugins/shared/types.js";
 import type { RawNoteFile } from "../../../src/plugins/v2/oc-memory-nexus/src/memory-recall-io.js";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
 
 describe("Unified Engine: oc-memory-nexus (Plugins v2)", () => {
   function createTestApi() {
@@ -28,6 +30,24 @@ describe("Unified Engine: oc-memory-nexus (Plugins v2)", () => {
     return { api, tools, hooks };
   }
 
+  it("conforms bidirectionally with openclaw.plugin.json manifest contracts", () => {
+    const manifestPath = resolve(
+      __dirname,
+      "../../../src/plugins/v2/oc-memory-nexus/openclaw.plugin.json"
+    );
+    expect(existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+    const { api, tools, hooks } = createTestApi();
+    pluginDef.register(api, {});
+
+    const registeredHooks = Array.from(hooks.keys()).sort();
+    const registeredTools = Array.from(tools.keys()).sort();
+
+    expect(manifest.contracts.hooks.sort()).toEqual(registeredHooks);
+    expect(manifest.contracts.tools.sort()).toEqual(registeredTools);
+  });
+
   it("registers all 8 consolidated tools and lifecycle hooks", () => {
     const { api, tools, hooks } = createTestApi();
     pluginDef.register(api, {});
@@ -48,6 +68,10 @@ describe("Unified Engine: oc-memory-nexus (Plugins v2)", () => {
     }
 
     expect(hooks.has("gateway_start")).toBe(true);
+    expect(hooks.has("gateway_stop")).toBe(true);
+    expect(hooks.has("after_tool_call")).toBe(true);
+    expect(hooks.has("before_agent_reply")).toBe(true);
+    expect(hooks.has("before_compaction")).toBe(true);
   });
 
   it("indexes memory notes on gateway_start and reports in recall_status / catalogue", async () => {

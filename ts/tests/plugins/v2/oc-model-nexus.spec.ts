@@ -1,7 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import pluginDef from "../../../src/plugins/v2/oc-model-nexus/src/index.js";
 import { resetSharedModelStateForTests } from "../../../src/plugins/v2/oc-model-nexus/src/model-router-logic.js";
+import {
+  getCached,
+  putCached,
+  invalidateExpired,
+  getCacheStats,
+  type CacheStore,
+} from "../../../src/plugins/v2/oc-model-nexus/src/context-cache-logic.js";
+import {
+  shouldRelay,
+  shouldRelayFallback,
+} from "../../../src/plugins/v2/oc-model-nexus/src/stream-relay-logic.js";
 import type { PluginApi, ToolDefinition } from "../../../src/plugins/shared/types.js";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
 
 describe("Unified Engine: oc-model-nexus (Plugins v2)", () => {
   beforeEach(() => {
@@ -32,6 +45,24 @@ describe("Unified Engine: oc-model-nexus (Plugins v2)", () => {
     return { api, tools, hooks };
   }
 
+  it("conforms bidirectionally with openclaw.plugin.json manifest contracts", () => {
+    const manifestPath = resolve(
+      __dirname,
+      "../../../src/plugins/v2/oc-model-nexus/openclaw.plugin.json"
+    );
+    expect(existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+    const { api, tools, hooks } = createTestApi();
+    pluginDef.register(api, {});
+
+    const registeredHooks = Array.from(hooks.keys()).sort();
+    const registeredTools = Array.from(tools.keys()).sort();
+
+    expect(manifest.contracts.hooks.sort()).toEqual(registeredHooks);
+    expect(manifest.contracts.tools.sort()).toEqual(registeredTools);
+  });
+
   it("registers all 4 consolidated tools and hooks", () => {
     const { api, tools, hooks } = createTestApi();
     pluginDef.register(api, {});
@@ -49,6 +80,55 @@ describe("Unified Engine: oc-model-nexus (Plugins v2)", () => {
 
     expect(hooks.has("model_call_started")).toBe(true);
     expect(hooks.has("model_call_ended")).toBe(true);
+    expect(hooks.has("gateway_stop")).toBe(true);
+  });
+
+  it("pure context-cache-logic manages TTL, capacity eviction, and hit rate deterministically", () => {
+    const store: CacheStore = new Map();
+    const now = 1000000;
+
+    // Put two entries with maxEntries=2
+    const put1 = putCached(store, "p1", "prompt-one", now, 2);
+    expect(put1.size).toBe(1);
+    expect(put1.evictedKey).toBeUndefined();
+
+    const put2 = putCached(store, "p2", "prompt-two", now, 2);
+    expect(put2.size).toBe(2);
+
+    // Over-capacity put evicts oldest (p1)
+    const put3 = putCached(store, "p3", "prompt-three", now, 2);
+    expect(put3.size).toBe(2);
+    expect(put3.evictedKey).toBe("p1");
+
+    // Hit p3
+    const hit = getCached(store, "p3", now + 1000, 5000);
+    expect(hit).toBe("prompt-three");
+
+    // Miss on expired p2
+    const expiredMiss = getCached(store, "p2", now + 10000, 5000);
+    expect(expiredMiss).toBeUndefined();
+
+    // Stats
+    const stats = getCacheStats(store, now + 1000, 5000, 2);
+    expect(stats.cacheSize).toBe(1);
+    expect(stats.hitRate).toBeGreaterThan(0);
+
+    // Invalidation
+    const evicted = invalidateExpired(store, now + 20000, 5000);
+    expect(evicted).toBe(1);
+    expect(store.size).toBe(0);
+  });
+
+  it("pure stream-relay-logic determines relay routing and fallback boundaries", () => {
+    expect(shouldRelay("openai/gpt-4o", true, false)).toBe(true);
+    expect(shouldRelay("openai/gpt-4o", false, true)).toBe(true);
+    expect(shouldRelay("openai/gpt-4o", false, false)).toBe(false);
+    expect(shouldRelay("", true, true)).toBe(false);
+
+    expect(shouldRelayFallback(false, true, 0, 3)).toBe(true);
+    expect(shouldRelayFallback(true, true, 3, 3)).toBe(true);
+    expect(shouldRelayFallback(true, true, 1, 3)).toBe(false);
+    expect(shouldRelayFallback(false, false, 0, 3)).toBe(false);
   });
 
   it("records model calls and reports latency / error metrics in model_health", async () => {

@@ -10,6 +10,11 @@
  * Pure functions only — no node:fs, no network, no process.
  */
 
+import {
+  quoteTrimGlobal,
+  GIT_SHA_HEX_REGEX,
+} from "../../../shared/regex-library.js";
+
 export interface StagingVerifyOptions {
   ignoreCase?: boolean;
 }
@@ -33,7 +38,7 @@ export interface StagingRevisionVerdict {
  */
 export function normalizeSha(raw: string | undefined | null): string {
   if (!raw || typeof raw !== "string") return "";
-  return raw.trim().replace(/^["']|["']$/g, "").toLowerCase();
+  return raw.trim().replace(quoteTrimGlobal(), "").toLowerCase();
 }
 
 /**
@@ -59,7 +64,7 @@ export function extractShaFromPayload(payload: unknown): string | null {
   if (typeof payload === "string") {
     const trimmed = payload.trim();
     // 40-char full hex or 7..12-char short hex
-    const hexMatch = trimmed.match(/\b([0-9a-f]{7,40})\b/i);
+    const hexMatch = trimmed.match(GIT_SHA_HEX_REGEX as RegExp);
     if (hexMatch) return hexMatch[1];
     return null;
   }
@@ -69,7 +74,7 @@ export function extractShaFromPayload(payload: unknown): string | null {
     for (const key of ["sha", "commit", "gitSha", "gitCommit", "revision", "version"]) {
       const val = obj[key];
       if (typeof val === "string") {
-        const hex = val.match(/\b([0-9a-f]{7,40})\b/i);
+        const hex = val.match(GIT_SHA_HEX_REGEX as RegExp);
         if (hex) return hex[1];
       }
     }

@@ -37,6 +37,7 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { resolve, dirname } from "node:path";
+import { filenameTimestampDelim } from "../../../shared/regex-library.js";
 import {
   readSessions,
   getSessionFileSize,
@@ -100,7 +101,7 @@ export function isMaterializationSafe(
  * 2026-08-21T21-29-40-926Z (colons and dots replaced by dashes).
  */
 export function formatTimestampForFilename(iso: string): string {
-  return iso.replace(/:/g, "-").replace(/\./g, "-");
+  return iso.replace(filenameTimestampDelim(), "-");
 }
 
 /**

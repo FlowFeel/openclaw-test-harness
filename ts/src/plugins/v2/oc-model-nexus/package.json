@@ -7,6 +7,15 @@
   "scripts": {
     "build": "node ../../../scripts/build-plugins.mjs"
   },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "minGatewayVersion": "2026.6.8",
+      "pluginApi": ">=2026.6.8"
+    }
+  },
   "dependencies": {},
   "devDependencies": {}
 }

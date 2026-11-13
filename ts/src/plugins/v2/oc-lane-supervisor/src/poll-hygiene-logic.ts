@@ -11,6 +11,11 @@
  * - Pure logic: no direct I/O, no timers.
  */
 
+import {
+  PID_PARSE_REGEX,
+  SESSION_ID_PARSE_REGEX,
+} from "../../../shared/regex-library.js";
+
 export const ZERO_DELTA_POLL_PATTERNS = [
   /\(no new output\)/i,
   /Process still running/i,
@@ -51,14 +56,14 @@ export function extractPollDetails(
   }
 
   if (!pid) {
-    const pidMatch = text.match(/pid[:=\s]+(\d+)/i);
+    const pidMatch = text.match(PID_PARSE_REGEX as RegExp);
     if (pidMatch && pidMatch[1]) {
       pid = parseInt(pidMatch[1], 10);
     }
   }
 
   if (!sessionId) {
-    const sessionMatch = text.match(/sessionId[:=\s]+([a-zA-Z0-9_-]+)/i);
+    const sessionMatch = text.match(SESSION_ID_PARSE_REGEX as RegExp);
     if (sessionMatch && sessionMatch[1]) {
       sessionId = sessionMatch[1];
     }

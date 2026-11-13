@@ -39,151 +39,31 @@ import {
 } from "./model-router-logic.js";
 
 // ── Stream Relay Seams ───────────────────────────────────────────────
-export interface StreamRelayConfig {
-  sidecarPort?: number;
-  fallbackEnabled?: boolean;
-  fallbackTimeoutMs?: number;
-  maxRetries?: number;
-  healthCheckIntervalMs?: number;
-}
-
-export interface RelayState {
-  started: boolean;
-  startedAt: number | null;
-  sidecarPort: number;
-  fallbackMode: boolean;
-  fallbackCount: number;
-  totalRelayed: number;
-  totalFailed: number;
-  lastLatencyMs: number | null;
-  avgLatencyMs: number | null;
-}
-
-export function shouldRelay(
-  modelId: string,
-  sidecarAvailable: boolean,
-  fallbackEnabled: boolean,
-): boolean {
-  if (!modelId) return false;
-  if (sidecarAvailable) return true;
-  return fallbackEnabled;
-}
-
-export function shouldRelayFallback(
-  sidecarAvailable: boolean,
-  fallbackEnabled: boolean,
-  consecutiveFailures: number,
-  maxRetries: number,
-): boolean {
-  if (!fallbackEnabled) return false;
-  if (!sidecarAvailable) return true;
-  if (consecutiveFailures >= maxRetries) return true;
-  return false;
-}
+export {
+  shouldRelay,
+  shouldRelayFallback,
+  type StreamRelayConfig,
+  type RelayState,
+} from "./stream-relay-logic.js";
+import { type RelayState } from "./stream-relay-logic.js";
 
 // ── Context Cache Seams ──────────────────────────────────────────────
-export interface CacheEntry {
-  value: unknown;
-  createdAtMs: number;
-  hitCount: number;
-}
-
-export type CacheStore = Map<string, CacheEntry>;
-
-export interface CacheStats {
-  cacheSize: number;
-  hitRate: number;
-  ttlMs: number;
-  maxEntries: number;
-  entries: Array<{
-    key: string;
-    ageMs: number;
-    hitCount: number;
-  }>;
-}
-
-export function getCached(
-  cache: CacheStore,
-  key: string,
-  nowMs: number,
-  ttlMs: number,
-): unknown | undefined {
-  const entry = cache.get(key);
-  if (!entry) return undefined;
-
-  if (nowMs - entry.createdAtMs > ttlMs) {
-    cache.delete(key);
-    return undefined;
-  }
-
-  entry.hitCount += 1;
-  return entry.value;
-}
-
-export function putCached(
-  cache: CacheStore,
-  key: string,
-  value: unknown,
-  nowMs: number,
-  maxEntries: number,
-): void {
-  if (cache.size >= maxEntries && !cache.has(key)) {
-    const oldestKey = cache.keys().next().value;
-    if (oldestKey !== undefined) {
-      cache.delete(oldestKey);
-    }
-  }
-
-  cache.set(key, {
-    value,
-    createdAtMs: nowMs,
-    hitCount: 0,
-  });
-}
-
-export function invalidateExpired(
-  cache: CacheStore,
-  nowMs: number,
-  ttlMs: number,
-): number {
-  let evicted = 0;
-  for (const [key, entry] of cache.entries()) {
-    if (nowMs - entry.createdAtMs > ttlMs) {
-      cache.delete(key);
-      evicted += 1;
-    }
-  }
-  return evicted;
-}
-
-export function getCacheStats(
-  cache: CacheStore,
-  nowMs: number,
-  ttlMs: number,
-  maxEntries: number,
-): CacheStats {
-  let totalHits = 0;
-  const entries: CacheStats["entries"] = [];
-
-  for (const [key, entry] of cache.entries()) {
-    totalHits += entry.hitCount;
-    entries.push({
-      key,
-      ageMs: nowMs - entry.createdAtMs,
-      hitCount: entry.hitCount,
-    });
-  }
-
-  const hitRate = entries.length > 0 ? totalHits / (totalHits + entries.length) : 0;
-
-  return {
-    cacheSize: cache.size,
-    hitRate: Math.round(hitRate * 1000) / 1000,
-    ttlMs,
-    maxEntries,
-    entries,
-  };
-}
+export {
+  getCached,
+  putCached,
+  invalidateExpired,
+  getCacheStats,
+  type CacheEntry,
+  type CacheStore,
+  type CacheStats,
+  type CachePutResult,
+} from "./context-cache-logic.js";
+import {
+  getCached,
+  putCached,
+  getCacheStats,
+  type CacheStore,
+} from "./context-cache-logic.js";
 
 // ── Event Loop Monitor Seams ─────────────────────────────────────────
 import { aggregateSystemHealth, type ProcessTelemetry, type SystemHealth } from "../../../shared/telemetry-logic.js";
