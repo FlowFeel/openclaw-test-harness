@@ -1,0 +1,12 @@
+{
+  "name": "@flowfeel/oc-model-nexus",
+  "version": "0.2.0",
+  "description": "Unified Model Nexus Engine (Plugins v2) for OpenClaw",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "node ../../../scripts/build-plugins.mjs"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
