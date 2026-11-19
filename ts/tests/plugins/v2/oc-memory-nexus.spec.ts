@@ -1,77 +1,31 @@
-import { describe, it, expect, vi } from "vitest";
+/**
+ * Unified Engine Suite: oc-memory-nexus (Plugins v2) — Protocol-Double Verification.
+ *
+ * @dft Uses InMemoryPluginApi and InMemorySidecarClient (Axiom A5) — zero vi.fn() mocks.
+ */
+
+import { describe, it, expect } from "vitest";
 import pluginDef from "../../../src/plugins/v2/oc-memory-nexus/src/index.js";
-import type { PluginApi, ToolDefinition } from "../../../src/plugins/shared/types.js";
 import type { RawNoteFile } from "../../../src/plugins/v2/oc-memory-nexus/src/memory-recall-io.js";
+import { InMemoryPluginApi } from "../../doubles/in-memory-plugin-api.js";
+import { InMemorySidecarClient } from "../../doubles/in-memory-io.js";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 describe("Unified Engine: oc-memory-nexus (Plugins v2)", () => {
-  function createTestApi() {
-    const tools = new Map<string, ToolDefinition>();
-    const hooks = new Map<string, Array<(event: any, ctx?: any) => Promise<unknown>>>();
-
-    const api: PluginApi = {
-      registerTool(tool: ToolDefinition) {
-        tools.set(tool.name, tool);
-      },
-      on(hookName: string, handler: (event: any, ctx?: any) => unknown) {
-        if (!hooks.has(hookName)) hooks.set(hookName, []);
-        hooks.get(hookName)!.push(handler as any);
-      },
-      registerHook: vi.fn(),
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        debug: vi.fn(),
-      },
-    };
-
-    return { api, tools, hooks };
-  }
-
   it("conforms bidirectionally with openclaw.plugin.json manifest contracts", () => {
     const manifestPath = resolve(
       __dirname,
-      "../../../src/plugins/v2/oc-memory-nexus/openclaw.plugin.json"
+      "../../../src/plugins/v2/oc-memory-nexus/openclaw.plugin.json",
     );
     expect(existsSync(manifestPath)).toBe(true);
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 
-    const { api, tools, hooks } = createTestApi();
+    const api = new InMemoryPluginApi();
     pluginDef.register(api, {});
 
-    const registeredHooks = Array.from(hooks.keys()).sort();
-    const registeredTools = Array.from(tools.keys()).sort();
-
-    expect(manifest.contracts.hooks.sort()).toEqual(registeredHooks);
-    expect(manifest.contracts.tools.sort()).toEqual(registeredTools);
-  });
-
-  it("registers all 8 consolidated tools and lifecycle hooks", () => {
-    const { api, tools, hooks } = createTestApi();
-    pluginDef.register(api, {});
-
-    const expectedTools = [
-      "compact_check",
-      "compact_delta",
-      "sanitize_transcript",
-      "sidecar_health",
-      "sidecar_exec",
-      "recall_status",
-      "recall_verify",
-      "recall_catalogue",
-    ];
-
-    for (const toolName of expectedTools) {
-      expect(tools.has(toolName), `Missing tool ${toolName}`).toBe(true);
-    }
-
-    expect(hooks.has("gateway_start")).toBe(true);
-    expect(hooks.has("gateway_stop")).toBe(true);
-    expect(hooks.has("after_tool_call")).toBe(true);
-    expect(hooks.has("before_agent_reply")).toBe(true);
-    expect(hooks.has("before_compaction")).toBe(true);
+    expect(manifest.contracts.hooks.sort()).toEqual(api.registeredHookNames());
+    expect(manifest.contracts.tools.sort()).toEqual(api.registeredToolNames());
   });
 
   it("indexes memory notes on gateway_start and reports in recall_status / catalogue", async () => {
@@ -80,75 +34,48 @@ describe("Unified Engine: oc-memory-nexus (Plugins v2)", () => {
         id: "user-prefs",
         filePath: "memory/user-prefs.md",
         rawContent:
-          "---\n" +
-          "kind: user_preference\n" +
-          "use_when: formatting replies\n" +
-          "does_not_apply_when: raw json requested\n" +
-          "provenance: user interview\n" +
-          "source: memory/user-prefs.md\n" +
-          "---\n" +
-          "Prefers concise replies.",
+          "---\nkind: user_preference\nuse_when: formatting replies\ndoes_not_apply_when: raw json requested\n" +
+          "provenance: user interview\nsource: memory/user-prefs.md\n---\nPrefers concise replies.",
       },
       {
         id: "infra-rule",
         filePath: "memory/infra-rule.md",
         rawContent:
-          "---\n" +
-          "kind: code_rule\n" +
-          "use_when: infrastructure tasks\n" +
-          "does_not_apply_when: sandbox test\n" +
-          "provenance: architecture spec\n" +
-          "source: memory/infra-rule.md\n" +
-          "---\n" +
-          "No direct production access.",
+          "---\nkind: code_rule\nuse_when: infrastructure tasks\ndoes_not_apply_when: sandbox test\n" +
+          "provenance: architecture spec\nsource: memory/infra-rule.md\n---\nNo direct production access.",
       },
     ];
 
-    const mockLoader = vi.fn().mockReturnValue(mockNotes);
-    const { api, tools, hooks } = createTestApi();
+    const api = new InMemoryPluginApi();
+    pluginDef.register(api, { notesLoader: () => mockNotes });
 
-    pluginDef.register(api, {
-      notesLoader: mockLoader,
-    });
+    await api.dispatchHook("gateway_start");
 
-    const startHooks = hooks.get("gateway_start")!;
-    for (const hook of startHooks) {
-      await hook({});
-    }
-
-    const statusTool = tools.get("recall_status")!;
-    const statusRes = await statusTool.execute("c1", {});
-    const parsedStatus = JSON.parse(statusRes.content[0].text);
-
+    const parsedStatus = JSON.parse((await api.executeTool("recall_status")).content[0].text);
     expect(parsedStatus.detail.totalNotes).toBe(2);
     expect(parsedStatus.detail.validCount).toBe(2);
 
-    const catTool = tools.get("recall_catalogue")!;
-    const catRes = await catTool.execute("c2", { kind: "user_preference" });
-    const parsedCat = JSON.parse(catRes.content[0].text);
+    const parsedCat = JSON.parse(
+      (await api.executeTool("recall_catalogue", { kind: "user_preference" })).content[0].text,
+    );
     expect(parsedCat.totalListed).toBe(1);
     expect(parsedCat.catalogue).toContain("user-prefs");
   });
 
-  it("handles sidecar_health and sidecar_exec with injected client", async () => {
-    const mockSidecarClient: any = {
-      get: vi.fn().mockResolvedValue({ status: "healthy", poolSize: 3, active: 0 }),
-      post: vi.fn().mockResolvedValue({ json: "ok" }),
-    };
+  it("handles sidecar_health and sidecar_exec with InMemorySidecarClient", async () => {
+    const sidecar = new InMemorySidecarClient();
+    sidecar.setGetResponse("/health", { status: "healthy", poolSize: 3, active: 0 });
+    sidecar.setPostResponse("/exec/json.stringify", { json: "ok" });
 
-    const { api, tools } = createTestApi();
-    pluginDef.register(api, {
-      sidecarClient: mockSidecarClient,
-    });
+    const api = new InMemoryPluginApi();
+    pluginDef.register(api, { sidecarClient: sidecar });
 
-    const healthTool = tools.get("sidecar_health")!;
-    const hRes = await healthTool.execute("c3", {});
-    const hParsed = JSON.parse(hRes.content[0].text);
+    const hParsed = JSON.parse((await api.executeTool("sidecar_health")).content[0].text);
     expect(hParsed.status).toBe("healthy");
 
-    const execTool = tools.get("sidecar_exec")!;
-    const eRes = await execTool.execute("c4", { operation: "json.stringify", data: { a: 1 } });
-    const eParsed = JSON.parse(eRes.content[0].text);
+    const eParsed = JSON.parse(
+      (await api.executeTool("sidecar_exec", { operation: "json.stringify", data: { a: 1 } })).content[0].text,
+    );
     expect(eParsed.ok).toBe(true);
     expect(eParsed.result.json).toBe("ok");
   });

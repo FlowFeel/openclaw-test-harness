@@ -35,11 +35,11 @@ import {
   cleanupSessions,
   type SessionsMap,
   type CleanupReport,
-} from "./session-cleanup.js";
+} from "../../../shared/session-cleanup.js";
 import {
   aggregateSystemHealth,
   type ProcessTelemetry,
-} from "./telemetry-logic.js";
+} from "../../../shared/telemetry-logic.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -162,8 +162,8 @@ class WorkerPool {
           this.active--;
         });
         this.workers.push(w);
-      } catch {
-        // Worker_threads may not be available — degrade gracefully
+      } catch (err) {
+        sidecarLog(`[sidecar] worker ${i} init failed, degrading to inline: ${String(err)}`);
       }
     }
   }

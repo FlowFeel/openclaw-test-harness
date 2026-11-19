@@ -74,8 +74,9 @@ export function readNotesFromDisk(notesDir: string, subdirs: string[] = []): Raw
             filePath: fullPath,
           });
         }
-      } catch {
-        // Skip unreadable files
+      } catch (err) {
+        void err;
+        continue;
       }
     }
   }

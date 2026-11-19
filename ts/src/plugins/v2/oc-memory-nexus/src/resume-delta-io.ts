@@ -40,16 +40,18 @@ export function readPathMtimes(paths?: string[]): Record<string, number> {
             if (entryStat.isFile()) {
               result[fullEntryPath] = Math.floor(entryStat.mtimeMs);
             }
-          } catch {
-            // Ignore unreadable entries
+          } catch (err) {
+            void err;
+            continue;
           }
         }
       }
       if (st.isFile()) {
         result[absPath] = Math.floor(st.mtimeMs);
       }
-    } catch {
-      // Ignore unreadable paths
+    } catch (err) {
+      void err;
+      continue;
     }
   }
 
