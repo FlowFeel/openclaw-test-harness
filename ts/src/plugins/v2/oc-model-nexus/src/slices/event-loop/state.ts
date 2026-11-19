@@ -18,3 +18,4 @@ export interface EventLoopSliceState {
 export function createEventLoopState(maxReadings = 60): EventLoopSliceState {
   return { readings: [], maxReadings };
 }
+

@@ -1,8 +1,13 @@
 /**
  * Pure logic for Plugin Efficiency Scoring, Habit Points & Energy Budgeting.
  *
- * Implements Foundry DFT Axioms (no side effects, deterministic pure functions)
- * and the Hypothetico-Axiomatic Empirical Feedback Calibration Loop.
+ * @invariants
+ * - Pure deterministic functions: zero Node I/O, zero Date.now()/Math.random().
+ * - All state transitions return immutable CheckResult / TurnEnergyState containers.
+ *
+ * @dft
+ * - Tested via efficiency-energy.spec.ts, plugins-v2-efficiency-energy.spec.ts,
+ *   and hypothetico-axiomatic-calibration.spec.ts.
  * @see team/specs/plugins-v2-efficiency-and-energy-spec.md
  */
 

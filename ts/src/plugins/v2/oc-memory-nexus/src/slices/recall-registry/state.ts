@@ -30,3 +30,4 @@ export function createRecallRegistryState(): RecallRegistrySliceState {
     lastCandidateCount: 0,
   };
 }
+

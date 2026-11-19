@@ -69,8 +69,11 @@ export function readTranscriptSizes(
       try {
         const st = statSync(filePath);
         sizes[key] = st.size;
-      } catch {
-        // Ignore unreadable files defensively
+      } catch (err) {
+        // Record unreadable file size as 0 rather than failing the scan
+        if (err instanceof Error && err.message.length > 0) {
+          sizes[key] = 0;
+        }
       }
     }
   }

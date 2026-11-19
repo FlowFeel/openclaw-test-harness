@@ -1,4 +1,8 @@
 /**
+ * @invariants Pure/Protocol module with explicit dependencies.
+ * @dft Covered by unit and integration test suites.
+ */
+/**
  * Mock worker pool — for tests, no threads, synchronous, 0ms.
  *
  * Implements WorkerPool Protocol. Runs handlers inline (no thread overhead).

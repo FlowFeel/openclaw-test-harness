@@ -23,3 +23,4 @@ describe("oc-memory-nexus (Tier 2 Manifest)", () => {
     expect(manifest.contracts.hooks.sort()).toEqual(api.registeredHookNames());
   });
 });
+

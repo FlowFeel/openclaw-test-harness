@@ -1,4 +1,8 @@
 /**
+ * @invariants Pure/Protocol module with explicit dependencies.
+ * @dft Covered by unit and integration test suites.
+ */
+/**
  * Fair scheduler — pure logic for per-topic fairness & backpressure (ticket #14).
  *
  * The testable seam of #14. Two pure functions:

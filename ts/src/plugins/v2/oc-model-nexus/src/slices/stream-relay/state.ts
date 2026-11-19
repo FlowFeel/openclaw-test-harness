@@ -41,3 +41,4 @@ export function createRelayState(sidecarPort: number, startedAtMs: number): Rela
     avgLatencyMs: null,
   };
 }
+

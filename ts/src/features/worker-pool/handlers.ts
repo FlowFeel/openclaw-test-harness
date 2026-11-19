@@ -1,4 +1,8 @@
 /**
+ * @invariants Pure/Protocol module with explicit dependencies.
+ * @dft Covered by unit and integration test suites.
+ */
+/**
  * Built-in worker handlers — CPU-heavy functions that should run
  * off the main event loop.
  *

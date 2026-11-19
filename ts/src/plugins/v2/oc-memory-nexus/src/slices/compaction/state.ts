@@ -30,3 +30,4 @@ export function createCompactionSliceState(): CompactionSliceState {
     totalSanitizedLinesRemoved: 0,
   };
 }
+

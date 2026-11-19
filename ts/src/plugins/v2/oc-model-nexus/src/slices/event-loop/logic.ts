@@ -31,3 +31,4 @@ export function recordTelemetryReading(
 export function evaluateEventLoopHealth(state: EventLoopSliceState, windowSize = 10): SystemHealth {
   return aggregateSystemHealth([...state.readings.slice(-windowSize)], 0, 0);
 }
+

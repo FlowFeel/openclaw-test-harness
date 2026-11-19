@@ -286,7 +286,10 @@ export function defaultProcessSpawner(
           timeout: 2000,
           stdio: ["ignore", "pipe", "ignore"],
         }).toString().trim() || undefined;
-      } catch {}
+      } catch (err) {
+        void err;
+        branch = undefined;
+      }
 
       // 3. Check for uncommitted changes
       let hasUncommitted = false;
@@ -297,7 +300,10 @@ export function defaultProcessSpawner(
           stdio: ["ignore", "pipe", "ignore"],
         }).toString().trim();
         hasUncommitted = statusOut.length > 0;
-      } catch {}
+      } catch (err) {
+        void err;
+        hasUncommitted = false;
+      }
 
       const status = sha
         ? hasUncommitted

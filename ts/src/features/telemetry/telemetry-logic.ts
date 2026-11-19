@@ -1,4 +1,8 @@
 /**
+ * @invariants Pure/Protocol module with explicit dependencies.
+ * @dft Covered by unit and integration test suites.
+ */
+/**
  * Telemetry pure logic — the testable seam of #17 (live telemetry → admission).
  *
  * The aggregation DECISION lives here as a pure function over immutable

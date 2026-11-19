@@ -55,3 +55,4 @@ describe("oc-model-nexus / slices/model-routing (Tier 1 Unit)", () => {
     expect(summary.recommendedFallback).toBe("fast-model");
   });
 });
+

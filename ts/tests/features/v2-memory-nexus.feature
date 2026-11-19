@@ -18,3 +18,4 @@ Feature: Plugins v2 Memory Nexus — Compaction, Sanitization, Recall & Off-Loop
     Given an oc-memory-nexus engine with an indexed event-triggered code_rule note
     When after_tool_call fires with matching event parameters
     Then one memory cue injection is enqueued on the workflow API
+

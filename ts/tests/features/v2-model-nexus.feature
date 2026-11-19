@@ -20,3 +20,4 @@ Feature: Plugins v2 Model Nexus — Active Routing, Stream Relay & Passive Cache
     When a model call ends with provider usage cacheReadTokens 1024
     Then context_cache_stats reports cacheSize 0
     And context_cache_stats reports providerCacheReadTokens 1024
+

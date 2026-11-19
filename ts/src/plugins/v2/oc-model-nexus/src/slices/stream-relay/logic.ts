@@ -83,3 +83,4 @@ export function formatRelayHealth(state: RelayState, nowMs: number): Record<stri
     avgLatencyMs: state.avgLatencyMs,
   };
 }
+

@@ -18,3 +18,4 @@ export interface CpuSidecarState {
 export function createCpuSidecarState(port = 18900): CpuSidecarState {
   return { port, active: false, totalExecCalls: 0, failedExecCalls: 0 };
 }
+
