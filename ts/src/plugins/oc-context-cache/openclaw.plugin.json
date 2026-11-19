@@ -3,7 +3,14 @@
   "name": "OC Context Cache",
   "description": "In-memory context cache for system prompt and other frequently accessed data.",
   "contracts": {
-    "tools": ["context_cache_stats"]
+    "tools": [
+      "context_cache_stats"
+    ],
+    "hooks": [
+      "before_prompt_build",
+      "gateway_start",
+      "gateway_stop"
+    ]
   },
   "activation": {
     "onStartup": true

@@ -33,3 +33,4 @@ export function checkCheckResult(tree: PluginTree): Violation[] {
   }
   return violations;
 }
+

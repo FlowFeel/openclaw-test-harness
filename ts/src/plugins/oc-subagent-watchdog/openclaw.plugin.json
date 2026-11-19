@@ -3,7 +3,13 @@
   "name": "OC Subagent Watchdog",
   "description": "Tracks subagent lifecycle — spawn/ended events, stale detection, active count limits. No sidecar needed.",
   "contracts": {
-    "tools": ["subagent_health"]
+    "tools": [
+      "subagent_health"
+    ],
+    "hooks": [
+      "subagent_ended",
+      "subagent_spawned"
+    ]
   },
   "activation": {
     "onStartup": true
@@ -12,9 +18,18 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "maxConcurrent": { "type": "number", "default": 6 },
-      "runTimeoutSeconds": { "type": "number", "default": 300 },
-      "staleCheckIntervalMs": { "type": "number", "default": 60000 }
+      "maxConcurrent": {
+        "type": "number",
+        "default": 6
+      },
+      "runTimeoutSeconds": {
+        "type": "number",
+        "default": 300
+      },
+      "staleCheckIntervalMs": {
+        "type": "number",
+        "default": 60000
+      }
     }
   }
 }

@@ -84,3 +84,4 @@ export const KEBAB_OR_SNAKE_SPLIT = Object.freeze(/[-_]/);
 export function kebabOrSnakeGlobal(): RegExp {
   return /[-_]/g;
 }
+

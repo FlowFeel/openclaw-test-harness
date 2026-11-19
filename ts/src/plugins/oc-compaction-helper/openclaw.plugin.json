@@ -10,19 +10,43 @@
       "compact_check",
       "compact_delta",
       "sanitize_transcript"
+    ],
+    "hooks": [
+      "after_compaction",
+      "agent_end",
+      "agent_turn_prepare",
+      "before_compaction",
+      "before_prompt_build"
     ]
   },
   "configSchema": {
     "type": "object",
     "properties": {
-      "maxTranscriptMb": { "type": "number", "default": 5 },
-      "autoCompactionThresholdMb": { "type": "number", "default": 2 },
-      "autoCompactionEnabled": { "type": "boolean", "default": true },
-      "compactionProvider": { "type": "string", "default": "literate" },
-      "cooldownMs": { "type": "number", "default": 120000 },
+      "maxTranscriptMb": {
+        "type": "number",
+        "default": 5
+      },
+      "autoCompactionThresholdMb": {
+        "type": "number",
+        "default": 2
+      },
+      "autoCompactionEnabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "compactionProvider": {
+        "type": "string",
+        "default": "literate"
+      },
+      "cooldownMs": {
+        "type": "number",
+        "default": 120000
+      },
       "bloatFields": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "default": [
           "compactionCheckpoints",
           "systemPromptReport",
@@ -32,8 +56,17 @@
           "lastHeartbeatText"
         ]
       },
-      "trackResumeDeltas": { "type": "boolean", "default": true },
-      "watchPaths": { "type": "array", "items": { "type": "string" }, "default": [] }
+      "trackResumeDeltas": {
+        "type": "boolean",
+        "default": true
+      },
+      "watchPaths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      }
     },
     "additionalProperties": false
   }

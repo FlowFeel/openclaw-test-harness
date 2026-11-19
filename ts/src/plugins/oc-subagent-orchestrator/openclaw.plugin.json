@@ -1,13 +1,23 @@
 {
   "id": "oc-subagent-orchestrator",
   "name": "OC Subagent Orchestrator",
-  "description": "Full subagent management \u2014 work queue dispatch, depth limiting, adaptive admission, priority, topic isolation, result merging, and caching. The one plugin that manages subagents.",
+  "description": "Full subagent management — work queue dispatch, depth limiting, adaptive admission, priority, topic isolation, result merging, and caching. The one plugin that manages subagents.",
   "contracts": {
     "tools": [
       "queue_work",
       "queue_status",
       "queue_results",
       "merge_results"
+    ],
+    "hooks": [
+      "after_compaction",
+      "agent_end",
+      "gateway_start",
+      "gateway_stop",
+      "model_call_ended",
+      "model_call_started",
+      "subagent_ended",
+      "subagent_spawned"
     ]
   },
   "activation": {

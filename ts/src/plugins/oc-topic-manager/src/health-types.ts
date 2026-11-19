@@ -1,35 +1,11 @@
 /**
- * Types for topic health telemetry and zombie detector (T-584).
+ * Legacy v1 re-export shim for oc-topic-manager/health-types.ts.
+ *
+ * @invariants
+ * - Delegates all implementation to canonical module ../../v2/oc-lane-supervisor/src/health-types.js (zero duplication).
  *
  * @dft
- * - Pure type definitions only.
+ * - Covered by canonical module unit & integration test suites.
  */
 
-export type TopicHealthIssue =
-  | "CRITICAL_CONTEXT_CEILING"
-  | "DEAD_TOPIC"
-  | "ZOMBIE_RUNNING"
-  | "UNCOMPACTED_BLOAT";
-
-export type TopicRemedy = "sanitize_transcript" | "materialize_successor";
-
-export interface TopicHealthEvaluation {
-  topicId: number;
-  sessionKey: string;
-  verdicts: TopicHealthIssue[];
-  remedy?: TopicRemedy;
-  metrics: {
-    contextTokens?: number;
-    status?: string;
-    abortedLastRun?: boolean;
-    updatedAt?: number;
-    transcriptSizeBytes?: number;
-  };
-}
-
-export interface TopicHealthSummary {
-  totalScanned: number;
-  flaggedCount: number;
-  byIssue: Record<TopicHealthIssue, number>;
-  evaluations: TopicHealthEvaluation[];
-}
+export * from "../../v2/oc-lane-supervisor/src/health-types.js";

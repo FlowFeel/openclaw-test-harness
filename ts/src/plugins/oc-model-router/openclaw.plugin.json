@@ -3,7 +3,13 @@
   "name": "OC Model Router",
   "description": "Model fallback chain optimization — tracks per-model latency and error rates, routes calls to the fastest healthy model.",
   "contracts": {
-    "tools": ["model_health"]
+    "tools": [
+      "model_health"
+    ],
+    "hooks": [
+      "model_call_ended",
+      "model_call_started"
+    ]
   },
   "activation": {
     "onStartup": true
@@ -12,10 +18,22 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "p99ThresholdMs": { "type": "number", "default": 15000 },
-      "errorRateThreshold": { "type": "number", "default": 0.1 },
-      "minSamples": { "type": "number", "default": 5 },
-      "maxSamples": { "type": "number", "default": 100 }
+      "p99ThresholdMs": {
+        "type": "number",
+        "default": 15000
+      },
+      "errorRateThreshold": {
+        "type": "number",
+        "default": 0.1
+      },
+      "minSamples": {
+        "type": "number",
+        "default": 5
+      },
+      "maxSamples": {
+        "type": "number",
+        "default": 100
+      }
     }
   }
 }

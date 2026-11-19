@@ -31,3 +31,4 @@ export function checkDftDocs(tree: PluginTree): Violation[] {
   }
   return violations;
 }
+
