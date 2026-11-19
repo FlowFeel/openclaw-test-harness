@@ -2,6 +2,12 @@
 
 Implements SessionStore Protocol with plain dicts.
 Zero dependencies, zero fixtures, zero setup.
+
+@invariants
+- Stateful in-memory Protocol double for SessionStore with zero disk I/O (A1, A5).
+
+@dft
+- Used directly by unit tests for admission and lifecycle state machines.
 """
 
 from __future__ import annotations

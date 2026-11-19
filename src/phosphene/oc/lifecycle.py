@@ -5,6 +5,12 @@ separated from I/O via Protocol.
 
 This is the OC-patchable layer — our lifecycle state machine can be
 wired into OC's subagent-registry.ts via patch.
+
+@invariants
+- Pure state machine: zero filesystem or network I/O; explicit timestamps (A1, A2).
+
+@dft
+- Tested in isolation via tests/unit/test_lifecycle.py with MemorySessionStore.
 """
 
 from __future__ import annotations

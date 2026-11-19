@@ -2,6 +2,12 @@
 
 Protocol for persisting session metadata. Implementations can use
 SQLite (our registry), JSON (OC's default), or in-memory (tests).
+
+@invariants
+- Pure Protocol & value dataclass definitions with zero I/O (A1, A5).
+
+@dft
+- Implemented by MemorySessionStore in unit tests and real adapters in integration tests.
 """
 
 from __future__ import annotations

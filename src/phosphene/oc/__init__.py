@@ -11,6 +11,12 @@ The test pyramid verifies:
 1. **Unit**: Pure logic functions — admission checks, state transitions
 2. **Integration**: Abstractions against a real OC container (patched)
 3. **E2E**: Full spawn → timeout → archive → cleanup cycle in a container
+
+@invariants
+- Re-exports pure Protocol abstractions with zero runtime I/O at import time (A1).
+
+@dft
+- Covered by tests/unit/ and tests/integration/ pytest suites.
 """
 
 from __future__ import annotations
