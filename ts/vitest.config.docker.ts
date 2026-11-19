@@ -11,6 +11,8 @@ export default defineConfig({
       "tests/foundry/**/*.spec.ts",
       "tests/plugins/**/*.spec.ts",
       "tests/integration/**/*.spec.ts",
+      "tests/features/**/*.spec.ts",
+      "src/plugins/v2/**/tests/**/*.spec.ts",
     ],
     exclude: [
       "node_modules/**",
