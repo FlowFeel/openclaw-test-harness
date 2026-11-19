@@ -23,18 +23,37 @@ import { NullSidecar } from "./sidecar-protocol.js";
 // Use globalThis so the singleton survives across esbuild bundles.
 // Each plugin bundles its own copy of sidecar-registry.ts, but they
 // share the same globalThis — so the singleton is truly shared.
-const GLOBAL_KEY = "__OC_SIDECAR_REGISTRY__";
+const GLOBAL_KEY = "__OC_SIDECAR_REGISTRY__" as const;
+
+interface GlobalWithSidecarRegistry {
+  [GLOBAL_KEY]?: SidecarProtocol;
+}
+
+export interface SidecarRegistryResult {
+  registered: boolean;
+  previouslyRegistered: boolean;
+}
+
+function getRegistryHost(): GlobalWithSidecarRegistry {
+  return globalThis as unknown as GlobalWithSidecarRegistry;
+}
 
 function getGlobal(): SidecarProtocol {
-  return (globalThis as any)[GLOBAL_KEY] ?? new NullSidecar();
+  return getRegistryHost()[GLOBAL_KEY] ?? new NullSidecar();
 }
 
-export function registerSidecar(sidecar: SidecarProtocol): void {
-  (globalThis as any)[GLOBAL_KEY] = sidecar;
+export function registerSidecar(sidecar: SidecarProtocol): SidecarRegistryResult {
+  const host = getRegistryHost();
+  const previouslyRegistered = host[GLOBAL_KEY] !== undefined;
+  host[GLOBAL_KEY] = sidecar;
+  return { registered: true, previouslyRegistered };
 }
 
-export function unregisterSidecar(): void {
-  delete (globalThis as any)[GLOBAL_KEY];
+export function unregisterSidecar(): SidecarRegistryResult {
+  const host = getRegistryHost();
+  const previouslyRegistered = host[GLOBAL_KEY] !== undefined;
+  delete host[GLOBAL_KEY];
+  return { registered: false, previouslyRegistered };
 }
 
 export function getSidecar(): SidecarProtocol {
@@ -42,6 +61,9 @@ export function getSidecar(): SidecarProtocol {
 }
 
 /** Reset to NullSidecar — for tests only */
-export function resetSidecarRegistry(): void {
-  delete (globalThis as any)[GLOBAL_KEY];
+export function resetSidecarRegistry(): SidecarRegistryResult {
+  const host = getRegistryHost();
+  const previouslyRegistered = host[GLOBAL_KEY] !== undefined;
+  delete host[GLOBAL_KEY];
+  return { registered: false, previouslyRegistered };
 }

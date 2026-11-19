@@ -10,6 +10,7 @@
 import { describe, it, expect } from "vitest";
 import {
   validatePlugin,
+  validatePluginStrict,
   hasErrors,
   checkPureIoSeparation,
   checkDeterminism,
@@ -17,6 +18,12 @@ import {
   checkDftDocs,
   checkMockDoubles,
   checkCheckResult,
+  checkReachability,
+  checkNoInlineRegex,
+  checkNoEmptyCatch,
+  checkNoTypeErasure,
+  checkUnitSizeCeilings,
+  checkTestPyramid,
   extractImports,
   extractRegisteredTools,
   extractRegisteredHooks,
@@ -368,5 +375,108 @@ api.registerHook("after_compaction", async () => {});
     const src = `api.registerHook(["session_start", "session_end"], async () => {});
 `;
     expect(extractRegisteredHooks(src)).toEqual(["session_start", "session_end"]);
+  });
+
+  it("extracts api.on() hook events", () => {
+    const src = `api.on("model_call_started", async () => {});
+api.on("model_call_ended", async () => {});
+`;
+    expect(extractRegisteredHooks(src)).toEqual(["model_call_started", "model_call_ended"]);
+  });
+});
+
+// ── Strict Structural Hygiene & Test Pyramid Checks ──────────────────────
+
+describe("Strict Phosphene Hygiene Checks", () => {
+  it("checkManifestConformance enforces bidirectional hooks when checkHooks is true", () => {
+    const t = tree(
+      "oc-test",
+      {
+        "src/index.ts": `api.on("gateway_start", async () => {});
+api.on("undeclared_hook", async () => {});`,
+      },
+      { id: "oc-test", name: "OcTest", description: "t", contracts: { tools: [], hooks: ["gateway_start", "missing_hook"] } },
+    );
+    const v = checkManifestConformance(t, { checkHooks: true });
+    expect(v.map((x) => x.message)).toEqual([
+      expect.stringContaining("missing_hook"),
+      expect.stringContaining("undeclared_hook"),
+    ]);
+  });
+
+  it("checkReachability flags dead/unreachable source files", () => {
+    const t = tree("oc-test", {
+      "src/index.ts": `import { live } from "./live.js"; export const x = live;`,
+      "src/live.ts": `export const live = 1;`,
+      "src/dead.ts": `export const dead = 2;`,
+    });
+    const v = checkReachability(t);
+    expect(v).toHaveLength(1);
+    expect(v[0].axiom).toBe("reachability");
+    expect(v[0].file).toBe("src/dead.ts");
+  });
+
+  it("checkNoInlineRegex flags inline regexes outside regex utils", () => {
+    const t = tree("oc-test", {
+      "src/parser-logic.ts": `export function clean(s: string) { return s.replace(/\\s+/g, " "); }`,
+      "src/my-regex-utils.ts": `export const WS = /\\s+/g;`,
+    });
+    const v = checkNoInlineRegex(t);
+    expect(v).toHaveLength(1);
+    expect(v[0].axiom).toBe("no-inline-regex");
+    expect(v[0].file).toBe("src/parser-logic.ts");
+  });
+
+  it("checkNoEmptyCatch flags silent catch {} blocks", () => {
+    const t = tree("oc-test", {
+      "src/index.ts": `try { run(); } catch {}`,
+    });
+    const v = checkNoEmptyCatch(t);
+    expect(v).toHaveLength(1);
+    expect(v[0].axiom).toBe("no-empty-catch");
+  });
+
+  it("checkNoTypeErasure flags any and as never seams", () => {
+    const t = tree("oc-test", {
+      "src/index.ts": `const x = (foo as any).bar;`,
+    });
+    const v = checkNoTypeErasure(t);
+    expect(v).toHaveLength(1);
+    expect(v[0].axiom).toBe("no-type-erasure");
+  });
+
+  it("checkUnitSizeCeilings flags oversized files and functions", () => {
+    const longBody = Array.from({ length: 12 }, (_, i) => `  const v${i} = ${i};`).join("\n");
+    const t = tree("oc-test", {
+      "src/big.ts": `export function tooLong() {\n${longBody}\n  return 0;\n}\n`,
+    });
+    const v = checkUnitSizeCeilings(t, { maxFileLines: 10, maxFnLines: 10 });
+    expect(v.map((x) => x.axiom)).toEqual(["small-files", "small-units"]);
+  });
+
+  it("checkTestPyramid enforces 1:1 slice unit specs plus integration and manifest specs", () => {
+    const t = tree("oc-test", {
+      "src/slices/energy/logic.ts": `export const step = () => 1;`,
+    });
+    const v = checkTestPyramid(t);
+    expect(v).toHaveLength(3);
+    expect(v.every((x) => x.axiom === "test-pyramid")).toBe(true);
+  });
+
+  it("validatePluginStrict passes on a clean modular slice plugin", () => {
+    const t = tree(
+      "oc-clean",
+      {
+        "src/index.ts": `/** @dft root */\nimport { bindEnergy } from "./slices/energy/slice.js";\nexport default { id: "oc-clean", register(api: unknown) { bindEnergy(api); } };\n`,
+        "src/slices/energy/state.ts": `/** @dft state */\nexport interface EnergyState { value: number; }\nexport function createEnergyState(): EnergyState { return { value: 100 }; }\n`,
+        "src/slices/energy/logic.ts": `/** @dft logic */\nimport type { EnergyState } from "./state.js";\nexport function drain(s: EnergyState, cost: number): { next: EnergyState } { return { next: { value: s.value - cost } }; }\n`,
+        "src/slices/energy/slice.ts": `/** @dft slice */\nimport { createEnergyState } from "./state.js";\nimport { drain } from "./logic.js";\nexport function bindEnergy(api: { on: Function; registerTool: Function }) {\n  let s = createEnergyState();\n  api.on("before_tool_call", () => { s = drain(s, 1).next; });\n  api.registerTool({ name: "energy_health", execute: async () => s });\n}\n`,
+        "src/slices/energy/tests/logic.spec.ts": `// unit test`,
+        "tests/integration.spec.ts": `// integration test`,
+        "tests/manifest.spec.ts": `// manifest test`,
+      },
+      { id: "oc-clean", name: "OcClean", description: "clean", contracts: { tools: ["energy_health"], hooks: ["before_tool_call"] } },
+    );
+    expect(validatePluginStrict(t)).toEqual([]);
   });
 });

@@ -18,13 +18,14 @@
  */
 
 import type { ScaffoldParams, GeneratedFiles } from "./types.js";
+import { KEBAB_OR_SNAKE_SPLIT, kebabOrSnakeGlobal } from "./foundry-regex-utils.js";
 
 // ── Template helpers ─────────────────────────────────────────────────────
 
 /** Convert a plugin name to PascalCase for type names: "oc-my-plugin" → "OcMyPlugin". */
 function toPascalCase(name: string): string {
   return name
-    .split(/[-_]/)
+    .split(KEBAB_OR_SNAKE_SPLIT as RegExp)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join("");
 }
@@ -194,7 +195,7 @@ function indexTemplate(params: ScaffoldParams): string {
   // Generate hook registrations.
   const hookRegistrations = params.hooks
     .map((hook) => {
-      const hookName = hook.replace(/[-_]/g, " ");
+      const hookName = hook.replace(kebabOrSnakeGlobal(), " ");
       return `
     // ── Hook: ${hook} ──────────────────────────────────────────
     api.on("${hook}", async (event) => {
