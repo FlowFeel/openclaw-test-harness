@@ -35,7 +35,18 @@ describe("Feature: Plugins v2 Lane Supervisor — Turn Energy, Poll Hygiene, Adm
     const api = new InMemoryPluginApi();
     pluginDef.register(api, { suppressIdleHeartbeats: true });
     const [res] = await api.dispatchHook("before_agent_run", { prompt: "   \n  " }, { sessionId: "bdd-idle" });
-    expect((res as { block?: boolean }).block).toBe(true);
+    expect(res).toEqual({
+      outcome: "block",
+      reason: expect.stringContaining("Empty or whitespace-only prompt blocked"),
+    });
+
+    // Interactive Telegram messages (even with missing/redacted prompt) MUST pass with InputGateDecision
+    const [tgPass] = await api.dispatchHook(
+      "before_agent_run",
+      { channelId: "telegram", senderId: "user-42" },
+      { sessionId: "bdd-tg" },
+    );
+    expect(tgPass).toEqual({ outcome: "pass" });
   });
 
   it("Scenario: Topic audit and recovery plan detect unregistered topics deterministically", async () => {

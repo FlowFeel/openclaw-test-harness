@@ -22,6 +22,12 @@ import {
 import { evaluateAgentRunAdmission } from "../../idle-guard-logic.js";
 import type { TurnEnergySliceConfig, TurnEnergySliceState } from "./state.js";
 
+export interface TurnStartAdmissionContext {
+  trigger?: string;
+  isHeartbeat?: boolean;
+  isInteractiveChannel?: boolean;
+}
+
 export interface TurnStartResult {
   suppressed: boolean;
   reason?: string;
@@ -32,11 +38,22 @@ export function startTurnEnergy(
   state: TurnEnergySliceState,
   config: TurnEnergySliceConfig,
   sessionId: string,
-  prompt: string,
+  prompt: string | undefined,
   nowMs: number,
+  admissionCtx?: TurnStartAdmissionContext,
 ): TurnStartResult {
-  if (config.suppressIdleHeartbeats) {
-    const decision = evaluateAgentRunAdmission(prompt);
+  const isHeartbeat =
+    admissionCtx?.isHeartbeat === true || admissionCtx?.trigger === "heartbeat";
+  const shouldCheckIdle =
+    config.suppressIdleHeartbeats &&
+    (!admissionCtx?.isInteractiveChannel || isHeartbeat) &&
+    (prompt !== undefined || isHeartbeat);
+
+  if (shouldCheckIdle) {
+    const decision = evaluateAgentRunAdmission(prompt, {
+      trigger: admissionCtx?.trigger,
+      isHeartbeat: admissionCtx?.isHeartbeat,
+    });
     if (decision.outcome === "block") {
       return { suppressed: true, reason: decision.reason };
     }

@@ -16,6 +16,7 @@
     "hooks": [
       "before_dispatch",
       "before_agent_run",
+      "before_prompt_build",
       "before_tool_call",
       "tool_result_persist",
       "before_message_write",

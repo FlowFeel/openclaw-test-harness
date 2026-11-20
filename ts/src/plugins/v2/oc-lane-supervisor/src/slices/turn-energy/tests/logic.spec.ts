@@ -25,6 +25,13 @@ describe("oc-lane-supervisor / slices/turn-energy (Tier 1 Unit)", () => {
     const state = createTurnEnergySliceState();
     const res = startTurnEnergy(state, cfg, "s1", "   ", 1000);
     expect(res.suppressed).toBe(true);
+
+    // Interactive channel messages or redacted (undefined) prompts must NEVER be blocked
+    const redacted = startTurnEnergy(state, cfg, "s2", undefined, 1000);
+    expect(redacted.suppressed).toBe(false);
+
+    const tgMedia = startTurnEnergy(state, cfg, "s3", "", 1000, { isInteractiveChannel: true });
+    expect(tgMedia.suppressed).toBe(false);
   });
 
   it("drains turn energy on zero-delta polls until soft-landing gate trips", () => {
