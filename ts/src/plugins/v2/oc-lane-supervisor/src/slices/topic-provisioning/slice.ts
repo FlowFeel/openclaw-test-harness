@@ -72,12 +72,24 @@ export function bindTopicProvisioningSlice(
       const sessionKey = ctx?.sessionKey ?? event?.sessionKey ? String(ctx?.sessionKey ?? event?.sessionKey) : null;
       const createdUtc = new Date(clock()).toISOString();
 
+      const rawCreatedBy =
+        (ctx as Record<string, unknown> | undefined)?.sender ??
+        (ctx as Record<string, unknown> | undefined)?.senderName ??
+        (ctx as Record<string, unknown> | undefined)?.senderId ??
+        (ctx as Record<string, unknown> | undefined)?.createdBy ??
+        (event as Record<string, unknown> | undefined)?.sender ??
+        (event as Record<string, unknown> | undefined)?.senderName ??
+        (event as Record<string, unknown> | undefined)?.senderId ??
+        (event as Record<string, unknown> | undefined)?.createdBy;
+      const createdBy = rawCreatedBy ? String(rawCreatedBy) : "system";
+
       const skeleton: CarePackageSkeleton = renderCarePackageSkeleton({
         topicId,
         topicName,
         chatId,
         sessionKey,
         createdUtc,
+        createdBy,
         workspaceRoot,
       });
 

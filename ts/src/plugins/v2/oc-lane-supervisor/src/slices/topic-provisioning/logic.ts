@@ -82,13 +82,14 @@ export function deriveCarePackagePath(
 export function renderCarePackageSkeleton(params: TopicOrientationParams): CarePackageSkeleton {
   const slug = slugifyTopicName(params.topicName);
   const createdBy = params.createdBy ?? "system";
-  const generatedBy = params.generatedBy ?? "feelingflowingbot";
+  const generatedBy = params.generatedBy ?? "flowfeel-oc-lane-supervisor@0.2.0";
   const sessionKeyYaml = params.sessionKey ? `"${params.sessionKey}"` : "null";
   const workspacePath = deriveTopicWorkspacePath(params.topicId, params.topicName, params.workspaceRoot);
   const { relativePath } = deriveCarePackagePath(params.chatId, params.topicId, params.workspaceRoot);
 
   const frontmatter = [
     "---",
+    `uri: topics/${params.chatId}/${params.topicId}/care-package`,
     `title: "${params.topicName}"`,
     `topic_id: ${params.topicId}`,
     `chat_id: "${params.chatId}"`,
