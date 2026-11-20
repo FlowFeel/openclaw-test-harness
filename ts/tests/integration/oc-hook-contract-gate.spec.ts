@@ -270,4 +270,27 @@ describe("OpenClaw Hook-Contract Integration Gate (All 4 v2 Engines)", () => {
       api.dispatchHook("agent_end", { producedVisibleReply: true }, ctx),
     ).resolves.toBeDefined();
   });
+
+  it("extracts prompt from event.messages when event.prompt is omitted and treats non-heartbeat session as interactive", async () => {
+    const isHookDecision = await loadOcIsHookDecision();
+    const api = registerAllV2Engines();
+
+    // Prompt omitted from event, but provided in event.messages; sessionKey has no :heartbeat
+    const results = await api.dispatchHook(
+      "before_agent_run",
+      {
+        messages: [
+          { role: "user", content: "Show git status" },
+        ],
+      },
+      {
+        sessionKey: "agent:main:telegram:direct:8031635700",
+      },
+    );
+
+    for (const d of results) {
+      expect(isHookDecision(d)).toBe(true);
+      expect(d).toEqual({ outcome: "pass" });
+    }
+  });
 });

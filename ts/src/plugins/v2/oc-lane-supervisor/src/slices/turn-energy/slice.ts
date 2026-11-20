@@ -48,16 +48,27 @@ export function bindTurnEnergySlice(
   return {
     onBeforeAgentRun(event: HookEvent, ctx?: HookContext): InputGateDecision {
       const sessionId = resolveSessionId(event, ctx);
-      const prompt = typeof event.prompt === "string" ? event.prompt : undefined;
+      const rawSessionKey = String(ctx?.sessionKey ?? event?.sessionKey ?? "");
+      const isHeartbeatSession = rawSessionKey.includes(":heartbeat") || ctx?.trigger === "heartbeat";
+
+      const rawMessages = Array.isArray(event.messages) ? event.messages : undefined;
+      const lastMessage = rawMessages?.[rawMessages.length - 1] as { content?: unknown } | undefined;
+      const extractedContent = typeof lastMessage?.content === "string" ? lastMessage.content : undefined;
+      const prompt = typeof event.prompt === "string" ? event.prompt : extractedContent;
+
       const trigger = typeof ctx?.trigger === "string" ? ctx.trigger : undefined;
-      const isHeartbeat = ctx?.isHeartbeat === true;
-      const isInteractiveChannel = Boolean(
+      const isHeartbeat = ctx?.isHeartbeat === true || isHeartbeatSession;
+      const hasExplicitInteractiveChannel = Boolean(
         event.channelId ||
           event.senderId ||
           ctx?.channelId ||
           ctx?.chatId ||
           ctx?.topicId,
       );
+      const isInteractiveChannel =
+        hasExplicitInteractiveChannel ||
+        (rawSessionKey.length > 0 && !isHeartbeatSession);
+
       const res = startTurnEnergy(state, config, sessionId, prompt, clock(), {
         trigger,
         isHeartbeat,
