@@ -28,6 +28,8 @@ import { bindToolHygieneSlice } from "./slices/tool-hygiene/slice.js";
 import { bindTopicAdmissionSlice } from "./slices/topic-admission/slice.js";
 import { bindLaneForecasterSlice } from "./slices/lane-forecaster/slice.js";
 import { bindTopicRecoverySlice } from "./slices/topic-recovery/slice.js";
+import { bindTopicProvisioningSlice } from "./slices/topic-provisioning/slice.js";
+import type { TopicProvisioningIO } from "./slices/topic-provisioning/io.js";
 
 export interface LaneSupervisorConfig extends TruncationOptions {
   sessionsPath?: string;
@@ -55,6 +57,9 @@ export interface LaneSupervisorConfig extends TruncationOptions {
   sessionsReader?: SessionsReader;
   sessionsWriter?: SessionsWriter;
   historyReader?: HistoryReader;
+  topicProvisioningIO?: TopicProvisioningIO;
+  enableTopicProvisioning?: boolean;
+  workspaceRoot?: string;
   clock?: () => number;
 }
 
@@ -144,8 +149,20 @@ export default definePluginEntry({
       getHealthCard: (sid) => energy.getHealthCard(sid),
     });
 
+    const provisioning = bindTopicProvisioningSlice(api, {
+      enabled: cfg.enableTopicProvisioning ?? true,
+      workspaceRoot: cfg.workspaceRoot,
+      io: cfg.topicProvisioningIO,
+      clock,
+    });
+
     api.on("before_dispatch", async (event: HookEvent) => forecaster.onBeforeDispatch(event));
-    api.on("before_agent_run", async (event: HookEvent, ctx?: HookContext) => energy.onBeforeAgentRun(event, ctx));
+    api.on("before_agent_run", async (event: HookEvent, ctx?: HookContext) => {
+      const provisionedEvent = provisioning.onBeforeAgentRun(event, ctx);
+      const gate = energy.onBeforeAgentRun(provisionedEvent, ctx);
+      if (gate?.block) return gate;
+      return provisionedEvent;
+    });
 
     api.on("before_tool_call", (event: HookEvent, ctx?: HookContext) => {
       const toolName = String(event.toolName ?? "");

@@ -38,6 +38,10 @@ export const HEARTBEAT_CRON_EVENT_REGEX = /Scheduled job|cron:/i;
 export const HEARTBEAT_SCRATCH_DIRECTIVE_REGEX =
   /Heartbeat monitor scratch:\s*\S+/i;
 
+export const TOPIC_NON_ALPHANUMERIC_REGEX = /[^a-z0-9]+/g;
+export const TOPIC_LEADING_TRAILING_HYPHENS_REGEX = /^-+|-+$/g;
+export const TOPIC_LEADING_HYPHEN_REGEX = /^-/;
+
 // ── Centralized Messages ────────────────────────────────────────────
 
 export const MESSAGES = {
