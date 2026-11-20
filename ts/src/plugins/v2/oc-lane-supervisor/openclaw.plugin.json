@@ -1,7 +1,7 @@
 {
   "id": "oc-lane-supervisor",
   "name": "OC Lane Supervisor",
-  "description": "Unified Lane Supervisor (Plugins v2) — consolidates turn energy budgeting, habit economics, soft-landing gating, topic admission control, zero-delta frame collapsing, transient tool rollups, and topic registry recovery.",
+  "description": "Unified Lane Supervisor (Plugins v2) \u2014 consolidates turn energy budgeting, habit economics, soft-landing gating, topic admission control, automated topic care package provisioning, zero-delta frame collapsing, transient tool rollups, and topic registry recovery.",
   "activation": {
     "onStartup": true
   },
@@ -43,7 +43,9 @@
       },
       "bloatFields": {
         "type": "array",
-        "items": { "type": "string" },
+        "items": {
+          "type": "string"
+        },
         "default": [
           "compactionCheckpoints",
           "systemPromptReport",
@@ -103,7 +105,7 @@
       },
       "warningThresholdRatio": {
         "type": "number",
-        "default": 0.80
+        "default": 0.8
       },
       "maxIdleDays": {
         "type": "number",
@@ -112,6 +114,11 @@
       "maxMessages": {
         "type": "number",
         "default": 2000
+      },
+      "enableTopicProvisioning": {
+        "type": "boolean",
+        "default": true,
+        "description": "Automatically scaffold topic directories and drop care-package.md orientation snapshot on first agent run"
       }
     }
   }
