@@ -47,10 +47,13 @@ describe("oc-lane-supervisor / slices/topic-provisioning (Tier 1 Unit)", () => {
       workspaceRoot: "/home/node/.openclaw/workspace",
     });
 
+    expect(skeleton.frontmatter).toContain('uri: topics/telegram:-1003842172831:topic:83272/83272/care-package');
     expect(skeleton.frontmatter).toContain('title: "Plugins Team"');
     expect(skeleton.frontmatter).toContain("topic_id: 83272");
     expect(skeleton.frontmatter).toContain('status: orientation');
     expect(skeleton.frontmatter).toContain('session_key: "agent:main:telegram:group:-1003842172831:topic:83272"');
+    expect(skeleton.frontmatter).toContain('created_by: "Ed Phil"');
+    expect(skeleton.frontmatter).toContain('generated_by: "feelingflowingbot"');
 
     expect(skeleton.markdown).toContain("## 1. Your Dedicated Workspace Directory");
     expect(skeleton.markdown).toContain("/home/node/.openclaw/workspace/work/topic-83272-plugins-team/");
@@ -61,7 +64,7 @@ describe("oc-lane-supervisor / slices/topic-provisioning (Tier 1 Unit)", () => {
     expect(skeleton.summaryInjection).toContain("work/topic-83272-plugins-team");
   });
 
-  it("handles null session keys deterministically", () => {
+  it("handles null session keys deterministically and defaults provenance", () => {
     const skeleton = renderCarePackageSkeleton({
       topicId: 99999,
       topicName: "Unregistered Topic",
@@ -70,7 +73,10 @@ describe("oc-lane-supervisor / slices/topic-provisioning (Tier 1 Unit)", () => {
       createdUtc: "2026-11-20T17:00:00Z",
     });
 
+    expect(skeleton.frontmatter).toContain('uri: topics/telegram:-1001234567890/99999/care-package');
     expect(skeleton.frontmatter).toContain("session_key: null");
     expect(skeleton.frontmatter).toContain('title: "Unregistered Topic"');
+    expect(skeleton.frontmatter).toContain('created_by: "system"');
+    expect(skeleton.frontmatter).toContain('generated_by: "flowfeel-oc-lane-supervisor@0.2.0"');
   });
 });

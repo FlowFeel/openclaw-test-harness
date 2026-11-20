@@ -48,7 +48,10 @@ describe("Feature: Plugins v2 Topic Provisioning — Automated Workspace Scaffol
       "/workspace/archive/sessions/telegram/1003842172831:topic:83272/topics/83272/care-package.md";
     expect(io.files.has(carePackagePath)).toBe(true);
     const content = io.files.get(carePackagePath) ?? "";
+    expect(content).toContain('uri: topics/telegram:-1003842172831:topic:83272/83272/care-package');
     expect(content).toContain('title: "Plugins Team"');
+    expect(content).toContain('created_by: "system"');
+    expect(content).toContain('generated_by: "flowfeel-oc-lane-supervisor@0.2.0"');
     expect(content).toContain("status: orientation");
     expect(content).toContain("tools/CATALOG.md");
 
