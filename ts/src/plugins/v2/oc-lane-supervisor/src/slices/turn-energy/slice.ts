@@ -39,6 +39,30 @@ function resolveSessionId(event?: HookEvent, ctx?: HookContext): string {
   return String(ctx?.sessionId ?? ctx?.sessionKey ?? event?.sessionId ?? event?.sessionKey ?? "default");
 }
 
+function extractPrompt(event: HookEvent): string | undefined {
+  if (typeof event.prompt === "string") {
+    return event.prompt;
+  }
+  const messages = Array.isArray(event.messages) ? event.messages : undefined;
+  const last = messages && messages.length > 0 ? messages[messages.length - 1] : undefined;
+  if (!last || typeof last !== "object") {
+    return undefined;
+  }
+  const content = (last as { content?: unknown }).content;
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    const texts = content
+      .map((part) => (part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+        ? (part as { text: string }).text
+        : ""))
+      .filter(Boolean);
+    return texts.length > 0 ? texts.join("\n") : undefined;
+  }
+  return undefined;
+}
+
 export function bindTurnEnergySlice(
   config: TurnEnergySliceConfig,
   clock: () => number = () => Date.now(),
@@ -48,15 +72,23 @@ export function bindTurnEnergySlice(
   return {
     onBeforeAgentRun(event: HookEvent, ctx?: HookContext): InputGateDecision {
       const sessionId = resolveSessionId(event, ctx);
-      const prompt = typeof event.prompt === "string" ? event.prompt : undefined;
+      const prompt = extractPrompt(event);
       const trigger = typeof ctx?.trigger === "string" ? ctx.trigger : undefined;
       const isHeartbeat = ctx?.isHeartbeat === true;
+      const rawSessionKey = ctx?.sessionKey ?? event.sessionKey;
+      const isNonHeartbeatUserSession =
+        typeof rawSessionKey === "string" &&
+        rawSessionKey.length > 0 &&
+        !rawSessionKey.includes(":heartbeat") &&
+        trigger !== "heartbeat" &&
+        !isHeartbeat;
       const isInteractiveChannel = Boolean(
         event.channelId ||
           event.senderId ||
           ctx?.channelId ||
           ctx?.chatId ||
-          ctx?.topicId,
+          ctx?.topicId ||
+          isNonHeartbeatUserSession,
       );
       const res = startTurnEnergy(state, config, sessionId, prompt, clock(), {
         trigger,

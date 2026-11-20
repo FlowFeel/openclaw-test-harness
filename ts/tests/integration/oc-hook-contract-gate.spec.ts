@@ -194,6 +194,58 @@ describe("OpenClaw Hook-Contract Integration Gate (All 4 v2 Engines)", () => {
     ).toBe(true);
   });
 
+  it("treats non-:heartbeat sessionKey as interactive user session and falls back to event.messages[-1].content", async () => {
+    const isHookDecision = await loadOcIsHookDecision();
+    const api = registerAllV2Engines();
+
+    // Non-heartbeat sessionKey with omitted prompt and no channelId/senderId MUST pass
+    const userSessionResults = await api.dispatchHook(
+      "before_agent_run",
+      { messages: [{ role: "user", content: "" }] },
+      { sessionKey: "agent:main:telegram:dm:12345" },
+    );
+    for (const d of userSessionResults) {
+      expect(isHookDecision(d)).toBe(true);
+      expect(d).toEqual({ outcome: "pass" });
+    }
+
+    // :heartbeat sessionKey with omitted prompt extracts last message content:
+    // 1) Actionable scheduled task in messages[-1].content -> passes
+    const actionableHb = await api.dispatchHook(
+      "before_agent_run",
+      {
+        messages: [
+          { role: "system", content: "idle" },
+          { role: "user", content: "Run the following periodic tasks: check drift" },
+        ],
+      },
+      { sessionKey: "agent:main:heartbeat", trigger: "heartbeat" },
+    );
+    for (const d of actionableHb) {
+      expect(isHookDecision(d)).toBe(true);
+      expect(d).toEqual({ outcome: "pass" });
+    }
+
+    // 2) Idle heartbeat poll in messages[-1].content -> blocks with valid InputGateDecision
+    const idleHb = await api.dispatchHook(
+      "before_agent_run",
+      {
+        messages: [
+          { role: "user", content: "[OpenClaw heartbeat poll] If nothing needs attention, reply HEARTBEAT_OK" },
+        ],
+      },
+      { sessionKey: "agent:main:heartbeat", trigger: "heartbeat" },
+    );
+    for (const d of idleHb) {
+      expect(isHookDecision(d)).toBe(true);
+    }
+    expect(
+      idleHb.some(
+        (d) => typeof d === "object" && d !== null && (d as { outcome?: string }).outcome === "block",
+      ),
+    ).toBe(true);
+  });
+
   it("completes a full interactive Telegram turn lifecycle across all 4 v2 engines without throwing or blocking", async () => {
     const isHookDecision = await loadOcIsHookDecision();
     const api = registerAllV2Engines();
