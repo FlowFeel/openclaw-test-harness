@@ -10,9 +10,11 @@
  * - Tested via slices/topic-provisioning/tests/logic.spec.ts.
  */
 
-// Centralized regex patterns adhering to zero-inline-regex mandate
-const NON_ALPHANUMERIC_REGEX = /[^a-z0-9]+/g;
-const LEADING_TRAILING_HYPHENS_REGEX = /^-+|-+$/g;
+import {
+  TOPIC_NON_ALPHANUMERIC_REGEX,
+  TOPIC_LEADING_TRAILING_HYPHENS_REGEX,
+  TOPIC_LEADING_HYPHEN_REGEX,
+} from "../../utils.js";
 
 export interface TopicOrientationParams {
   topicId: number;
@@ -39,8 +41,8 @@ export interface CarePackageSkeleton {
 export function slugifyTopicName(name: string): string {
   const normalized = name.trim().toLowerCase();
   const slug = normalized
-    .replace(NON_ALPHANUMERIC_REGEX, "-")
-    .replace(LEADING_TRAILING_HYPHENS_REGEX, "");
+    .replace(TOPIC_NON_ALPHANUMERIC_REGEX, "-")
+    .replace(TOPIC_LEADING_TRAILING_HYPHENS_REGEX, "");
   return slug || "unnamed-topic";
 }
 
@@ -64,7 +66,9 @@ export function deriveCarePackagePath(
   topicId: number,
   workspaceRoot = "/home/node/.openclaw/workspace",
 ): { relativePath: string; absolutePath: string } {
-  const sanitizedChatId = chatId.replace("telegram:", "").replace(/^-/, "");
+  const sanitizedChatId = chatId
+    .replace("telegram:", "")
+    .replace(TOPIC_LEADING_HYPHEN_REGEX, "");
   const relativePath = `archive/sessions/telegram/${sanitizedChatId}/topics/${topicId}/care-package.md`;
   return {
     relativePath,
