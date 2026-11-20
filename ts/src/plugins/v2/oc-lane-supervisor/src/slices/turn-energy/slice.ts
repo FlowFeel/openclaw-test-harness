@@ -18,8 +18,12 @@ import {
   getSessionHealthCard,
 } from "./logic.js";
 
+export type InputGateDecision =
+  | { outcome: "pass" }
+  | { outcome: "block"; reason: string };
+
 export interface TurnEnergySliceHandle {
-  onBeforeAgentRun: (event: HookEvent, ctx?: HookContext) => { block?: boolean; blockReason?: string } | undefined;
+  onBeforeAgentRun: (event: HookEvent, ctx?: HookContext) => InputGateDecision;
   onBeforeToolCall: (ctx?: HookContext) => { block?: boolean; blockReason?: string } | undefined;
   onToolResultPersist: (params: {
     sessionId: string;
@@ -42,14 +46,30 @@ export function bindTurnEnergySlice(
   const state = createTurnEnergySliceState();
 
   return {
-    onBeforeAgentRun(event: HookEvent, ctx?: HookContext) {
+    onBeforeAgentRun(event: HookEvent, ctx?: HookContext): InputGateDecision {
       const sessionId = resolveSessionId(event, ctx);
-      const prompt = typeof event.prompt === "string" ? event.prompt : "";
-      const res = startTurnEnergy(state, config, sessionId, prompt, clock());
+      const prompt = typeof event.prompt === "string" ? event.prompt : undefined;
+      const trigger = typeof ctx?.trigger === "string" ? ctx.trigger : undefined;
+      const isHeartbeat = ctx?.isHeartbeat === true;
+      const isInteractiveChannel = Boolean(
+        event.channelId ||
+          event.senderId ||
+          ctx?.channelId ||
+          ctx?.chatId ||
+          ctx?.topicId,
+      );
+      const res = startTurnEnergy(state, config, sessionId, prompt, clock(), {
+        trigger,
+        isHeartbeat,
+        isInteractiveChannel,
+      });
       if (res.suppressed) {
-        return { block: true, blockReason: res.reason };
+        return {
+          outcome: "block",
+          reason: res.reason || "Idle heartbeat suppressed — zero model calls when idle",
+        };
       }
-      return undefined;
+      return { outcome: "pass" };
     },
     onBeforeToolCall(ctx?: HookContext) {
       const sessionId = resolveSessionId(undefined, ctx);

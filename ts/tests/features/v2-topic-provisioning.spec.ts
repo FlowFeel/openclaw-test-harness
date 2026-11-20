@@ -28,11 +28,14 @@ describe("Feature: Plugins v2 Topic Provisioning — Automated Workspace Scaffol
       sessionKey: "agent:main:telegram:group:-1003842172831:topic:83272",
     };
 
-    const [event] = await api.dispatchHook(
+    const [gateDecision] = await api.dispatchHook(
       "before_agent_run",
-      { prompt: "Kick off sprint" },
+      { prompt: "Kick off sprint", channelId: "telegram" },
       ctx,
     );
+
+    // before_agent_run MUST return strict OpenClaw InputGateDecision ({ outcome: "pass" })
+    expect(gateDecision).toEqual({ outcome: "pass" });
 
     // Assert workspace scaffolding created
     expect(io.directories.has("/workspace/work/topic-83272-plugins-team/docs")).toBe(true);
@@ -49,11 +52,15 @@ describe("Feature: Plugins v2 Topic Provisioning — Automated Workspace Scaffol
     expect(content).toContain("status: orientation");
     expect(content).toContain("tools/CATALOG.md");
 
-    // Assert Turn 0 prompt injection
-    const prompt = (event as { prompt?: string }).prompt ?? "";
-    expect(prompt).toContain("[Topic Orientation]");
-    expect(prompt).toContain("work/topic-83272-plugins-team");
-    expect(prompt).toContain("Kick off sprint");
+    // Assert Turn 0 orientation brief delivered via before_prompt_build prependContext
+    const [promptResult] = await api.dispatchHook(
+      "before_prompt_build",
+      { prompt: "Kick off sprint" },
+      ctx,
+    );
+    const prependContext = (promptResult as { prependContext?: string })?.prependContext ?? "";
+    expect(prependContext).toContain("[Topic Orientation]");
+    expect(prependContext).toContain("work/topic-83272-plugins-team");
   });
 
   it("Scenario: Subsequent agent turns in provisioned topic are idempotent", async () => {

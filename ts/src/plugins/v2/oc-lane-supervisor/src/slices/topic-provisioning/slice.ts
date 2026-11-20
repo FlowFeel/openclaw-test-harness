@@ -23,6 +23,7 @@ import {
 
 export interface TopicProvisioningSliceHandle {
   onBeforeAgentRun: (event: HookEvent, ctx?: HookContext) => HookEvent;
+  consumeOrientationInjection: (sessionKey: string) => string | undefined;
   isTopicProvisioned: (topicId: number) => boolean;
 }
 
@@ -45,6 +46,7 @@ export function bindTopicProvisioningSlice(
   const clock = config.clock ?? (() => Date.now());
 
   let state = createTopicProvisioningSliceState();
+  const pendingInjections = new Map<string, string>();
 
   return {
     onBeforeAgentRun(event: HookEvent, ctx?: HookContext): HookEvent {
@@ -79,30 +81,43 @@ export function bindTopicProvisioningSlice(
         workspaceRoot,
       });
 
-      // Check if care package already exists on disk
-      const { absolutePath } = { absolutePath: `${workspaceRoot}/${skeleton.carePackageRelativePath}` };
-      const alreadyOnDisk = io.existsSync(absolutePath);
+      // Check if care package already exists on disk (never throw inside fail-closed before_agent_run)
+      const absolutePath = `${workspaceRoot}/${skeleton.carePackageRelativePath}`;
+      try {
+        const alreadyOnDisk = io.existsSync(absolutePath);
 
-      if (!alreadyOnDisk) {
-        // Scaffolding directories: work/topic-<id>-<slug>/{docs,scripts,tests,state}
-        io.mkdirSync(`${skeleton.workspacePath}/docs`, { recursive: true });
-        io.mkdirSync(`${skeleton.workspacePath}/scripts`, { recursive: true });
-        io.mkdirSync(`${skeleton.workspacePath}/tests`, { recursive: true });
-        io.mkdirSync(`${skeleton.workspacePath}/state`, { recursive: true });
+        if (!alreadyOnDisk) {
+          // Scaffolding directories: work/topic-<id>-<slug>/{docs,scripts,tests,state}
+          io.mkdirSync(`${skeleton.workspacePath}/docs`, { recursive: true });
+          io.mkdirSync(`${skeleton.workspacePath}/scripts`, { recursive: true });
+          io.mkdirSync(`${skeleton.workspacePath}/tests`, { recursive: true });
+          io.mkdirSync(`${skeleton.workspacePath}/state`, { recursive: true });
 
-        // Ensure archive directory exists and write care package
-        const archiveDir = absolutePath.substring(0, absolutePath.lastIndexOf("/"));
-        io.mkdirSync(archiveDir, { recursive: true });
-        io.writeFileSync(absolutePath, skeleton.markdown, "utf-8");
+          // Ensure archive directory exists and write care package
+          const archiveDir = absolutePath.substring(0, absolutePath.lastIndexOf("/"));
+          io.mkdirSync(archiveDir, { recursive: true });
+          io.writeFileSync(absolutePath, skeleton.markdown, "utf-8");
 
-        api.logger?.info?.(
-          `[oc-lane-supervisor] provisioned topic ${topicId} workspace at ${skeleton.workspacePath}`,
+          api.logger?.info?.(
+            `[oc-lane-supervisor] provisioned topic ${topicId} workspace at ${skeleton.workspacePath}`,
+          );
+        }
+      } catch (err) {
+        api.logger?.warn?.(
+          `[oc-lane-supervisor] topic ${topicId} provisioning I/O failed (fail-open): ${String(err)}`,
         );
+        return event;
       }
 
       state = markTopicProvisioned(state, topicId);
 
-      // Turn 0 context injection: inject orientation brief into prompt context if available
+      // Queue Turn 0 orientation brief for before_prompt_build (before_agent_run is gate-only)
+      const injectionKey = String(
+        ctx?.sessionId ?? ctx?.sessionKey ?? event?.sessionId ?? event?.sessionKey ?? `topic:${topicId}`,
+      );
+      pendingInjections.set(injectionKey, skeleton.summaryInjection);
+
+      // Preserve prompt return for direct unit tests on slice.onBeforeAgentRun
       const existingContext = typeof event.prompt === "string" ? event.prompt : "";
       if (!existingContext.includes("[Topic Orientation]")) {
         return {
@@ -114,6 +129,13 @@ export function bindTopicProvisioningSlice(
       }
 
       return event;
+    },
+    consumeOrientationInjection(sessionKey: string): string | undefined {
+      const brief = pendingInjections.get(sessionKey);
+      if (brief !== undefined) {
+        pendingInjections.delete(sessionKey);
+      }
+      return brief;
     },
     isTopicProvisioned: (topicId: number) => state.provisionedTopicIds.has(topicId),
   };

@@ -158,10 +158,20 @@ export default definePluginEntry({
 
     api.on("before_dispatch", async (event: HookEvent) => forecaster.onBeforeDispatch(event));
     api.on("before_agent_run", async (event: HookEvent, ctx?: HookContext) => {
-      const provisionedEvent = provisioning.onBeforeAgentRun(event, ctx);
-      const gate = energy.onBeforeAgentRun(provisionedEvent, ctx);
-      if (gate?.block) return gate;
-      return provisionedEvent;
+      try {
+        provisioning.onBeforeAgentRun(event, ctx);
+      } catch (err) {
+        api.logger?.warn?.(`[oc-lane-supervisor] topic provisioning failed: ${String(err)}`);
+      }
+      return energy.onBeforeAgentRun(event, ctx);
+    });
+    api.on("before_prompt_build", async (event: HookEvent, ctx?: HookContext) => {
+      const sessionId = resolveSessionId(event, ctx);
+      const orientation = provisioning.consumeOrientationInjection(sessionId);
+      if (orientation) {
+        return { prependContext: orientation };
+      }
+      return undefined;
     });
 
     api.on("before_tool_call", (event: HookEvent, ctx?: HookContext) => {
