@@ -3,7 +3,14 @@
   "name": "OC Stream Relay",
   "description": "Stream relay plugin that intercepts model calls and relays streaming responses through the sidecar worker pool. Supports fallback to direct relay when sidecar is unavailable.",
   "contracts": {
-    "tools": ["stream_relay_health"]
+    "tools": [
+      "stream_relay_health"
+    ],
+    "hooks": [
+      "gateway_start",
+      "gateway_stop",
+      "model_call_started"
+    ]
   },
   "activation": {
     "onStartup": true
@@ -16,11 +23,26 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "sidecarPort": { "type": "number", "default": 18900 },
-          "fallbackEnabled": { "type": "boolean", "default": true },
-          "fallbackTimeoutMs": { "type": "number", "default": 3000 },
-          "maxRetries": { "type": "number", "default": 2 },
-          "healthCheckIntervalMs": { "type": "number", "default": 15000 }
+          "sidecarPort": {
+            "type": "number",
+            "default": 18900
+          },
+          "fallbackEnabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "fallbackTimeoutMs": {
+            "type": "number",
+            "default": 3000
+          },
+          "maxRetries": {
+            "type": "number",
+            "default": 2
+          },
+          "healthCheckIntervalMs": {
+            "type": "number",
+            "default": 15000
+          }
         }
       }
     }

@@ -1,14 +1,13 @@
 /**
- * Foundry CI spec — validates all 11 plugins against the six DFT axioms.
+ * Foundry CI spec — validates ALL v1 plugins AND all 4 v2 domain engines
+ * against the six DFT axioms + strict structural hygiene & test-pyramid gates.
  *
  * @why
- * The foundry CLI (`npx tsx src/foundry/cli.ts validate`) is a local check.
- * A P0 violation (node:fs import in oc-compaction-helper) shipped to main
- * because no CI step ran the foundry. This spec runs the pure validator
- * in-process (no subprocess) inside the existing vitest step — so DFT
- * violations fail CI even if the dedicated "Foundry validation" step is
- * removed. Defense-in-depth: the CI step catches it fast (~3s), this spec
- * catches it redundantly in the test report.
+ * Runs the pure Foundry validator in-process inside the CI vitest step so DFT
+ * violations fail CI even if the standalone `validate:foundry` CLI step is
+ * bypassed. Enforces bidirectional hook conformance across all 20 plugins and
+ * strict reachability / regex / empty-catch / type-erasure / test-pyramid
+ * gates on all 4 v2 domain engines.
  *
  * @dft
  * - A5 (mock-doubles): reads real plugin source from disk — no mocks.
@@ -19,11 +18,20 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
-import { validatePlugin, hasErrors } from "../../src/foundry/validate-logic.js";
-import type { PluginTree, PluginManifest } from "../../src/foundry/types.js";
+import {
+  validatePlugin,
+  hasErrors,
+  checkReachability,
+  checkNoInlineRegex,
+  checkNoEmptyCatch,
+  checkNoTypeErasure,
+  checkTestPyramid,
+} from "../../src/foundry/validate-logic.js";
+import type { PluginTree, PluginManifest, Violation } from "../../src/foundry/types.js";
 
 const __dirname = new URL(".", import.meta.url).pathname;
 const pluginsDir = resolve(__dirname, "..", "..", "src", "plugins");
+const v2PluginsDir = resolve(pluginsDir, "v2");
 
 /** Read a plugin directory into a PluginTree (mirrors cli.ts readPluginTree). */
 function readPluginTree(pluginDir: string): PluginTree {
@@ -59,47 +67,77 @@ function readPluginTree(pluginDir: string): PluginTree {
   return { name, manifest, files };
 }
 
-/** List all plugin directories (oc-*). */
-function listPluginDirs(): string[] {
-  return readdirSync(pluginsDir)
+function listPluginDirs(rootDir: string): string[] {
+  if (!existsSync(rootDir)) return [];
+  return readdirSync(rootDir)
+    .sort()
     .filter((name) => name.startsWith("oc-"))
     .filter((name) => {
-      const dir = join(pluginsDir, name);
+      const dir = join(rootDir, name);
       return statSync(dir).isDirectory() && existsSync(join(dir, "src", "index.ts"));
     })
-    .map((name) => join(pluginsDir, name));
+    .map((name) => join(rootDir, name));
 }
 
-describe("Foundry CI: all plugins pass the six DFT axioms", () => {
-  const pluginDirs = listPluginDirs();
+function formatViolations(name: string, violations: Violation[]): string {
+  const details = violations
+    .map(
+      (v) =>
+        `  ${v.severity === "error" ? "✗" : "⚠"} [${v.axiom}] ${v.file ?? ""}: ${v.message}`
+    )
+    .join("\n");
+  return `${name} has ${violations.length} DFT violation(s):\n${details}`;
+}
 
-  it("found at least 11 plugins to validate", () => {
-    expect(pluginDirs.length).toBeGreaterThanOrEqual(11);
+describe("Foundry CI: all legacy v1 plugins pass DFT axioms + bidirectional hook contracts", () => {
+  const v1Dirs = listPluginDirs(pluginsDir);
+
+  it("found at least 11 v1 plugins to validate", () => {
+    expect(v1Dirs.length).toBeGreaterThanOrEqual(11);
   });
 
-  // One test per plugin — a failure names the plugin in the test title.
-  for (const pluginDir of pluginDirs) {
+  for (const pluginDir of v1Dirs) {
     const name = pluginDir.split("/").pop()!;
 
-    it(`${name}: zero DFT violations`, () => {
+    it(`v1/${name}: zero DFT or manifest-hook violations`, () => {
       const tree = readPluginTree(pluginDir);
-      const violations = validatePlugin(tree);
+      const violations = validatePlugin(tree, { checkHooks: true });
 
       if (hasErrors(violations)) {
-        // Print every violation so the CI log shows exactly what's wrong
-        const details = violations
-          .map(
-            (v) =>
-              `  ${v.severity === "error" ? "✗" : "⚠"} [${v.axiom}] ${v.file ?? ""}: ${v.message}`
-          )
-          .join("\n");
-        throw new Error(
-          `${name} has ${violations.length} DFT violation(s):\n${details}`
-        );
+        throw new Error(formatViolations(`v1/${name}`, violations));
       }
 
-      // Warnings are advisory — they don't fail CI, but we assert none exist
-      // to keep the suite clean. If a warning is expected, suppress it here.
+      const warnings = violations.filter((v) => v.severity === "warn");
+      expect(warnings).toEqual([]);
+    });
+  }
+});
+
+describe("Foundry CI: all 4 v2 domain engines pass strict DFT + structural hygiene + test pyramid", () => {
+  const v2Dirs = listPluginDirs(v2PluginsDir);
+
+  it("found all 4 v2 domain engines", () => {
+    expect(v2Dirs.length).toBe(4);
+  });
+
+  for (const pluginDir of v2Dirs) {
+    const name = pluginDir.split("/").pop()!;
+
+    it(`v2/${name}: zero DFT, hook, reachability, regex, empty-catch, type-erasure, or pyramid violations`, () => {
+      const tree = readPluginTree(pluginDir);
+      const violations: Violation[] = [
+        ...validatePlugin(tree, { checkHooks: true }),
+        ...checkReachability(tree),
+        ...checkNoInlineRegex(tree),
+        ...checkNoEmptyCatch(tree),
+        ...checkNoTypeErasure(tree),
+        ...checkTestPyramid(tree),
+      ];
+
+      if (hasErrors(violations)) {
+        throw new Error(formatViolations(`v2/${name}`, violations));
+      }
+
       const warnings = violations.filter((v) => v.severity === "warn");
       expect(warnings).toEqual([]);
     });

@@ -54,11 +54,11 @@ function compactContext(input: {
   };
 }
 
-const HANDLERS: Record<string, (input: any) => unknown> = {
-  "json.stringify": jsonStringify,
-  "json.parse": jsonParse,
-  "serialize.session": serializeSession,
-  "compact.context": compactContext,
+const HANDLERS: Record<string, (input: unknown) => unknown> = {
+  "json.stringify": (i) => jsonStringify(i as { data: unknown; indent?: number }),
+  "json.parse": (i) => jsonParse(i as { text: string }),
+  "serialize.session": (i) => serializeSession(i as { session: Record<string, unknown> }),
+  "compact.context": (i) => compactContext(i as { transcript: string; maxBytes: number }),
 };
 
 // ── Message loop ───────────────────────────────────────────────

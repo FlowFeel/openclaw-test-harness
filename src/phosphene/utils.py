@@ -1,4 +1,11 @@
-"""Utility functions and message constants for phosphene."""
+"""Utility functions and message constants for phosphene.
+
+@invariants
+- Pure formatting helpers with injectable TextIO output streams (A1, A5).
+
+@dft
+- Tested via tests/test_registry.py using io.StringIO doubles.
+"""
 
 from __future__ import annotations
 

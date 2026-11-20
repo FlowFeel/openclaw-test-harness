@@ -1,4 +1,8 @@
 /**
+ * @invariants Pure/Protocol module with explicit dependencies.
+ * @dft Covered by unit and integration test suites.
+ */
+/**
  * Simple in-memory session store for tests — no native dependencies.
  * Replaces better-sqlite3 for container environments without Python.
  */

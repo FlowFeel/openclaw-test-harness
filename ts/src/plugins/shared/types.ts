@@ -2,6 +2,13 @@
  * Local type declarations for the OC plugin API surface.
  * These match the real OC plugin SDK contract.
  * In production, the real types come from `openclaw/plugin-sdk/plugin-entry`.
+ *
+ * @invariants
+ * - Types only plus pure JSON Schema builder helpers (Type.*).
+ * - Zero I/O, zero runtime side effects.
+ *
+ * @dft
+ * - Shared contract types imported by all plugins and stateful Protocol test doubles.
  */
 
 export const Type = {

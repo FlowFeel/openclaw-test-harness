@@ -35,11 +35,11 @@ import {
   cleanupSessions,
   type SessionsMap,
   type CleanupReport,
-} from "./session-cleanup.js";
+} from "../../../shared/session-cleanup.js";
 import {
   aggregateSystemHealth,
   type ProcessTelemetry,
-} from "./telemetry-logic.js";
+} from "../../../shared/telemetry-logic.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -162,8 +162,9 @@ class WorkerPool {
           this.active--;
         });
         this.workers.push(w);
-      } catch {
-        // Worker_threads may not be available — degrade gracefully
+      } catch (err) {
+        void err;
+        this.failed++;
       }
     }
   }
@@ -197,11 +198,12 @@ class WorkerPool {
   }
 
   private executeInline(handler: string, input: unknown): unknown {
-    const handlers: Record<string, (input: any) => unknown> = {
-      "json.stringify": (i: { data: unknown }) => JSON.stringify(i.data),
-      "json.parse": (i: { text: string }) => JSON.parse(i.text),
-      "serialize.session": (i: { session: Record<string, unknown> }) => JSON.stringify(i.session),
-      "compact.context": (i: { transcript: string; maxBytes: number }) => {
+    const handlers: Record<string, (input: unknown) => unknown> = {
+      "json.stringify": (i) => JSON.stringify((i as { data: unknown }).data),
+      "json.parse": (i) => JSON.parse((i as { text: string }).text),
+      "serialize.session": (i) => JSON.stringify((i as { session: Record<string, unknown> }).session),
+      "compact.context": (raw) => {
+        const i = raw as { transcript: string; maxBytes: number };
         const original = i.transcript;
         const originalSize = Buffer.byteLength(original, "utf8");
         if (originalSize <= i.maxBytes) return { compacted: original, originalSize, compactedSize: originalSize };

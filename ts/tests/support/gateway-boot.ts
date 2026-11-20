@@ -37,6 +37,18 @@ export function builtPluginDirs(): string[] {
     .map((d) => path.join(PLUGINS_SRC_DIR, d))
 }
 
+/** All v2 domain engine directories (src/plugins/v2/oc-*) with a built dist/index.js. */
+export function builtV2PluginDirs(): string[] {
+  const v2Dir = path.join(PLUGINS_SRC_DIR, "v2")
+  if (!fs.existsSync(v2Dir)) return []
+  return fs
+    .readdirSync(v2Dir)
+    .sort()
+    .filter((d) => d.startsWith("oc-"))
+    .filter((d) => fs.existsSync(path.join(v2Dir, d, "dist", "index.js")))
+    .map((d) => path.join(v2Dir, d))
+}
+
 export interface BootGatewayOptions {
   container: StartedTestContainer
   /** Plugin directories (container paths) to load via plugins.load.paths. */

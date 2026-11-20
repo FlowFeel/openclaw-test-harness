@@ -1,4 +1,8 @@
 /**
+ * @invariants Pure/Protocol module with explicit dependencies.
+ * @dft Covered by unit and integration test suites.
+ */
+/**
  * MockSupervisor — in-process, deterministic SubagentSupervisor for tests.
  *
  * No real worker_threads / child_process: actors are plain records and

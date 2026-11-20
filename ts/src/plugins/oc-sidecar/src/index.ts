@@ -31,12 +31,18 @@ import { startSidecar, stopSidecar, type SidecarHandle } from "./sidecar-manager
 import { registerSidecar, unregisterSidecar, getSidecar } from "../../shared/sidecar-registry.js";
 import { createSidecarClient, type SidecarClient } from "./sidecar-client.js";
 
+export interface SidecarLifecycleProtocol {
+  startSidecar: typeof startSidecar;
+  stopSidecar: typeof stopSidecar;
+}
+
 export interface SidecarPluginConfig {
   sidecar?: {
     port?: number;
     workerThreads?: number;
     startupTimeoutMs?: number;
   };
+  sidecarLifecycle?: SidecarLifecycleProtocol;
 }
 
 /** Default sidecar port. */
@@ -89,6 +95,11 @@ export default definePluginEntry({
     const workerThreads =
       cfg.sidecar?.workerThreads ?? DEFAULT_WORKER_THREADS;
 
+    const lifecycle: SidecarLifecycleProtocol = cfg.sidecarLifecycle ?? {
+      startSidecar,
+      stopSidecar,
+    };
+
     let sidecar: SidecarHandle | null = null;
     let client: SidecarClient | null = null;
 
@@ -130,7 +141,7 @@ export default definePluginEntry({
         }
 
         // No sidecar running — start a fresh one
-        sidecar = await startSidecar({
+        sidecar = await lifecycle.startSidecar({
           port: sidecarPort,
           workerThreads,
           startupTimeoutMs,
@@ -149,7 +160,7 @@ export default definePluginEntry({
       // Only stop the process if we started it (not if we adopted it).
       // Always unregister from the registry — we registered the client.
       if (sidecar) {
-        await stopSidecar(sidecar);
+        await lifecycle.stopSidecar(sidecar);
         sidecar = null;
       }
       client = null;

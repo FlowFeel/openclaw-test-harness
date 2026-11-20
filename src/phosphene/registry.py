@@ -4,6 +4,13 @@ Provides:
 - Task registration contract for heartbeat and periodic maintenance tasks.
 - Plugin drift check task wired to cron '0 */6 * * *'.
 - CLI runner for task dispatch and standalone verification.
+
+@invariants
+- Task registration is deterministic; periodic jobs fail-closed on missing
+  env or manifest (A1, A6).
+
+@dft
+- Tested via tests/test_registry.py with injectable task handlers and in-memory streams.
 """
 
 from __future__ import annotations

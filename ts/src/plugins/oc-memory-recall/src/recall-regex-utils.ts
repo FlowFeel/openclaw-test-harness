@@ -1,21 +1,11 @@
 /**
- * Recall Regex Utilities — centralized regexes for memory-recall grammar and linting.
+ * Legacy v1 re-export shim for oc-memory-recall/recall-regex-utils.ts.
  *
- * @dft principle: Regexes reside in utils files only.
+ * @invariants
+ * - Delegates all implementation to canonical module ../../v2/oc-memory-nexus/src/recall-regex-utils.js (zero duplication).
+ *
+ * @dft
+ * - Covered by canonical module unit & integration test suites.
  */
 
-export {
-  PREDICATE_INTERNAL_PERIOD_REGEX,
-  IMPERATIVE_MOOD_REGEX,
-  MUST_FRAMING_REGEX,
-  PATH_SHAPE_REGEX,
-  ISO_8601_REGEX,
-  KIND_LINE_REGEX,
-  WHITESPACE_CHAR_REGEX,
-  WHITESPACE_SEQUENCE_REGEX,
-  MARKDOWN_HEADING_REGEX,
-  MD_EXTENSION_REGEX,
-  quoteTrimGlobal,
-  backslashGlobal,
-  edgeSlashes,
-} from "../../shared/regex-library.ts";
+export * from "../../v2/oc-memory-nexus/src/recall-regex-utils.js";

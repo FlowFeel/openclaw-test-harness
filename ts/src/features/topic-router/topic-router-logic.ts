@@ -1,4 +1,8 @@
 /**
+ * @invariants Pure/Protocol module with explicit dependencies.
+ * @dft Covered by unit and integration test suites.
+ */
+/**
  * Topic router pure logic — the testable seam of #16 (per-topic actor isolation).
  *
  * The routing, attribution, and crash-containment DECISIONS live here as pure

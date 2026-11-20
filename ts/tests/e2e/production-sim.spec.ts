@@ -42,6 +42,7 @@ const PLUGIN_DIRS = [
   "oc-stream-relay",
 ];
 const SHARED_DIR = path.resolve(TS_DIR, "src/plugins/shared");
+const V2_DIR = path.resolve(TS_DIR, "src/plugins/v2");
 const OC_VERSION = "2026.7.1"; // must match docker/Dockerfile ARG OC_VERSION
 
 // Expected hook counts per plugin (from source code audit)
@@ -102,6 +103,25 @@ function collectPluginFiles(): Array<{ source: string; target: string }> {
       }
     };
     walk(SHARED_DIR, ".");
+  }
+  if (fs.existsSync(V2_DIR)) {
+    const walk = (d: string, base: string) => {
+      for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+        if (entry.name === "node_modules" || entry.name === "dist" || entry.name === "tests") {
+          continue;
+        }
+        const full = path.join(d, entry.name);
+        const rel = path.join(base, entry.name);
+        if (entry.isDirectory()) {
+          walk(full, rel);
+          continue;
+        }
+        if (entry.name.endsWith(".ts") || entry.name.endsWith(".json")) {
+          files.push({ source: full, target: `/app/workspace/plugins/v2/${rel}` });
+        }
+      }
+    };
+    walk(V2_DIR, ".");
   }
   return files;
 }
