@@ -53,4 +53,3 @@ class AlertDelta:
     new_alerts: list[PluginDriftResult] = field(default_factory=list)
     suppressed_alerts: list[PluginDriftResult] = field(default_factory=list)
     resolved_alerts: list[tuple[str, str]] = field(default_factory=list)
-

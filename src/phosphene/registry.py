@@ -6,7 +6,8 @@ Provides:
 - CLI runner for task dispatch and standalone verification.
 
 @invariants
-- Task registration is deterministic; periodic jobs fail-closed on missing env or manifest (A1, A6).
+- Task registration is deterministic; periodic jobs fail-closed on missing
+  env or manifest (A1, A6).
 
 @dft
 - Tested via tests/test_registry.py with injectable task handlers and in-memory streams.

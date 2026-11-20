@@ -8,7 +8,8 @@ Provides:
 - **Test Pyramid**: Unit → Integration → E2E, all conformant to phosphene axiomatics.
 
 @invariants
-- Package root exposes version and public subpackages with zero import-time side effects (A1).
+- Package root exposes version and public subpackages with zero import-time
+  side effects (A1).
 
 @dft
 - Verified by Python pytest suite under tests/.

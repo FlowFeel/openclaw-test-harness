@@ -13,7 +13,8 @@ The Protocol lets us test the admission logic without OC running.
 The concrete implementation patches OC's child-admission.ts via diff.
 
 @invariants
-- Pure admission evaluation: zero I/O, deterministic decisions with explicit timestamps (A1, A2, A6).
+- Pure admission evaluation: zero I/O, deterministic decisions with explicit
+  timestamps (A1, A2, A6).
 
 @dft
 - Tested in isolation via tests/unit/test_admission.py with inline snapshots.

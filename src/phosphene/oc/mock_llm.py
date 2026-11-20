@@ -4,7 +4,8 @@ Returns canned responses so tests don't need real API keys or network access.
 Implements a minimal OpenAI-compatible chat completions endpoint.
 
 @invariants
-- Localhost-only deterministic HTTP test double; never makes outbound network calls (A5).
+- Localhost-only deterministic HTTP test double; never makes outbound
+  network calls (A5).
 
 @dft
 - Used by containerized integration tests to verify LLM request/response flows.

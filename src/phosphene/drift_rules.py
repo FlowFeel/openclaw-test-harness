@@ -72,7 +72,9 @@ def compute_alert_delta(
     now_iso: str,
 ) -> tuple[AlertDelta, dict[str, Any]]:
     """Pure transition computing new, suppressed, and resolved drift alerts."""
-    active_signatures: dict[str, Any] = {k: dict(v) for k, v in prior_signatures.items()}
+    active_signatures: dict[str, Any] = {
+        k: dict(v) for k, v in prior_signatures.items()
+    }
     delta = AlertDelta()
     current_drift_plugins: set[str] = set()
 
@@ -155,4 +157,3 @@ def format_provenance_alert(commit_sha: str, error_msg: str) -> str:
         f"[doctor:provenance-violation] [CRITICAL] Release commit {short_sha} "
         f"failed provenance gate: {error_msg}"
     )
-

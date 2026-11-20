@@ -1,11 +1,14 @@
 """Plugin drift checker and release provenance I/O orchestrator.
 
 @invariants
-- I/O boundary: isolates HTTP (GitHub API) and filesystem scans from pure rules in drift_rules.py (A1).
-- Preserves all public exports from drift_models.py and drift_rules.py for backward compatibility.
+- I/O boundary: isolates HTTP (GitHub API) and filesystem scans from pure rules
+  in drift_rules.py (A1).
+- Preserves all public exports from drift_models.py and drift_rules.py for
+  backward compatibility.
 
 @dft
-- Accepts injectable requests.Session and get_archive_bytes_fn for deterministic testing (A5).
+- Accepts injectable requests.Session and get_archive_bytes_fn for
+  deterministic testing (A5).
 """
 
 from __future__ import annotations
@@ -71,10 +74,14 @@ def verify_commit_provenance(
     try:
         resp = client.get(url, headers=headers, timeout=15)
     except requests.RequestException as exc:
-        return ProvenanceStatus(ok=False, error=f"Network error querying commit PRs: {exc}")
+        return ProvenanceStatus(
+            ok=False, error=f"Network error querying commit PRs: {exc}"
+        )
 
     if resp.status_code != 200:
-        return ProvenanceStatus(ok=False, error=f"GitHub API error {resp.status_code}: {resp.text}")
+        return ProvenanceStatus(
+            ok=False, error=f"GitHub API error {resp.status_code}: {resp.text}"
+        )
 
     pulls = resp.json()
     if not isinstance(pulls, list) or len(pulls) == 0:
@@ -86,7 +93,9 @@ def verify_commit_provenance(
     for pr in pulls:
         merged_at = pr.get("merged_at")
         if merged_at is not None:
-            return ProvenanceStatus(ok=True, pr_number=pr.get("number"), merged_at=merged_at)
+            return ProvenanceStatus(
+                ok=True, pr_number=pr.get("number"), merged_at=merged_at
+            )
 
     return ProvenanceStatus(
         ok=False,
