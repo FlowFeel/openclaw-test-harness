@@ -137,4 +137,29 @@ describe("oc-lane-supervisor / slices/topic-provisioning (Tier 2 Integration)", 
     expect(io.directories.size).toBe(0);
     expect(io.files.size).toBe(0);
   });
+
+  it("provisions clean non-repeating workspace path on session_start and queues Turn 0 orientation", () => {
+    const api = createMockApi();
+    const io = new InMemoryTopicProvisioningIO();
+    const slice = bindTopicProvisioningSlice(api, {
+      enabled: true,
+      workspaceRoot: "/mock/workspace",
+      io,
+      clock: () => 1763657700000,
+    });
+
+    const sessionKey = "agent:main:telegram:group:-1003842172831:topic:55501";
+    slice.onSessionStart({ sessionId: "sess-55501", sessionKey }, { sessionKey });
+
+    // Must NOT create work/topic-55501-topic-55501
+    expect(io.directories.has("/mock/workspace/work/topic-55501/docs")).toBe(true);
+    expect(io.directories.has("/mock/workspace/work/topic-55501-topic-55501/docs")).toBe(false);
+    expect(slice.isTopicProvisioned(55501)).toBe(true);
+
+    const brief = slice.consumeOrientationInjection(sessionKey);
+    expect(brief).toContain("[Topic Orientation]");
+    expect(brief).toContain("/mock/workspace/work/topic-55501");
+    // Consuming a second time returns undefined (one-shot Turn 0 delivery)
+    expect(slice.consumeOrientationInjection(sessionKey)).toBeUndefined();
+  });
 });

@@ -9,6 +9,7 @@ import {
   slugifyTopicName,
   deriveTopicWorkspacePath,
   deriveCarePackagePath,
+  extractTopicProvisioningContext,
   renderCarePackageSkeleton,
 } from "../logic.js";
 
@@ -27,6 +28,17 @@ describe("oc-lane-supervisor / slices/topic-provisioning (Tier 1 Unit)", () => {
   it("derives consistent topic workspace and care package paths", () => {
     const ws = deriveTopicWorkspacePath(83272, "Plugins Team", "/test/workspace");
     expect(ws).toBe("/test/workspace/work/topic-83272-plugins-team");
+
+    // Avoid repeating topic-<id> when topicName is generic or omitted (e.g. session_start)
+    expect(deriveTopicWorkspacePath(83272, "Topic 83272", "/test/workspace")).toBe(
+      "/test/workspace/work/topic-83272",
+    );
+    expect(deriveTopicWorkspacePath(83272, "83272", "/test/workspace")).toBe(
+      "/test/workspace/work/topic-83272",
+    );
+    expect(deriveTopicWorkspacePath(83272, "   ", "/test/workspace")).toBe(
+      "/test/workspace/work/topic-83272",
+    );
 
     const cp = deriveCarePackagePath("telegram:-1003842172831:topic:83272", 83272, "/test/workspace");
     expect(cp.relativePath).toBe("archive/sessions/telegram/-1003842172831/topics/83272/care-package.md");
@@ -81,5 +93,22 @@ describe("oc-lane-supervisor / slices/topic-provisioning (Tier 1 Unit)", () => {
     expect(skeleton.frontmatter).toContain('title: "Unregistered Topic"');
     expect(skeleton.frontmatter).toContain('created_by: "system"');
     expect(skeleton.frontmatter).toContain('generated_by: "flowfeel-oc-lane-supervisor@0.2.0"');
+  });
+
+  it("extracts topic identity from sessionKey when top-level topicId/chatId are omitted", () => {
+    const extracted = extractTopicProvisioningContext(
+      { sessionId: "s-101" },
+      { sessionKey: "agent:main:telegram:group:-1003842172831:topic:101717" },
+    );
+    expect(extracted).toEqual({
+      topicId: 101717,
+      topicName: "Topic 101717",
+      chatId: "-1003842172831",
+      sessionKey: "agent:main:telegram:group:-1003842172831:topic:101717",
+      createdBy: "system",
+      injectionKey: "agent:main:telegram:group:-1003842172831:topic:101717",
+    });
+
+    expect(extractTopicProvisioningContext({}, { sessionKey: "agent:main:telegram:direct:123" })).toBeNull();
   });
 });
