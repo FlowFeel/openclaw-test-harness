@@ -15,6 +15,7 @@
     ],
     "hooks": [
       "before_dispatch",
+      "session_start",
       "before_agent_run",
       "before_prompt_build",
       "before_tool_call",

@@ -51,7 +51,7 @@ describe("oc-lane-supervisor / slices/topic-provisioning (Tier 2 Integration)", 
 
     // Verify care package file written
     const cpPath =
-      "/mock/workspace/archive/sessions/telegram/1003842172831:topic:83272/topics/83272/care-package.md";
+      "/mock/workspace/archive/sessions/telegram/-1003842172831/topics/83272/care-package.md";
     expect(io.files.has(cpPath)).toBe(true);
     const content = io.files.get(cpPath) ?? "";
     expect(content).toContain('uri: topics/telegram:-1003842172831:topic:83272/83272/care-package');
@@ -93,6 +93,31 @@ describe("oc-lane-supervisor / slices/topic-provisioning (Tier 2 Integration)", 
 
     // Content should remain untouched
     expect(io.files.get(cpPath)).toBe("MUTATED_CONTENT");
+  });
+
+  it("extracts topicId and chatId from sessionKey when topicId is omitted", () => {
+    const api = createMockApi();
+    const io = new InMemoryTopicProvisioningIO();
+    const slice = bindTopicProvisioningSlice(api, {
+      enabled: true,
+      workspaceRoot: "/mock/workspace",
+      io,
+      clock: () => 1763657700000,
+    });
+
+    const event = { prompt: "Inbound message in new topic" };
+    const ctx = {
+      sessionKey: "agent:main:telegram:group:-1003842172831:topic:101717",
+      topicName: "Evolutions: Math and Models",
+    };
+
+    const out = slice.onBeforeAgentRun(event, ctx);
+
+    const cpPath =
+      "/mock/workspace/archive/sessions/telegram/-1003842172831/topics/101717/care-package.md";
+    expect(io.files.has(cpPath)).toBe(true);
+    expect(slice.isTopicProvisioned(101717)).toBe(true);
+    expect(out.prompt).toContain("[Topic Orientation]");
   });
 
   it("ignores non-topic sessions gracefully", () => {

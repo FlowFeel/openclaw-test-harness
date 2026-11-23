@@ -29,10 +29,13 @@ describe("oc-lane-supervisor / slices/topic-provisioning (Tier 1 Unit)", () => {
     expect(ws).toBe("/test/workspace/work/topic-83272-plugins-team");
 
     const cp = deriveCarePackagePath("telegram:-1003842172831:topic:83272", 83272, "/test/workspace");
-    expect(cp.relativePath).toBe("archive/sessions/telegram/1003842172831:topic:83272/topics/83272/care-package.md");
+    expect(cp.relativePath).toBe("archive/sessions/telegram/-1003842172831/topics/83272/care-package.md");
     expect(cp.absolutePath).toBe(
-      "/test/workspace/archive/sessions/telegram/1003842172831:topic:83272/topics/83272/care-package.md",
+      "/test/workspace/archive/sessions/telegram/-1003842172831/topics/83272/care-package.md",
     );
+
+    const cpRawChatId = deriveCarePackagePath("-1003842172831", 83272, "/test/workspace");
+    expect(cpRawChatId.relativePath).toBe("archive/sessions/telegram/-1003842172831/topics/83272/care-package.md");
   });
 
   it("renders deterministic care-package skeleton markdown and turn-0 prompt summary", () => {
