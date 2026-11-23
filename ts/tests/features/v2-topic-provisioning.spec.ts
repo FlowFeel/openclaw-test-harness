@@ -45,7 +45,7 @@ describe("Feature: Plugins v2 Topic Provisioning — Automated Workspace Scaffol
 
     // Assert care package created
     const carePackagePath =
-      "/workspace/archive/sessions/telegram/1003842172831:topic:83272/topics/83272/care-package.md";
+      "/workspace/archive/sessions/telegram/-1003842172831/topics/83272/care-package.md";
     expect(io.files.has(carePackagePath)).toBe(true);
     const content = io.files.get(carePackagePath) ?? "";
     expect(content).toContain('uri: topics/telegram:-1003842172831:topic:83272/83272/care-package');
@@ -64,6 +64,30 @@ describe("Feature: Plugins v2 Topic Provisioning — Automated Workspace Scaffol
     const prependContext = (promptResult as { prependContext?: string })?.prependContext ?? "";
     expect(prependContext).toContain("[Topic Orientation]");
     expect(prependContext).toContain("work/topic-83272-plugins-team");
+  });
+
+  it("Scenario: Session start hook provisions topic without requiring agent turn", async () => {
+    const api = new InMemoryPluginApi();
+    const io = new InMemoryTopicProvisioningIO();
+
+    pluginDef.register(api, {
+      enableTopicProvisioning: true,
+      topicProvisioningIO: io,
+      workspaceRoot: "/workspace",
+    });
+
+    const ctx = {
+      sessionKey: "agent:main:telegram:group:-1003842172831:topic:101717",
+      topicName: "Evolutions: Math and Models",
+    };
+
+    // session_start fires on session initialization (even before any agent turn)
+    await api.dispatchHook("session_start", { sessionId: "session-101717" }, ctx);
+
+    const carePackagePath =
+      "/workspace/archive/sessions/telegram/-1003842172831/topics/101717/care-package.md";
+    expect(io.files.has(carePackagePath)).toBe(true);
+    expect(io.directories.has("/workspace/work/topic-101717-evolutions-math-and-models/docs")).toBe(true);
   });
 
   it("Scenario: Subsequent agent turns in provisioned topic are idempotent", async () => {

@@ -13,8 +13,9 @@
 import {
   TOPIC_NON_ALPHANUMERIC_REGEX,
   TOPIC_LEADING_TRAILING_HYPHENS_REGEX,
-  TOPIC_LEADING_HYPHEN_REGEX,
+  TELEGRAM_PREFIX_REGEX,
 } from "../../utils.js";
+import { TOPIC_CHAT_AND_THREAD_REGEX } from "../../../../../shared/regex-library.js";
 
 export interface TopicOrientationParams {
   topicId: number;
@@ -58,6 +59,14 @@ export function deriveTopicWorkspacePath(
   return `${workspaceRoot}/work/topic-${topicId}-${slug}`;
 }
 
+export function sanitizeTelegramChatId(chatId: string): string {
+  const match = chatId.match(TOPIC_CHAT_AND_THREAD_REGEX as RegExp);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return chatId.replace(TELEGRAM_PREFIX_REGEX, "");
+}
+
 /**
  * Derives the care package relative and absolute archive paths.
  */
@@ -66,9 +75,7 @@ export function deriveCarePackagePath(
   topicId: number,
   workspaceRoot = "/home/node/.openclaw/workspace",
 ): { relativePath: string; absolutePath: string } {
-  const sanitizedChatId = chatId
-    .replace("telegram:", "")
-    .replace(TOPIC_LEADING_HYPHEN_REGEX, "");
+  const sanitizedChatId = sanitizeTelegramChatId(chatId);
   const relativePath = `archive/sessions/telegram/${sanitizedChatId}/topics/${topicId}/care-package.md`;
   return {
     relativePath,

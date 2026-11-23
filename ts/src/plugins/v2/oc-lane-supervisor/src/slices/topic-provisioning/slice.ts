@@ -14,6 +14,7 @@ import {
   renderCarePackageSkeleton,
   type CarePackageSkeleton,
 } from "./logic.js";
+import { TOPIC_CHAT_AND_THREAD_REGEX } from "../../../../../shared/regex-library.js";
 import { NodeFsTopicProvisioningIO, type TopicProvisioningIO } from "./io.js";
 import {
   createTopicProvisioningSliceState,
@@ -52,11 +53,20 @@ export function bindTopicProvisioningSlice(
     onBeforeAgentRun(event: HookEvent, ctx?: HookContext): HookEvent {
       if (!enabled) return event;
 
+      const rawSessionKey =
+        ctx?.sessionKey ??
+        event?.sessionKey ??
+        (ctx as Record<string, unknown> | undefined)?.sessionId ??
+        (event as Record<string, unknown> | undefined)?.sessionId;
+      const sessionKeyStr = typeof rawSessionKey === "string" ? rawSessionKey : "";
+      const sessionKeyMatch = sessionKeyStr.match(TOPIC_CHAT_AND_THREAD_REGEX as RegExp);
+
       const rawTopicId =
         ctx?.topicId ??
         event?.topicId ??
         (ctx as Record<string, unknown> | undefined)?.threadId ??
-        (event as Record<string, unknown> | undefined)?.threadId;
+        (event as Record<string, unknown> | undefined)?.threadId ??
+        sessionKeyMatch?.[2];
 
       const topicId = parseTopicId(rawTopicId);
       if (!topicId) return event;
@@ -66,10 +76,15 @@ export function bindTopicProvisioningSlice(
         return event;
       }
 
+      const rawChatId =
+        ctx?.chatId ??
+        event?.chatId ??
+        sessionKeyMatch?.[1];
+      const chatId = String(rawChatId ?? "telegram:default");
+
       const topicName =
         String(ctx?.topicName ?? event?.topicName ?? `Topic ${topicId}`);
-      const chatId = String(ctx?.chatId ?? event?.chatId ?? "telegram:default");
-      const sessionKey = ctx?.sessionKey ?? event?.sessionKey ? String(ctx?.sessionKey ?? event?.sessionKey) : null;
+      const sessionKey = sessionKeyStr.length > 0 ? sessionKeyStr : null;
       const createdUtc = new Date(clock()).toISOString();
 
       const rawCreatedBy =

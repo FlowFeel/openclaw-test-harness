@@ -40,7 +40,7 @@ export const HEARTBEAT_SCRATCH_DIRECTIVE_REGEX =
 
 export const TOPIC_NON_ALPHANUMERIC_REGEX = /[^a-z0-9]+/g;
 export const TOPIC_LEADING_TRAILING_HYPHENS_REGEX = /^-+|-+$/g;
-export const TOPIC_LEADING_HYPHEN_REGEX = /^-/;
+export const TELEGRAM_PREFIX_REGEX = /^telegram:/;
 
 // ── Centralized Messages ────────────────────────────────────────────
 
