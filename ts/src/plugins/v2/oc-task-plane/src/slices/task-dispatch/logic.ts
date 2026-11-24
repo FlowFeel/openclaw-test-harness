@@ -22,6 +22,21 @@ import { classifyCommand, type ClassificationResult } from "../../classifier-log
 import { reconcileRestartState } from "../../recovery-logic.js";
 import type { TaskDispatchSliceConfig, TaskDispatchSliceState } from "./state.js";
 
+/**
+ * Pure Open-World Assumption (OWA) payload normalizer.
+ *
+ * Plain objects are shallow-cloned verbatim with zero key filtering or schema
+ * gating. Non-plain values (arrays, primitives, null) are preserved verbatim
+ * under `{ raw }` rather than silently dropped or coerced into numeric keys.
+ */
+export function normalizeOwaPayload(raw: unknown): Record<string, unknown> {
+  if (raw === undefined) return {};
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    return { ...(raw as Record<string, unknown>) };
+  }
+  return { raw };
+}
+
 export function dispatchNewTask(
   state: TaskDispatchSliceState,
   config: TaskDispatchSliceConfig,
@@ -30,7 +45,7 @@ export function dispatchNewTask(
     kind: TaskPlaneKind;
     owner: string;
     timeoutMs?: number;
-    payload?: Record<string, unknown>;
+    payload?: unknown;
     nowMs: number;
   },
 ): {
@@ -47,9 +62,10 @@ export function dispatchNewTask(
   const outputHandle = `${config.outputDir}/${taskId}.log`;
   const effectiveTimeout =
     params.timeoutMs ?? classification.suggestedTimeoutMs ?? config.defaultTimeoutMs;
+  const normalizedPayload = normalizeOwaPayload(params.payload);
   const payload = params.command
-    ? { ...(params.payload ?? {}), command: params.command }
-    : (params.payload ?? {});
+    ? { ...normalizedPayload, command: params.command }
+    : normalizedPayload;
 
   const dispatched = dispatchTask(
     state.registry,
