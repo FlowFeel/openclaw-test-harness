@@ -9,7 +9,7 @@ import pluginDef from "../../src/plugins/v2/oc-lane-supervisor/src/index.js";
 import { InMemoryPluginApi } from "../doubles/in-memory-plugin-api.js";
 
 describe("Feature: Plugins v2 Lane Supervisor — Turn Energy, Poll Hygiene, Admission & Topic Recovery", () => {
-  it("Scenario: Zero-delta poll loop exhausts constrained turn energy and triggers soft landing", async () => {
+  it("Scenario: Zero-delta poll loop exhausts constrained turn energy and tracks diagnostics without blocking", async () => {
     const api = new InMemoryPluginApi();
     pluginDef.register(api, { initialSessionTier: "constrained" });
     const ctx = { sessionId: "bdd-s1" };
@@ -27,8 +27,8 @@ describe("Feature: Plugins v2 Lane Supervisor — Turn Energy, Poll Hygiene, Adm
     }
 
     const [gate] = await api.dispatchHook("before_tool_call", { toolName: "exec", params: {} }, ctx);
-    expect((gate as { block?: boolean; blockReason?: string }).block).toBe(true);
-    expect((gate as { blockReason?: string }).blockReason).toContain("Turn energy budget exhausted");
+    // Strict OWA Non-Gating: tool execution must not be blocked
+    expect((gate as { block?: boolean } | undefined)?.block).not.toBe(true);
   });
 
   it("Scenario: Idle whitespace prompt is suppressed before model invocation", async () => {

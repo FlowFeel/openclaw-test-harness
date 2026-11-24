@@ -46,7 +46,8 @@ describe("oc-lane-supervisor (Tier 2 Integration)", () => {
     }
 
     const [gate] = await api.dispatchHook("before_tool_call", { toolName: "exec", params: {} }, ctx);
-    expect((gate as { block?: boolean }).block).toBe(true);
+    // Strict OWA Non-Gating: tool execution must not be blocked
+    expect((gate as { block?: boolean } | undefined)?.block).not.toBe(true);
 
     // Subagent semaphore saturation warns on 2nd spawn
     await api.dispatchHook("subagent_spawning", { subagentId: "sub-1" });

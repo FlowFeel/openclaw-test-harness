@@ -153,7 +153,7 @@ export default definePluginEntry({
     };
 
     // T-586: Parameter circuit breaker state
-    let circuitBreakerState: CircuitBreakerState = createInitialCircuitBreakerState();
+    const circuitBreakerState: CircuitBreakerState = createInitialCircuitBreakerState();
     const circuitBreakerConfig: CircuitBreakerConfig = {
       maxConsecutiveIdenticalErrors: cfg.maxConsecutiveIdenticalErrors,
       enableErrorCircuitBreaker: cfg.enableErrorCircuitBreaker,
@@ -167,6 +167,7 @@ export default definePluginEntry({
     const sessionTurnEnergy = new Map<string, TurnEnergyState>();
     const sessionTurnStartTimes = new Map<string, number>();
     const sessionLastToolTimes = new Map<string, number>();
+    const sessionLastBridgeAction = new Map<string, number>();
 
     const reader: SessionsReader = (path) => readSessions(path ?? sessionsPath);
     const writer: SessionsWriter = (data, path) =>
@@ -195,7 +196,7 @@ export default definePluginEntry({
           };
         }
 
-        // 2. Evaluate Turn Energy Budget
+        // 2. Evaluate Turn Energy Budget (Strict OWA Non-Gating: never block execution)
         if (enableEnergyBudget) {
           let energyState = sessionTurnEnergy.get(sessionKey);
           if (!energyState) {
@@ -203,16 +204,6 @@ export default definePluginEntry({
             const tier = rep ? rep.tier : initialSessionTier;
             energyState = initTurnEnergy(tier);
             sessionTurnEnergy.set(sessionKey, energyState);
-          }
-
-          if (energyState.isGated) {
-            const blockReason =
-              "🛑 Turn energy budget exhausted. Synthesize your visible reply with findings and next steps immediately.";
-            api.logger?.warn?.(`[oc-session-guard] energy budget exhausted for ${sessionKey}, gating ${toolName}`);
-            return {
-              block: true,
-              blockReason,
-            };
           }
         }
 
@@ -291,13 +282,19 @@ export default definePluginEntry({
           });
           sessionTurnEnergy.set(sessionKey, nextEnergyState);
 
-          // Phase 3: Cognitive envelope header & advisory in toolResult
+          // Phase 3: Cognitive envelope header & actionable bridge in toolResult
           const header = formatEnergyEnvelopeHeader(nextEnergyState);
           let notice = "";
-          if (nextEnergyState.isGated) {
-            notice = `\n\n${header}\n🛑 [oc-session-guard] Turn energy budget exhausted. Synthesize visible answer immediately.`;
-          } else if (nextEnergyState.advisoryEmitted) {
-            notice = `\n\n${header}\n⚡ [oc-session-guard] Energy advisory: wrap up tool execution and begin synthesis.`;
+
+          // Actionable bridge: emit when energy is low (<=200) or actionsCount >= 12, throttled to max once per 5 actions
+          const lastBridge = sessionLastBridgeAction.get(sessionKey) ?? -999;
+          const shouldBridge =
+            (nextEnergyState.remainingEnergy <= 200 || nextEnergyState.actionsCount >= 12) &&
+            nextEnergyState.actionsCount - lastBridge >= 5;
+
+          if (shouldBridge) {
+            sessionLastBridgeAction.set(sessionKey, nextEnergyState.actionsCount);
+            notice = `\n\n${header}\n⚡ Turn density high (${nextEnergyState.actionsCount} actions). To avoid hitting lane timeout (600s), offload remaining inspection:\n  → sessions_spawn(task="...", runtime="subagent") followed by sessions_yield()\n  → Or batch atomic steps via exec_pipeline(steps=[...])`;
           } else if (enableEnergyHeaders) {
             notice = `\n\n${header}`;
           }

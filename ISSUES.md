@@ -162,3 +162,18 @@ Mock implementation + a test before any OC patch.
   4. ✅ Conforms to all six DFT axioms and passes foundry validation across all 14 plugins.
 - **Status**: ✅ Completed & Verified (`ts/tests/plugins/oc-model-router/model-router.spec.ts`, 43 specs + `ts/tests/plugins/oc-model-router/wiring.spec.ts`, 16 specs).
 
+## #77: feat(task-plane): Open-World Assumption (OWA) payload preservation & pure orchestration plumbing
+- **Problem**: In legacy execution pipelines, persistence complected state tracking with schema enforcement: missing dictionary keys in step checkpoints raised fatal validation errors (`ValueError: Checkpoint missing required fields`), choking generative models mid-workflow and discarding partially written drafts. Furthermore, rigid schema gating coupled workflow orchestration to output verification within the same execution turn, causing brittle crashes whenever payloads drifted.
+- **Solution**:
+  1. **TaskPlane OWA Invariant**: `task_dispatch` and `TaskPlane` registry operations preserve arbitrary dictionary payloads (`Record<string, unknown>`) without filtering, sanitizing, or choking on open data across Gateway RPC wakes.
+  2. **Zero Schema Gating in TaskFlow**: In `taskflow/executor.py`, completely remove `checkpoint_schema` validation. Step persistence accepts open `dict[str, Any]` (or raw data) with zero schema gating, zero quality judgment, and zero aborts.
+  3. **Pure Task Orchestration**: Confine TaskFlow strictly to task identity/lineage tracking, execution states (`pending`, `running`, `completed`, `failed`), and DAG dependency routing.
+  4. **Durable Plane Offloading**: Maintainable, long-running activities are offloaded to `oc-durable-sidecar` cleanly without schema interception.
+- **Acceptance**:
+  1. ✅ Integration tests in `oc-task-plane` prove `task_dispatch` accepts heterogeneous, deeply nested payloads under OWA and preserves them across registry I/O, status queries, and wake events.
+  2. ✅ TaskFlow runner unit/integration tests verify checkpoint persistence succeeds without schema gating or validation aborts.
+  3. ✅ Lock-free asynchronous execution and background continuation are maintained across session yields and foreground lane budget expirations.
+  4. ✅ Conforms to all 6 DFT axioms.
+- **Status**: 📋 Open / Tracked (Issue #77 — specification: `team/specs/taskflow-asynchronous-refinement-and-owa-spec.md` / PR #270).
+
+

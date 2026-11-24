@@ -74,6 +74,12 @@ describe("Feature: Plugins v2 Efficiency Scoring, Energy Budgeting and Soft Land
     it("Scenario: Asynchronous task delegation rewards energy rebate and habit points", () => {
       // Given a session with tier "standard"
       turnState = initTurnEnergy("standard");
+      // Partially drain first so energy isn't capped at initial 1000
+      turnState = applyEnergyAction(turnState, {
+        toolName: "exec",
+        durationMs: 50000,
+      });
+      const energyBefore = turnState.remainingEnergy;
 
       // When an asynchronous task is dispatched via "task_dispatch"
       turnState = applyEnergyAction(turnState, {
@@ -82,8 +88,8 @@ describe("Feature: Plugins v2 Efficiency Scoring, Energy Budgeting and Soft Land
         isDelegation: true,
       });
 
-      // Then the energy pool should receive a rebate of 200 units (1000 - (0.5 - 200) = 1199.5)
-      expect(turnState.remainingEnergy).toBeGreaterThan(1000);
+      // Then the energy pool should receive a rebate
+      expect(turnState.remainingEnergy).toBeGreaterThan(energyBefore);
 
       // And the session should be awarded 150 habit points
       expect(turnState.habitPoints).toBe(150);
@@ -146,15 +152,14 @@ describe("Feature: Plugins v2 Efficiency Scoring, Energy Budgeting and Soft Land
       expect(turnState.remainingEnergy).toBe(0);
       expect(turnState.isGated).toBe(true);
 
-      // When the agent attempts to execute another tool call
+      // Under strict OWA non-gating, isGated remains a diagnostic flag and tool calls proceed without dropping tracking
       const afterAttempt = applyEnergyAction(turnState, {
         toolName: "read",
         durationMs: 100,
       });
 
-      // Then the tool call should be blocked before execution
       expect(afterAttempt.isGated).toBe(true);
-      expect(afterAttempt.actionsCount).toBe(turnState.actionsCount);
+      expect(afterAttempt.actionsCount).toBe(turnState.actionsCount + 1);
     });
   });
 

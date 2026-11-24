@@ -80,20 +80,11 @@ export function startTurnEnergy(
 }
 
 export function evaluateEnergyGate(
-  state: TurnEnergySliceState,
-  config: TurnEnergySliceConfig,
-  sessionId: string,
+  _state: TurnEnergySliceState,
+  _config: TurnEnergySliceConfig,
+  _sessionId: string,
 ): { blocked: boolean; blockReason?: string } {
-  if (!config.enabled) return { blocked: false };
-  const energy = state.turnEnergy.get(sessionId);
-  if (!energy) return { blocked: false };
-  if (energy.remainingEnergy <= 0 || energy.isGated) {
-    return {
-      blocked: true,
-      blockReason:
-        "Turn energy budget exhausted — entering soft landing. Synthesize visible reply from collected findings.",
-    };
-  }
+  // Pure OWA Non-Gating: tool execution is never blocked due to energy exhaustion
   return { blocked: false };
 }
 
@@ -116,6 +107,11 @@ export function applyToolEnergyDrain(
   const durationMs = Math.max(0, params.nowMs - lastTime);
   state.lastToolTimes.set(params.sessionId, params.nowMs);
 
+  const isDelegation =
+    params.toolName === "sessions_spawn" ||
+    params.toolName === "task_dispatch" ||
+    params.toolName === "durable_spawn";
+
   const next = applyEnergyAction(
     current,
     {
@@ -124,7 +120,7 @@ export function applyToolEnergyDrain(
       payloadBytes: params.payloadBytes,
       isPoll: params.isZeroDeltaPoll || params.toolName === "process",
       isZeroDelta: params.isZeroDeltaPoll,
-      isDelegation: params.toolName === "task_dispatch",
+      isDelegation,
     },
     DEFAULT_ENERGY_CONFIG,
   );

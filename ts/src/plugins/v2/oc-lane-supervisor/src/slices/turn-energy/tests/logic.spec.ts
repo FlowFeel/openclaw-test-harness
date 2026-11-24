@@ -34,7 +34,7 @@ describe("oc-lane-supervisor / slices/turn-energy (Tier 1 Unit)", () => {
     expect(tgMedia.suppressed).toBe(false);
   });
 
-  it("drains turn energy on zero-delta polls until soft-landing gate trips", () => {
+  it("drains turn energy on zero-delta polls while maintaining strict non-gating under OWA", () => {
     const state = createTurnEnergySliceState();
     startTurnEnergy(state, cfg, "s1", "Inspect logs", 1000);
     expect(evaluateEnergyGate(state, cfg, "s1").blocked).toBe(false);
@@ -49,9 +49,9 @@ describe("oc-lane-supervisor / slices/turn-energy (Tier 1 Unit)", () => {
       });
     }
 
+    // Pure OWA: evaluateEnergyGate remains unblocked
     const gate = evaluateEnergyGate(state, cfg, "s1");
-    expect(gate.blocked).toBe(true);
-    expect(gate.blockReason).toContain("Turn energy budget exhausted");
+    expect(gate.blocked).toBe(false);
 
     const end = finalizeTurnEnergy(state, cfg, "s1", 10_000, true);
     expect(end.updated).toBe(true);

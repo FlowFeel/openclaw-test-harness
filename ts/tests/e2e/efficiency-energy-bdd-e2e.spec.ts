@@ -68,7 +68,8 @@ describe("E2E BDD: Plugins v2 Efficiency & Energy Budgeting in Real Container", 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.output.trim().split("\n").pop()!);
     expect(parsed.isGated).toBe(true);
-    expect(parsed.actionCount).toBe(1); // Gated attempt did not increment actionsCount
+    // Under pure OWA non-gating, execution continues tracking
+    expect(parsed.actionCount).toBe(2);
   });
 
   it("Scenario: Bundled oc-session-guard plugin boots and registers session_health with habit telemetry card", async () => {

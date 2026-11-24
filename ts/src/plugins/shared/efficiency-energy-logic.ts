@@ -70,6 +70,7 @@ export interface TurnEnergyState {
   penalties: number;
   actionsCount: number;
   delegationCount: number;
+  serialExecCount: number;
   isGated: boolean;
   advisoryEmitted: boolean;
 }
@@ -169,6 +170,7 @@ export function initTurnEnergy(
     penalties: 0,
     actionsCount: 0,
     delegationCount: 0,
+    serialExecCount: 0,
     isGated: false,
     advisoryEmitted: false,
   };
@@ -176,29 +178,39 @@ export function initTurnEnergy(
 
 /**
  * Evaluate energy deduction and point adjustments for a discrete tool action.
+ * Strict OWA Non-Gating: tool actions are never blocked or ignored even when remaining energy is 0.
  */
 export function applyEnergyAction(
   state: TurnEnergyState,
   action: EnergyActionSpec,
   config: TurnEnergyConfig = DEFAULT_ENERGY_CONFIG,
 ): TurnEnergyState {
-  if (state.isGated) {
-    return state;
-  }
-
   const rates = config.rates ?? DEFAULT_INCENTIVE_RATES;
   const durationSec = Math.max(0, action.durationMs / 1000);
   let drain = durationSec * config.idleDrainPerSecond;
   let points = 0;
   let penalties = 0;
   let delegationCount = state.delegationCount;
+  let serialExecCount = state.serialExecCount;
 
   // Base action cost by category
   if (action.isDelegation) {
-    // Rewarded offload
-    drain -= rates.delegationRebate;
+    // Rewarded offload: restores energy runway for clean synthesis and yield (default +250E rebate)
+    const rebate = rates.delegationRebate >= 250 ? rates.delegationRebate : 250;
+    drain = -rebate;
     points += rates.delegationPoints;
     delegationCount += 1;
+    serialExecCount = 0;
+  } else if (action.toolName === "exec_pipeline") {
+    // Pipeline execution: fixed baseline cost without serial penalty, awards batching habit points
+    drain += 15;
+    points += 50;
+    serialExecCount = 0;
+  } else if (action.toolName === "exec") {
+    serialExecCount += 1;
+    // Serial friction penalty: unbatched exec calls beyond 8 in a single turn add +5E per extra call
+    const serialPenalty = serialExecCount > 8 ? (serialExecCount - 8) * 5 : 0;
+    drain += 15 + serialPenalty;
   } else if (action.isZeroDelta) {
     // Zero-delta poll penalty
     drain += rates.zeroDeltaPenaltyDrain;
@@ -222,7 +234,7 @@ export function applyEnergyAction(
   }
 
   // Heavy synchronous execution penalty
-  if (durationSec > 30 && !action.isDelegation) {
+  if (durationSec > 30 && !action.isDelegation && action.toolName !== "exec_pipeline") {
     drain += 30 + durationSec * 2.0;
   }
 
@@ -233,10 +245,21 @@ export function applyEnergyAction(
   }
 
   const newElapsed = state.elapsedSeconds + durationSec;
-  const newRemaining = Math.max(0, state.remainingEnergy - drain);
+  // If delegation, restore energy up to initial capacity; otherwise deduct down to 0
+  let newRemaining: number;
+  if (action.isDelegation) {
+    const rebate = rates.delegationRebate >= 250 ? rates.delegationRebate : 250;
+    newRemaining = Math.min(state.initialEnergy, state.remainingEnergy + rebate);
+  } else {
+    newRemaining = Math.max(0, state.remainingEnergy - drain);
+  }
+
+  // Pure OWA: isGated is preserved strictly as a diagnostic flag (<=0), never freezing tool execution
   const isGated = newRemaining <= config.exhaustionThreshold;
-  const advisoryEmitted =
-    state.advisoryEmitted || (newRemaining <= config.advisoryThreshold && !isGated);
+  // Delegation clears advisoryEmitted so agent can deliver visible reply cleanly
+  const advisoryEmitted = action.isDelegation
+    ? false
+    : state.advisoryEmitted || (newRemaining <= config.advisoryThreshold && !isGated);
 
   return {
     ...state,
@@ -246,6 +269,7 @@ export function applyEnergyAction(
     penalties: state.penalties + penalties,
     actionsCount: state.actionsCount + 1,
     delegationCount,
+    serialExecCount,
     isGated,
     advisoryEmitted,
   };

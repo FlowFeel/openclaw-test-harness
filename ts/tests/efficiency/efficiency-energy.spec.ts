@@ -51,7 +51,13 @@ describe("efficiency-energy-logic (Pure Foundry DFT Tests)", () => {
 
     it("rewards delegation with energy rebate and habit points", () => {
       const initial = initTurnEnergy("standard");
-      const next = applyEnergyAction(initial, {
+      // Partially drain first so energy isn't already capped at initial
+      const partiallyDrained = applyEnergyAction(initial, {
+        toolName: "exec",
+        durationMs: 50000,
+      });
+
+      const next = applyEnergyAction(partiallyDrained, {
         toolName: "task_dispatch",
         durationMs: 500,
         isDelegation: true,
@@ -59,8 +65,7 @@ describe("efficiency-energy-logic (Pure Foundry DFT Tests)", () => {
 
       expect(next.delegationCount).toBe(1);
       expect(next.habitPoints).toBe(150);
-      // 1000 - (0.5 - 200) = 1199.5
-      expect(next.remainingEnergy).toBeGreaterThan(1000);
+      expect(next.remainingEnergy).toBeGreaterThan(partiallyDrained.remainingEnergy);
     });
 
     it("applies penalty and heavy drain for zero-delta poll", () => {
@@ -89,7 +94,7 @@ describe("efficiency-energy-logic (Pure Foundry DFT Tests)", () => {
       expect(state.isGated).toBe(false);
     });
 
-    it("gates subsequent tool calls when energy reaches 0", () => {
+    it("tracks exhaustion diagnostic flag when energy reaches 0 without freezing actions (Strict OWA)", () => {
       let state = initTurnEnergy("constrained"); // 600 E
       // Apply huge drain
       state = applyEnergyAction(state, {
@@ -100,12 +105,12 @@ describe("efficiency-energy-logic (Pure Foundry DFT Tests)", () => {
       expect(state.remainingEnergy).toBe(0);
       expect(state.isGated).toBe(true);
 
-      // Attempting another action after gating is a no-op
+      // Attempting another action after gating continues tracking without blocking under OWA
       const afterGated = applyEnergyAction(state, {
         toolName: "read",
         durationMs: 100,
       });
-      expect(afterGated.actionsCount).toBe(state.actionsCount);
+      expect(afterGated.actionsCount).toBe(state.actionsCount + 1);
       expect(afterGated.remainingEnergy).toBe(0);
     });
   });

@@ -110,14 +110,13 @@ describe("Plugins v2: oc-lane-supervisor Consolidated Engine Integration", () =>
       );
     }
 
-    // Must be cleanly gated by turn energy exhaustion
+    // Strict OWA Non-Gating: tool call proceeds without being blocked
     const gatedRes = (await beforeTool.handler(
       { toolName: "exec", params: { command: "curl" } },
       ctx
-    )) as { block: boolean; blockReason: string };
+    )) as { block?: boolean; blockReason?: string } | undefined;
 
-    expect(gatedRes.block).toBe(true);
-    expect(gatedRes.blockReason).toContain("Turn energy budget exhausted");
+    expect(gatedRes?.block).not.toBe(true);
   });
 
   it("executes lane_forecast tool with duration prediction and advice", async () => {
