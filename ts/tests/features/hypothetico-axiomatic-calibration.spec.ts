@@ -46,8 +46,12 @@ describe("Feature: Hypothetico-Axiomatic Empirical Feedback and Dynamic Calibrat
   describe("Rule: Increase delegation rebate when empirical offload adoption is sluggish", () => {
     it("Scenario: Increase delegation rebate when empirical offload adoption is sluggish", () => {
       // Given a baseline energy config with delegation rebate 200 units and 150 habit points
-      expect(baselineConfig.rates.delegationRebate).toBe(200);
-      expect(baselineConfig.rates.delegationPoints).toBe(150);
+      const scenarioBaseline = {
+        ...baselineConfig,
+        rates: { ...baselineConfig.rates, delegationRebate: 200 },
+      };
+      expect(scenarioBaseline.rates.delegationRebate).toBe(200);
+      expect(scenarioBaseline.rates.delegationPoints).toBe(150);
 
       // When an empirical profile reports a sluggish delegation offload ratio of 0.18
       const empirical: EmpiricalCalibrationProfile = {
@@ -58,7 +62,7 @@ describe("Feature: Hypothetico-Axiomatic Empirical Feedback and Dynamic Calibrat
         meanTurnTes: 62,
       };
 
-      const calibrated = calibrateEconomicParameters(baselineConfig, empirical);
+      const calibrated = calibrateEconomicParameters(scenarioBaseline, empirical);
 
       // Then the calibrated delegation rebate should increase to 250 units
       expect(calibrated.rates.delegationRebate).toBe(250);

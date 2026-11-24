@@ -18,6 +18,7 @@ import {
   type HookContext,
 } from "../../../shared/types.js";
 import type { SessionTier } from "../../../shared/efficiency-energy-logic.js";
+import { appendNoticeToToolMessage } from "../../../shared/actionable-bridge-logic.js";
 import type { TruncationOptions } from "./tool-result-hygiene-logic.js";
 import { DEFAULT_LANE_CAP_MS, DEFAULT_WARN_RATIO } from "./forecaster-logic.js";
 import type { SessionsReader, SessionsWriter } from "./sessions-io.js";
@@ -194,13 +195,16 @@ export default definePluginEntry({
       const pollRes = poll.onToolResultPersist({ sessionId, toolName, message: event.message });
       const hygieneRes = toolHygiene.onToolResultPersist({ sessionId, toolName, message: pollRes.message });
       const payloadBytes = JSON.stringify(hygieneRes.message ?? "").length;
-      energy.onToolResultPersist({
+      const drainRes = energy.onToolResultPersist({
         sessionId,
         toolName,
         isZeroDeltaPoll: pollRes.isZeroDeltaPoll,
         payloadBytes,
       });
-      return { ...event, message: hygieneRes.message };
+      const decoratedMessage = drainRes.notice
+        ? appendNoticeToToolMessage(hygieneRes.message, drainRes.notice)
+        : hygieneRes.message;
+      return { ...event, message: decoratedMessage };
     });
 
     api.on("before_message_write", (event: HookEvent) => poll.onBeforeMessageWrite(event));

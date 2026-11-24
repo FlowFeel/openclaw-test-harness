@@ -61,4 +61,58 @@ describe("oc-lane-supervisor (Tier 2 Integration)", () => {
     expect(health.entryCount).toBe(1);
     expect(health.reputation).toBeDefined();
   });
+
+  it("emits throttled actionable bridges in v2 oc-lane-supervisor and resets throttle on new turn", async () => {
+    const api = new InMemoryPluginApi();
+    let now = 50_000;
+    pluginDef.register(api, {
+      initialSessionTier: "standard",
+      sessionsReader: () => ({}),
+      sessionsWriter: () => {},
+      clock: () => now,
+    });
+
+    const ctx = { sessionId: "v2-bridge-s1", channelId: "telegram" };
+    await api.dispatchHook("before_agent_run", { prompt: "Turn 1", channelId: "telegram" }, ctx);
+
+    const emittedTurn1: number[] = [];
+    for (let i = 1; i <= 17; i++) {
+      now += 100;
+      const [res] = await api.dispatchHook(
+        "tool_result_persist",
+        {
+          toolName: "read",
+          message: { role: "toolResult", toolName: "read", content: [{ type: "text", text: `r${i}` }] },
+        },
+        ctx,
+      );
+      const text =
+        (res as { message?: { content?: Array<{ text: string }> } })?.message?.content
+          ?.map((c) => c.text)
+          .join("\n") ?? "";
+      if (text.includes("Turn density high")) emittedTurn1.push(i);
+    }
+    expect(emittedTurn1).toEqual([12, 17]);
+
+    // New turn resets bridge throttle cleanly (emits at action 12 again, no stale cross-turn state)
+    await api.dispatchHook("before_agent_run", { prompt: "Turn 2", channelId: "telegram" }, ctx);
+    const emittedTurn2: number[] = [];
+    for (let i = 1; i <= 12; i++) {
+      now += 100;
+      const [res] = await api.dispatchHook(
+        "tool_result_persist",
+        {
+          toolName: "read",
+          message: { role: "toolResult", toolName: "read", content: [{ type: "text", text: `t2-${i}` }] },
+        },
+        ctx,
+      );
+      const text =
+        (res as { message?: { content?: Array<{ text: string }> } })?.message?.content
+          ?.map((c) => c.text)
+          .join("\n") ?? "";
+      if (text.includes("Turn density high")) emittedTurn2.push(i);
+    }
+    expect(emittedTurn2).toEqual([12]);
+  });
 });

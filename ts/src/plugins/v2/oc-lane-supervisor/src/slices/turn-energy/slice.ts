@@ -30,7 +30,7 @@ export interface TurnEnergySliceHandle {
     toolName: string;
     isZeroDeltaPoll: boolean;
     payloadBytes: number;
-  }) => void;
+  }) => { updated: boolean; remainingEnergy?: number; notice?: string };
   onAgentEnd: (event: HookEvent, ctx?: HookContext) => void;
   getHealthCard: (sessionId: string) => ReturnType<typeof getSessionHealthCard>;
 }
@@ -112,7 +112,7 @@ export function bindTurnEnergySlice(
       return undefined;
     },
     onToolResultPersist(params) {
-      applyToolEnergyDrain(state, config, { ...params, nowMs: clock() });
+      return applyToolEnergyDrain(state, config, { ...params, nowMs: clock() });
     },
     onAgentEnd(event: HookEvent, ctx?: HookContext) {
       const sessionId = resolveSessionId(event, ctx);

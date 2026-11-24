@@ -14,11 +14,19 @@ import {
   applyEnergyAction,
   evaluateTurnEfficiencyScore,
   updateSessionReputation,
+  formatEnergyEnvelopeHeader,
   formatHabitTelemetryCard,
   DEFAULT_ENERGY_CONFIG,
+  TARGETED_READ_TOOLS,
+  POLL_TOOLS,
   type SessionReputation,
   type TurnEnergyState,
 } from "../../../../../shared/efficiency-energy-logic.js";
+import {
+  createBridgeThrottleState,
+  evaluateBridgeTrigger,
+  renderActionableBridge,
+} from "../../../../../shared/actionable-bridge-logic.js";
 import { evaluateAgentRunAdmission } from "../../idle-guard-logic.js";
 import type { TurnEnergySliceConfig, TurnEnergySliceState } from "./state.js";
 
@@ -74,6 +82,7 @@ export function startTurnEnergy(
 
   const energy = initTurnEnergy(rep.tier);
   state.turnEnergy.set(sessionId, energy);
+  state.bridgeThrottle.set(sessionId, createBridgeThrottleState());
   state.turnStartTimes.set(sessionId, nowMs);
   state.lastToolTimes.set(sessionId, nowMs);
   return { suppressed: false, energy };
@@ -98,7 +107,7 @@ export function applyToolEnergyDrain(
     payloadBytes: number;
     nowMs: number;
   },
-): { updated: boolean; remainingEnergy?: number } {
+): { updated: boolean; remainingEnergy?: number; notice?: string } {
   if (!config.enabled) return { updated: false };
   const current = state.turnEnergy.get(params.sessionId);
   if (!current) return { updated: false };
@@ -107,25 +116,33 @@ export function applyToolEnergyDrain(
   const durationMs = Math.max(0, params.nowMs - lastTime);
   state.lastToolTimes.set(params.sessionId, params.nowMs);
 
-  const isDelegation =
-    params.toolName === "sessions_spawn" ||
-    params.toolName === "task_dispatch" ||
-    params.toolName === "durable_spawn";
-
   const next = applyEnergyAction(
     current,
     {
       toolName: params.toolName,
       durationMs,
       payloadBytes: params.payloadBytes,
-      isPoll: params.isZeroDeltaPoll || params.toolName === "process",
+      isPoll: params.isZeroDeltaPoll || POLL_TOOLS.has(params.toolName),
       isZeroDelta: params.isZeroDeltaPoll,
-      isDelegation,
+      isTargetedRead: TARGETED_READ_TOOLS.has(params.toolName),
     },
     DEFAULT_ENERGY_CONFIG,
   );
   state.turnEnergy.set(params.sessionId, next);
-  return { updated: true, remainingEnergy: next.remainingEnergy };
+
+  const throttle = state.bridgeThrottle.get(params.sessionId) ?? createBridgeThrottleState();
+  const bridge = evaluateBridgeTrigger(next, throttle);
+  state.bridgeThrottle.set(params.sessionId, bridge.nextThrottle);
+
+  const header = formatEnergyEnvelopeHeader(next);
+  let notice: string | undefined;
+  if (bridge.shouldEmit) {
+    notice = renderActionableBridge(next, header);
+  } else if (config.enableHeaders) {
+    notice = `\n\n${header}`;
+  }
+
+  return { updated: true, remainingEnergy: next.remainingEnergy, notice };
 }
 
 export function finalizeTurnEnergy(

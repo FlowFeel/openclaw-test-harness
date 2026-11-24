@@ -19,10 +19,19 @@ import {
   updateSessionReputation,
   formatEnergyEnvelopeHeader,
   formatHabitTelemetryCard,
+  TARGETED_READ_TOOLS,
+  POLL_TOOLS,
   type TurnEnergyState,
   type SessionTier,
   type SessionReputation,
 } from "../../shared/efficiency-energy-logic.js";
+import {
+  createBridgeThrottleState,
+  evaluateBridgeTrigger,
+  renderActionableBridge,
+  appendNoticeToToolMessage,
+  type BridgeThrottleState,
+} from "../../shared/actionable-bridge-logic.js";
 /**
  * OC Session Guard — session bloat and idle admission management plugin.
  *
@@ -167,7 +176,7 @@ export default definePluginEntry({
     const sessionTurnEnergy = new Map<string, TurnEnergyState>();
     const sessionTurnStartTimes = new Map<string, number>();
     const sessionLastToolTimes = new Map<string, number>();
-    const sessionLastBridgeAction = new Map<string, number>();
+    const sessionBridgeThrottle = new Map<string, BridgeThrottleState>();
 
     const reader: SessionsReader = (path) => readSessions(path ?? sessionsPath);
     const writer: SessionsWriter = (data, path) =>
@@ -260,60 +269,34 @@ export default definePluginEntry({
             payloadBytes = 0;
           }
 
-          const isDelegation =
-            toolName === "sessions_spawn" ||
-            toolName === "task_dispatch" ||
-            toolName === "durable_spawn";
-          const isPoll = toolName === "process" || toolName === "task_status";
-          const isZeroDelta = pollResult.isZeroDelta;
-          const isTargetedRead =
-            toolName === "read" ||
-            toolName === "memory_search" ||
-            toolName === "memory_get";
-
           const nextEnergyState = applyEnergyAction(energyState, {
             toolName,
             durationMs,
             payloadBytes,
-            isDelegation,
-            isPoll,
-            isZeroDelta,
-            isTargetedRead,
+            isPoll: POLL_TOOLS.has(toolName),
+            isZeroDelta: pollResult.isZeroDelta,
+            isTargetedRead: TARGETED_READ_TOOLS.has(toolName),
           });
           sessionTurnEnergy.set(sessionKey, nextEnergyState);
 
-          // Phase 3: Cognitive envelope header & actionable bridge in toolResult
+          // Phase 3: Cognitive envelope header & actionable bridge via shared pure module
+          const throttle = sessionBridgeThrottle.get(sessionKey) ?? createBridgeThrottleState();
+          const bridge = evaluateBridgeTrigger(nextEnergyState, throttle);
+          sessionBridgeThrottle.set(sessionKey, bridge.nextThrottle);
+
           const header = formatEnergyEnvelopeHeader(nextEnergyState);
           let notice = "";
-
-          // Actionable bridge: emit when energy is low (<=200) or actionsCount >= 12, throttled to max once per 5 actions
-          const lastBridge = sessionLastBridgeAction.get(sessionKey) ?? -999;
-          const shouldBridge =
-            (nextEnergyState.remainingEnergy <= 200 || nextEnergyState.actionsCount >= 12) &&
-            nextEnergyState.actionsCount - lastBridge >= 5;
-
-          if (shouldBridge) {
-            sessionLastBridgeAction.set(sessionKey, nextEnergyState.actionsCount);
-            notice = `\n\n${header}\n⚡ Turn density high (${nextEnergyState.actionsCount} actions). To avoid hitting lane timeout (600s), offload remaining inspection:\n  → sessions_spawn(task="...", runtime="subagent") followed by sessions_yield()\n  → Or batch atomic steps via exec_pipeline(steps=[...])`;
+          if (bridge.shouldEmit) {
+            notice = renderActionableBridge(nextEnergyState, header);
           } else if (enableEnergyHeaders) {
             notice = `\n\n${header}`;
           }
 
           if (notice) {
-            if (Array.isArray(currentMessage.content)) {
-              currentMessage = {
-                ...currentMessage,
-                content: [
-                  ...currentMessage.content,
-                  { type: "text", text: notice },
-                ],
-              };
-            } else if (typeof currentMessage.content === "string") {
-              currentMessage = {
-                ...currentMessage,
-                content: currentMessage.content + notice,
-              };
-            }
+            currentMessage = appendNoticeToToolMessage(
+              currentMessage,
+              notice,
+            ) as Record<string, unknown>;
           }
         }
 
@@ -388,6 +371,7 @@ export default definePluginEntry({
         const rep = sessionReputations.get(sessionKey);
         const tier = rep ? rep.tier : initialSessionTier;
         sessionTurnEnergy.set(sessionKey, initTurnEnergy(tier));
+        sessionBridgeThrottle.set(sessionKey, createBridgeThrottleState());
       }
 
       if (!suppressIdle) {

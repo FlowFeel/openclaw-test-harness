@@ -148,4 +148,49 @@ describe("Feature: Incentive-Based Energy Budgeting & OWA Cognitive Economics", 
       }
     }
   });
+
+  it("Scenario: Lane supervisor v2 emits throttled actionable bridges and resets throttle across turns", async () => {
+    const api = new InMemoryPluginApi();
+    pluginDef.register(api, { initialSessionTier: "standard", enableEnergyBudget: true });
+
+    const ctx = { sessionId: "v2-bdd-bridge", channelId: "telegram" };
+    await api.dispatchHook("before_agent_run", { prompt: "Turn 1", channelId: "telegram" }, ctx);
+
+    const turn1Emits: number[] = [];
+    for (let i = 1; i <= 17; i++) {
+      const [res] = await api.dispatchHook(
+        "tool_result_persist",
+        {
+          toolName: "read",
+          message: { role: "toolResult", toolName: "read", content: [{ type: "text", text: `t1-${i}` }] },
+        },
+        ctx,
+      );
+      const text =
+        (res as { message?: { content?: Array<{ text: string }> } })?.message?.content
+          ?.map((c) => c.text)
+          .join("\n") ?? "";
+      if (text.includes("Turn density high")) turn1Emits.push(i);
+    }
+    expect(turn1Emits).toEqual([12, 17]);
+
+    await api.dispatchHook("before_agent_run", { prompt: "Turn 2", channelId: "telegram" }, ctx);
+    const turn2Emits: number[] = [];
+    for (let i = 1; i <= 12; i++) {
+      const [res] = await api.dispatchHook(
+        "tool_result_persist",
+        {
+          toolName: "read",
+          message: { role: "toolResult", toolName: "read", content: [{ type: "text", text: `t2-${i}` }] },
+        },
+        ctx,
+      );
+      const text =
+        (res as { message?: { content?: Array<{ text: string }> } })?.message?.content
+          ?.map((c) => c.text)
+          .join("\n") ?? "";
+      if (text.includes("Turn density high")) turn2Emits.push(i);
+    }
+    expect(turn2Emits).toEqual([12]);
+  });
 });

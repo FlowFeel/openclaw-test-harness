@@ -29,3 +29,9 @@ Feature: Incentive-Based Energy Budgeting & OWA Cognitive Economics
     Then a constructive bridge suggesting sessions_spawn or exec_pipeline is emitted
     And the bridge is throttled to at most once every 5 actions
     And zero stop-sign nagging warnings are appended
+
+  Scenario: Lane supervisor v2 emits throttled actionable bridges and resets throttle across turns
+    Given a v2 oc-lane-supervisor engine with standard turn energy
+    When 17 tool actions are persisted in turn 1 and 12 tool actions in turn 2
+    Then turn 1 emits the actionable bridge on actions 12 and 17
+    And turn 2 resets the bridge throttle and emits again on action 12
