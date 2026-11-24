@@ -14,11 +14,19 @@ import {
   applyEnergyAction,
   evaluateTurnEfficiencyScore,
   updateSessionReputation,
+  formatEnergyEnvelopeHeader,
   formatHabitTelemetryCard,
   DEFAULT_ENERGY_CONFIG,
+  TARGETED_READ_TOOLS,
+  POLL_TOOLS,
   type SessionReputation,
   type TurnEnergyState,
 } from "../../../../../shared/efficiency-energy-logic.js";
+import {
+  createBridgeThrottleState,
+  evaluateBridgeTrigger,
+  renderActionableBridge,
+} from "../../../../../shared/actionable-bridge-logic.js";
 import { evaluateAgentRunAdmission } from "../../idle-guard-logic.js";
 import type { TurnEnergySliceConfig, TurnEnergySliceState } from "./state.js";
 
@@ -74,26 +82,18 @@ export function startTurnEnergy(
 
   const energy = initTurnEnergy(rep.tier);
   state.turnEnergy.set(sessionId, energy);
+  state.bridgeThrottle.set(sessionId, createBridgeThrottleState());
   state.turnStartTimes.set(sessionId, nowMs);
   state.lastToolTimes.set(sessionId, nowMs);
   return { suppressed: false, energy };
 }
 
 export function evaluateEnergyGate(
-  state: TurnEnergySliceState,
-  config: TurnEnergySliceConfig,
-  sessionId: string,
+  _state: TurnEnergySliceState,
+  _config: TurnEnergySliceConfig,
+  _sessionId: string,
 ): { blocked: boolean; blockReason?: string } {
-  if (!config.enabled) return { blocked: false };
-  const energy = state.turnEnergy.get(sessionId);
-  if (!energy) return { blocked: false };
-  if (energy.remainingEnergy <= 0 || energy.isGated) {
-    return {
-      blocked: true,
-      blockReason:
-        "Turn energy budget exhausted — entering soft landing. Synthesize visible reply from collected findings.",
-    };
-  }
+  // Pure OWA Non-Gating: tool execution is never blocked due to energy exhaustion
   return { blocked: false };
 }
 
@@ -107,7 +107,7 @@ export function applyToolEnergyDrain(
     payloadBytes: number;
     nowMs: number;
   },
-): { updated: boolean; remainingEnergy?: number } {
+): { updated: boolean; remainingEnergy?: number; notice?: string } {
   if (!config.enabled) return { updated: false };
   const current = state.turnEnergy.get(params.sessionId);
   if (!current) return { updated: false };
@@ -122,14 +122,27 @@ export function applyToolEnergyDrain(
       toolName: params.toolName,
       durationMs,
       payloadBytes: params.payloadBytes,
-      isPoll: params.isZeroDeltaPoll || params.toolName === "process",
+      isPoll: params.isZeroDeltaPoll || POLL_TOOLS.has(params.toolName),
       isZeroDelta: params.isZeroDeltaPoll,
-      isDelegation: params.toolName === "task_dispatch",
+      isTargetedRead: TARGETED_READ_TOOLS.has(params.toolName),
     },
     DEFAULT_ENERGY_CONFIG,
   );
   state.turnEnergy.set(params.sessionId, next);
-  return { updated: true, remainingEnergy: next.remainingEnergy };
+
+  const throttle = state.bridgeThrottle.get(params.sessionId) ?? createBridgeThrottleState();
+  const bridge = evaluateBridgeTrigger(next, throttle);
+  state.bridgeThrottle.set(params.sessionId, bridge.nextThrottle);
+
+  const header = formatEnergyEnvelopeHeader(next);
+  let notice: string | undefined;
+  if (bridge.shouldEmit) {
+    notice = renderActionableBridge(next, header);
+  } else if (config.enableHeaders) {
+    notice = `\n\n${header}`;
+  }
+
+  return { updated: true, remainingEnergy: next.remainingEnergy, notice };
 }
 
 export function finalizeTurnEnergy(

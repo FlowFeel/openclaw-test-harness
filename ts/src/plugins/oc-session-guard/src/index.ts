@@ -19,10 +19,19 @@ import {
   updateSessionReputation,
   formatEnergyEnvelopeHeader,
   formatHabitTelemetryCard,
+  TARGETED_READ_TOOLS,
+  POLL_TOOLS,
   type TurnEnergyState,
   type SessionTier,
   type SessionReputation,
 } from "../../shared/efficiency-energy-logic.js";
+import {
+  createBridgeThrottleState,
+  evaluateBridgeTrigger,
+  renderActionableBridge,
+  appendNoticeToToolMessage,
+  type BridgeThrottleState,
+} from "../../shared/actionable-bridge-logic.js";
 /**
  * OC Session Guard — session bloat and idle admission management plugin.
  *
@@ -153,7 +162,7 @@ export default definePluginEntry({
     };
 
     // T-586: Parameter circuit breaker state
-    let circuitBreakerState: CircuitBreakerState = createInitialCircuitBreakerState();
+    const circuitBreakerState: CircuitBreakerState = createInitialCircuitBreakerState();
     const circuitBreakerConfig: CircuitBreakerConfig = {
       maxConsecutiveIdenticalErrors: cfg.maxConsecutiveIdenticalErrors,
       enableErrorCircuitBreaker: cfg.enableErrorCircuitBreaker,
@@ -167,6 +176,7 @@ export default definePluginEntry({
     const sessionTurnEnergy = new Map<string, TurnEnergyState>();
     const sessionTurnStartTimes = new Map<string, number>();
     const sessionLastToolTimes = new Map<string, number>();
+    const sessionBridgeThrottle = new Map<string, BridgeThrottleState>();
 
     const reader: SessionsReader = (path) => readSessions(path ?? sessionsPath);
     const writer: SessionsWriter = (data, path) =>
@@ -195,7 +205,7 @@ export default definePluginEntry({
           };
         }
 
-        // 2. Evaluate Turn Energy Budget
+        // 2. Evaluate Turn Energy Budget (Strict OWA Non-Gating: never block execution)
         if (enableEnergyBudget) {
           let energyState = sessionTurnEnergy.get(sessionKey);
           if (!energyState) {
@@ -203,16 +213,6 @@ export default definePluginEntry({
             const tier = rep ? rep.tier : initialSessionTier;
             energyState = initTurnEnergy(tier);
             sessionTurnEnergy.set(sessionKey, energyState);
-          }
-
-          if (energyState.isGated) {
-            const blockReason =
-              "🛑 Turn energy budget exhausted. Synthesize your visible reply with findings and next steps immediately.";
-            api.logger?.warn?.(`[oc-session-guard] energy budget exhausted for ${sessionKey}, gating ${toolName}`);
-            return {
-              block: true,
-              blockReason,
-            };
           }
         }
 
@@ -269,54 +269,34 @@ export default definePluginEntry({
             payloadBytes = 0;
           }
 
-          const isDelegation =
-            toolName === "sessions_spawn" ||
-            toolName === "task_dispatch" ||
-            toolName === "durable_spawn";
-          const isPoll = toolName === "process" || toolName === "task_status";
-          const isZeroDelta = pollResult.isZeroDelta;
-          const isTargetedRead =
-            toolName === "read" ||
-            toolName === "memory_search" ||
-            toolName === "memory_get";
-
           const nextEnergyState = applyEnergyAction(energyState, {
             toolName,
             durationMs,
             payloadBytes,
-            isDelegation,
-            isPoll,
-            isZeroDelta,
-            isTargetedRead,
+            isPoll: POLL_TOOLS.has(toolName),
+            isZeroDelta: pollResult.isZeroDelta,
+            isTargetedRead: TARGETED_READ_TOOLS.has(toolName),
           });
           sessionTurnEnergy.set(sessionKey, nextEnergyState);
 
-          // Phase 3: Cognitive envelope header & advisory in toolResult
+          // Phase 3: Cognitive envelope header & actionable bridge via shared pure module
+          const throttle = sessionBridgeThrottle.get(sessionKey) ?? createBridgeThrottleState();
+          const bridge = evaluateBridgeTrigger(nextEnergyState, throttle);
+          sessionBridgeThrottle.set(sessionKey, bridge.nextThrottle);
+
           const header = formatEnergyEnvelopeHeader(nextEnergyState);
           let notice = "";
-          if (nextEnergyState.isGated) {
-            notice = `\n\n${header}\n🛑 [oc-session-guard] Turn energy budget exhausted. Synthesize visible answer immediately.`;
-          } else if (nextEnergyState.advisoryEmitted) {
-            notice = `\n\n${header}\n⚡ [oc-session-guard] Energy advisory: wrap up tool execution and begin synthesis.`;
+          if (bridge.shouldEmit) {
+            notice = renderActionableBridge(nextEnergyState, header);
           } else if (enableEnergyHeaders) {
             notice = `\n\n${header}`;
           }
 
           if (notice) {
-            if (Array.isArray(currentMessage.content)) {
-              currentMessage = {
-                ...currentMessage,
-                content: [
-                  ...currentMessage.content,
-                  { type: "text", text: notice },
-                ],
-              };
-            } else if (typeof currentMessage.content === "string") {
-              currentMessage = {
-                ...currentMessage,
-                content: currentMessage.content + notice,
-              };
-            }
+            currentMessage = appendNoticeToToolMessage(
+              currentMessage,
+              notice,
+            ) as Record<string, unknown>;
           }
         }
 
@@ -391,6 +371,7 @@ export default definePluginEntry({
         const rep = sessionReputations.get(sessionKey);
         const tier = rep ? rep.tier : initialSessionTier;
         sessionTurnEnergy.set(sessionKey, initTurnEnergy(tier));
+        sessionBridgeThrottle.set(sessionKey, createBridgeThrottleState());
       }
 
       if (!suppressIdle) {

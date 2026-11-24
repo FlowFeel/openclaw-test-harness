@@ -3,10 +3,11 @@ Feature: Plugins v2 Lane Supervisor — Turn Energy, Poll Hygiene, Admission & T
   I want modular turn-energy budgeting, zero-delta poll collapsing, subagent semaphore tracking, and topic orphan recovery
   So that runaway poll loops enter soft landing cleanly and topic registries stay healthy
 
-  Scenario: Zero-delta poll loop exhausts constrained turn energy and triggers soft landing
+  Scenario: Zero-delta poll loop exhausts constrained turn energy and tracks diagnostics without blocking
     Given an oc-lane-supervisor engine with initialSessionTier "constrained"
     When a session starts a turn and emits 6 zero-delta poll tool results
-    Then before_tool_call blocks further tool calls with "Turn energy budget exhausted"
+    Then before_tool_call does not block further tool calls under OWA
+    And the session health tracks diagnostic exhaustion
 
   Scenario: Idle whitespace prompt is suppressed before model invocation
     Given an oc-lane-supervisor engine with suppressIdleHeartbeats enabled

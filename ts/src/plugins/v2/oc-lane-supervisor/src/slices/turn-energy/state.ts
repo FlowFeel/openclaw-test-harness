@@ -14,6 +14,7 @@ import type {
   SessionReputation,
   SessionTier,
 } from "../../../../../shared/efficiency-energy-logic.js";
+import type { BridgeThrottleState } from "../../../../../shared/actionable-bridge-logic.js";
 
 export interface TurnEnergySliceConfig {
   enabled: boolean;
@@ -25,6 +26,7 @@ export interface TurnEnergySliceConfig {
 export interface TurnEnergySliceState {
   readonly reputations: Map<string, SessionReputation>;
   readonly turnEnergy: Map<string, TurnEnergyState>;
+  readonly bridgeThrottle: Map<string, BridgeThrottleState>;
   readonly turnStartTimes: Map<string, number>;
   readonly lastToolTimes: Map<string, number>;
 }
@@ -33,6 +35,7 @@ export function createTurnEnergySliceState(): TurnEnergySliceState {
   return {
     reputations: new Map(),
     turnEnergy: new Map(),
+    bridgeThrottle: new Map(),
     turnStartTimes: new Map(),
     lastToolTimes: new Map(),
   };

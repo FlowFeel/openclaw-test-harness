@@ -73,10 +73,10 @@ describe("Phase 2: oc-session-guard Energy Budget & Soft Landing Integration", (
     expect(persistRes.message.content.some((c) => c.text.includes("Energy advisory"))).toBe(false);
   });
 
-  it("injects energy advisory into tool result and gates tool execution when energy is exhausted", async () => {
+  it("injects actionable bridge into tool result and keeps tool execution unblocked when energy is exhausted (Strict OWA)", async () => {
     const { api, hooks, warns } = createMockApi();
     // Start with constrained tier (600E) to easily exhaust
-    plugin.register(api as never, { initialSessionTier: "constrained" });
+    plugin.register(api as never, { initialSessionTier: "constrained", enableEnergyBudget: true });
 
     const beforeRun = getHook(hooks, "before_agent_run");
     const beforeTool = getHook(hooks, "before_tool_call");
@@ -86,8 +86,7 @@ describe("Phase 2: oc-session-guard Energy Budget & Soft Landing Integration", (
 
     await beforeRun.handler({ prompt: "Investigate" }, ctx);
 
-    // Run a heavy tool call or simulated multiple calls that exhaust the 600E pool
-    // e.g. 5 consecutive zero-delta polls (each zero-delta poll is -100E + poll drain)
+    // Run multiple zero-delta polls that exhaust the 600E pool
     for (let i = 0; i < 6; i++) {
       await persistTool.handler(
         {
@@ -102,15 +101,13 @@ describe("Phase 2: oc-session-guard Energy Budget & Soft Landing Integration", (
       );
     }
 
-    // Now energy should be exhausted. Next before_tool_call must be blocked with soft-landing message
+    // Now energy should be exhausted. Next before_tool_call MUST NOT be blocked under pure OWA
     const gateVerdict = (await beforeTool.handler(
       { toolName: "exec", params: { command: "ls" } },
       ctx,
-    )) as { block: boolean; blockReason: string };
+    )) as { block?: boolean; blockReason?: string } | undefined;
 
-    expect(gateVerdict.block).toBe(true);
-    expect(gateVerdict.blockReason).toContain("Turn energy budget exhausted");
-    expect(warns.some((w) => w.includes("energy budget exhausted"))).toBe(true);
+    expect(gateVerdict?.block).not.toBe(true);
   });
 
   it("updates rolling TES and session tier at agent_end", async () => {
