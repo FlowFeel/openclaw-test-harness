@@ -159,7 +159,7 @@ export default definePluginEntry({
     api.on("before_dispatch", async (event: HookEvent) => forecaster.onBeforeDispatch(event));
     api.on("session_start", async (event: HookEvent, ctx?: HookContext) => {
       try {
-        provisioning.onBeforeAgentRun(event, ctx);
+        provisioning.onSessionStart(event, ctx);
       } catch (err) {
         api.logger?.warn?.(`[oc-lane-supervisor] topic provisioning on session_start failed: ${String(err)}`);
       }

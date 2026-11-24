@@ -1,21 +1,29 @@
 /**
- * Topic Provisioning Pure Logic — slugification, path derivation, and template rendering.
+ * Topic Provisioning Pure Logic — identity extraction, non-repeating slugification,
+ * path derivation, and care-package skeleton assembly.
  *
  * @invariants
  * - Pure logic: zero filesystem or network I/O (Axiom 1).
  * - Deterministic outputs given inputs and injected clock (Axiom 2).
  * - Zero inline regexes (Axiom 6 structural hygiene): uses centralized regex patterns.
+ * - Non-repeating workspace slugs: never emits `topic-<id>-topic-<id>`.
  *
  * @dft
  * - Tested via slices/topic-provisioning/tests/logic.spec.ts.
  */
 
+import type { HookContext, HookEvent } from "../../../../../shared/types.js";
+import { TOPIC_CHAT_AND_THREAD_REGEX } from "../../../../../shared/regex-library.js";
 import {
   TOPIC_NON_ALPHANUMERIC_REGEX,
   TOPIC_LEADING_TRAILING_HYPHENS_REGEX,
   TELEGRAM_PREFIX_REGEX,
 } from "../../utils.js";
-import { TOPIC_CHAT_AND_THREAD_REGEX } from "../../../../../shared/regex-library.js";
+import {
+  renderCarePackageFrontmatter,
+  renderCarePackageBody,
+  renderOrientationSummary,
+} from "./template.js";
 
 export interface TopicOrientationParams {
   topicId: number;
@@ -36,6 +44,24 @@ export interface CarePackageSkeleton {
   carePackageRelativePath: string;
 }
 
+export interface ExtractedTopicContext {
+  topicId: number;
+  topicName: string;
+  chatId: string;
+  sessionKey: string | null;
+  createdBy: string;
+  injectionKey: string;
+}
+
+export function parsePositiveTopicId(val: unknown): number | null {
+  if (typeof val === "number" && Number.isFinite(val) && val > 0) return val;
+  if (typeof val === "string") {
+    const parsed = Number.parseInt(val, 10);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
 /**
  * Pure deterministic slugification for forum topic names.
  */
@@ -43,12 +69,14 @@ export function slugifyTopicName(name: string): string {
   const normalized = name.trim().toLowerCase();
   const slug = normalized
     .replace(TOPIC_NON_ALPHANUMERIC_REGEX, "-")
-    .replace(TOPIC_LEADING_TRAILING_HYPHENS_REGEX, "");
+    .replace(LEADING_TRAILING_HYPHENS_REGEX_REF, "");
   return slug || "unnamed-topic";
 }
 
+const LEADING_TRAILING_HYPHENS_REGEX_REF = TOPIC_LEADING_TRAILING_HYPHENS_REGEX;
+
 /**
- * Derives the topic home workspace directory path.
+ * Derives the topic home workspace directory path without repeating `topic-<id>`.
  */
 export function deriveTopicWorkspacePath(
   topicId: number,
@@ -56,6 +84,14 @@ export function deriveTopicWorkspacePath(
   workspaceRoot = "/home/node/.openclaw/workspace",
 ): string {
   const slug = slugifyTopicName(topicName);
+  const redundantSlugs = new Set([
+    "unnamed-topic",
+    `topic-${topicId}`,
+    String(topicId),
+  ]);
+  if (redundantSlugs.has(slug)) {
+    return `${workspaceRoot}/work/topic-${topicId}`;
+  }
   return `${workspaceRoot}/work/topic-${topicId}-${slug}`;
 }
 
@@ -84,79 +120,75 @@ export function deriveCarePackagePath(
 }
 
 /**
- * Pure template renderer for the Turn 0 orientation care package skeleton.
+ * Pure identity extractor from OpenClaw HookEvent + HookContext (with sessionKey fallback).
+ */
+export function extractTopicProvisioningContext(
+  event: HookEvent,
+  ctx?: HookContext,
+): ExtractedTopicContext | null {
+  const ctxRecord = ctx as Record<string, unknown> | undefined;
+  const eventRecord = event as Record<string, unknown> | undefined;
+
+  const rawSessionKey =
+    ctx?.sessionKey ?? event?.sessionKey ?? ctxRecord?.sessionId ?? eventRecord?.sessionId;
+  const sessionKeyStr = typeof rawSessionKey === "string" ? rawSessionKey : "";
+  const sessionKeyMatch = sessionKeyStr.match(TOPIC_CHAT_AND_THREAD_REGEX as RegExp);
+
+  const topicId = parsePositiveTopicId(
+    ctx?.topicId ?? event?.topicId ?? ctxRecord?.threadId ?? eventRecord?.threadId ?? sessionKeyMatch?.[2],
+  );
+  if (!topicId) return null;
+
+  const rawChatId = ctx?.chatId ?? event?.chatId ?? sessionKeyMatch?.[1];
+  const chatId = String(rawChatId ?? "telegram:default");
+  const topicName = String(ctx?.topicName ?? event?.topicName ?? `Topic ${topicId}`);
+
+  const rawCreatedBy =
+    ctxRecord?.sender ??
+    ctxRecord?.senderName ??
+    ctxRecord?.senderId ??
+    ctxRecord?.createdBy ??
+    eventRecord?.sender ??
+    eventRecord?.senderName ??
+    eventRecord?.senderId ??
+    eventRecord?.createdBy;
+
+  const injectionKey = String(
+    ctx?.sessionId ?? ctx?.sessionKey ?? event?.sessionId ?? event?.sessionKey ?? `topic:${topicId}`,
+  );
+
+  return {
+    topicId,
+    topicName,
+    chatId,
+    sessionKey: sessionKeyStr.length > 0 ? sessionKeyStr : null,
+    createdBy: rawCreatedBy ? String(rawCreatedBy) : "system",
+    injectionKey,
+  };
+}
+
+/**
+ * Pure template assembler for the Turn 0 orientation care package skeleton.
  */
 export function renderCarePackageSkeleton(params: TopicOrientationParams): CarePackageSkeleton {
-  const slug = slugifyTopicName(params.topicName);
-  const createdBy = params.createdBy ?? "system";
-  const generatedBy = params.generatedBy ?? "flowfeel-oc-lane-supervisor@0.2.0";
-  const sessionKeyYaml = params.sessionKey ? `"${params.sessionKey}"` : "null";
   const workspacePath = deriveTopicWorkspacePath(params.topicId, params.topicName, params.workspaceRoot);
   const { relativePath } = deriveCarePackagePath(params.chatId, params.topicId, params.workspaceRoot);
 
-  const frontmatter = [
-    "---",
-    `uri: topics/${params.chatId}/${params.topicId}/care-package`,
-    `title: "${params.topicName}"`,
-    `topic_id: ${params.topicId}`,
-    `chat_id: "${params.chatId}"`,
-    `session_key: ${sessionKeyYaml}`,
-    `created: "${params.createdUtc}"`,
-    `created_by: "${createdBy}"`,
-    `generated_by: "${generatedBy}"`,
-    "status: orientation",
-    "---",
-  ].join("\n");
+  const templateInput = {
+    topicId: params.topicId,
+    topicName: params.topicName,
+    chatId: params.chatId,
+    sessionKey: params.sessionKey,
+    createdUtc: params.createdUtc,
+    createdBy: params.createdBy ?? "system",
+    generatedBy: params.generatedBy ?? "flowfeel-oc-lane-supervisor@0.2.0",
+    workspacePath,
+    carePackageRelativePath: relativePath,
+  };
 
-  const markdownBody = `
-# Care Package & Topic Orientation: ${params.topicName} (Topic ${params.topicId})
-
-> **Orientation Snapshot.** This package contains orientation only. The live transcript is the authoritative record of current state until the archive-time care package is written.
-
----
-
-## 1. Your Dedicated Workspace Directory
-
-Permanent scripts, utilities, and tests belong in your topic home:
-\`${workspacePath}/\`
-├── \`docs/\`        # Specifications, research notes, domain references
-├── \`scripts/\`     # Reusable Python scripts and CLI utilities
-├── \`tests/\`       # Automated tests (unit, property, hypothesis)
-└── \`state/\`       # Persistent local states or manifests (avoid Git packfile churn)
-
----
-
-## 2. Tool Discovery & Pre-Installed Stack
-
-Before attempting ad-hoc package installations or writing duplicate helpers:
-- **Inspect \`tools/CATALOG.md\`:** The living capability index for available packages.
-- **Pre-installed CLI Binaries (in PATH):** \`pandoc\` · \`pdftotext\` · \`pdfinfo\` · \`pdfimages\` · \`pdftoppm\` · \`pdfunite\` · \`pdfseparate\` · \`R\` · \`Rscript\` · \`git-lfs\`.
-- **Pre-installed Python Stack (\`lib/python\` via \`uv run\`):**
-  - **Office Stack:** \`python-pptx\` (slides/shapes), \`openpyxl\` (spreadsheets/formulas), \`python-docx\` (manuscripts).
-  - **PDF Tooling:** \`fitz\` (PyMuPDF), \`pypdf\`, \`reportlab\`, \`weasyprint\`.
-  - **Science & Stats:** \`numpy\`, \`scipy\`, \`pandas\`, \`statsmodels\`, \`sklearn\`, \`sympy\`, \`hypothesis\`.
-  - **Network & Parsing:** \`httpx\`, \`requests\`, \`beautifulsoup4\`.
-  - **Specialized Toolchains:** \`lib/python/refverify\` (citation QC), \`anthro-tools\` (CLIP/image), \`lib/python/mdrag\` (AST parsing).
-
-**Root Partition Warning:** The root partition (\`/\`) has only ~8GB total space. Never run bare \`pip install\` or download heavy weights directly to \`~/\`. Use \`lib/python\` via \`uv run\` or run inside container sandboxes.
-
----
-
-## 3. Core Working Principles
-
-- **No Production Access:** Zero SSH fixes or direct database mutations. CI/CD and deployment pipelines only.
-- **Branch Policy:** Named feature branches (\`feat/*\`, \`fix/*\`), pull requests before merge, no direct commits to \`main\`.
-- **Draft Persistence:** Persist all working notes, tables, and intermediate analyses to \`drafts/\` or your topic directory immediately; in-memory notes vanish at session close.
-- **Open-World Assumption (OWA):** Ingestion boundaries accept unpredictable external inputs (\`extra="allow"\`); internal analytical records enforce strict invariant schemas (\`extra="forbid"\` via \`InvariantStatic\`).
-- **Discrete Registration & Non-Interpolation:** Data curation is strictly registration, not narrative smoothing. Do not invent synthetic data or smooth away gaps; record fragmented witnesses exactly as they are.
-- **ID-Path Parity:** Deterministic 1:1 correspondence between entity URNs/URIs and their filesystem paths.
-- **Thoroughness Over Brevity:** Output and thinking require sufficient token length to optimize reasoning and analytical depth. Analytical completeness precedes compression.
-- **Planning is First-Class:** Deliberate architecture and specification precede raw execution.
-`.trim();
-
-  const markdown = `${frontmatter}\n\n${markdownBody}\n`;
-
-  const summaryInjection = `[Topic Orientation] Topic ${params.topicId} ("${params.topicName}") workspace provisioned at ${workspacePath}. Dedicated care package dropped at ${relativePath}. Review tools/CATALOG.md before running package installs.`;
+  const frontmatter = renderCarePackageFrontmatter(templateInput);
+  const markdown = `${frontmatter}\n\n${renderCarePackageBody(templateInput)}\n`;
+  const summaryInjection = renderOrientationSummary(templateInput);
 
   return {
     frontmatter,

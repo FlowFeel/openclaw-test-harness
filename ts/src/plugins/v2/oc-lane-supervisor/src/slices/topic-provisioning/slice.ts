@@ -1,9 +1,11 @@
 /**
- * Topic Provisioning Slice Adapter — binds before_agent_run to provision workspace and drop care package.
+ * Topic Provisioning Slice Adapter — binds session_start, before_agent_run, and
+ * before_prompt_build to provision workspaces and deliver Turn 0 orientation.
  *
  * @invariants
- * - Pure I/O mediated via TopicProvisioningIO (A1, A5).
- * - Idempotent: checks in-memory state and disk presence before touching filesystem.
+ * - Thin adapter: delegates identity extraction to logic.ts, filesystem I/O to io.ts,
+ *   and state transitions to state.ts (A1, A5, A6).
+ * - Never throws inside fail-closed lifecycle hooks.
  *
  * @dft
  * - Tested via slices/topic-provisioning/tests/slice.spec.ts with InMemoryTopicProvisioningIO.
@@ -11,30 +13,27 @@
 
 import type { PluginApi, HookEvent, HookContext } from "../../../../../shared/types.js";
 import {
+  extractTopicProvisioningContext,
   renderCarePackageSkeleton,
-  type CarePackageSkeleton,
 } from "./logic.js";
-import { TOPIC_CHAT_AND_THREAD_REGEX } from "../../../../../shared/regex-library.js";
-import { NodeFsTopicProvisioningIO, type TopicProvisioningIO } from "./io.js";
+import {
+  NodeFsTopicProvisioningIO,
+  scaffoldTopicWorkspace,
+  type TopicProvisioningIO,
+} from "./io.js";
 import {
   createTopicProvisioningSliceState,
   markTopicProvisioned,
+  enqueueOrientationInjection,
+  dequeueOrientationInjection,
   type TopicProvisioningSliceConfig,
 } from "./state.js";
 
 export interface TopicProvisioningSliceHandle {
+  onSessionStart: (event: HookEvent, ctx?: HookContext) => void;
   onBeforeAgentRun: (event: HookEvent, ctx?: HookContext) => HookEvent;
   consumeOrientationInjection: (sessionKey: string) => string | undefined;
   isTopicProvisioned: (topicId: number) => boolean;
-}
-
-function parseTopicId(val: unknown): number | null {
-  if (typeof val === "number" && Number.isFinite(val) && val > 0) return val;
-  if (typeof val === "string") {
-    const parsed = Number.parseInt(val, 10);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  return null;
 }
 
 export function bindTopicProvisioningSlice(
@@ -47,121 +46,59 @@ export function bindTopicProvisioningSlice(
   const clock = config.clock ?? (() => Date.now());
 
   let state = createTopicProvisioningSliceState();
-  const pendingInjections = new Map<string, string>();
+
+  function provision(event: HookEvent, ctx?: HookContext): string | undefined {
+    if (!enabled) return undefined;
+    const extracted = extractTopicProvisioningContext(event, ctx);
+    if (!extracted || state.provisionedTopicIds.has(extracted.topicId)) {
+      return undefined;
+    }
+
+    const skeleton = renderCarePackageSkeleton({
+      topicId: extracted.topicId,
+      topicName: extracted.topicName,
+      chatId: extracted.chatId,
+      sessionKey: extracted.sessionKey,
+      createdUtc: new Date(clock()).toISOString(),
+      createdBy: extracted.createdBy,
+      workspaceRoot,
+    });
+
+    const scaffold = scaffoldTopicWorkspace(io, skeleton, workspaceRoot);
+    if (!scaffold.ok) {
+      api.logger?.warn?.(
+        `[oc-lane-supervisor] topic ${extracted.topicId} provisioning I/O failed (fail-open): ${scaffold.error}`,
+      );
+      return undefined;
+    }
+    if (scaffold.created) {
+      api.logger?.info?.(
+        `[oc-lane-supervisor] provisioned topic ${extracted.topicId} workspace at ${skeleton.workspacePath}`,
+      );
+    }
+
+    state = markTopicProvisioned(state, extracted.topicId);
+    state = enqueueOrientationInjection(state, extracted.injectionKey, skeleton.summaryInjection);
+    return skeleton.summaryInjection;
+  }
 
   return {
+    onSessionStart(event: HookEvent, ctx?: HookContext): void {
+      provision(event, ctx);
+    },
     onBeforeAgentRun(event: HookEvent, ctx?: HookContext): HookEvent {
-      if (!enabled) return event;
-
-      const rawSessionKey =
-        ctx?.sessionKey ??
-        event?.sessionKey ??
-        (ctx as Record<string, unknown> | undefined)?.sessionId ??
-        (event as Record<string, unknown> | undefined)?.sessionId;
-      const sessionKeyStr = typeof rawSessionKey === "string" ? rawSessionKey : "";
-      const sessionKeyMatch = sessionKeyStr.match(TOPIC_CHAT_AND_THREAD_REGEX as RegExp);
-
-      const rawTopicId =
-        ctx?.topicId ??
-        event?.topicId ??
-        (ctx as Record<string, unknown> | undefined)?.threadId ??
-        (event as Record<string, unknown> | undefined)?.threadId ??
-        sessionKeyMatch?.[2];
-
-      const topicId = parseTopicId(rawTopicId);
-      if (!topicId) return event;
-
-      // In-memory cache hit: already provisioned in this daemon lifecycle
-      if (state.provisionedTopicIds.has(topicId)) {
-        return event;
-      }
-
-      const rawChatId =
-        ctx?.chatId ??
-        event?.chatId ??
-        sessionKeyMatch?.[1];
-      const chatId = String(rawChatId ?? "telegram:default");
-
-      const topicName =
-        String(ctx?.topicName ?? event?.topicName ?? `Topic ${topicId}`);
-      const sessionKey = sessionKeyStr.length > 0 ? sessionKeyStr : null;
-      const createdUtc = new Date(clock()).toISOString();
-
-      const rawCreatedBy =
-        (ctx as Record<string, unknown> | undefined)?.sender ??
-        (ctx as Record<string, unknown> | undefined)?.senderName ??
-        (ctx as Record<string, unknown> | undefined)?.senderId ??
-        (ctx as Record<string, unknown> | undefined)?.createdBy ??
-        (event as Record<string, unknown> | undefined)?.sender ??
-        (event as Record<string, unknown> | undefined)?.senderName ??
-        (event as Record<string, unknown> | undefined)?.senderId ??
-        (event as Record<string, unknown> | undefined)?.createdBy;
-      const createdBy = rawCreatedBy ? String(rawCreatedBy) : "system";
-
-      const skeleton: CarePackageSkeleton = renderCarePackageSkeleton({
-        topicId,
-        topicName,
-        chatId,
-        sessionKey,
-        createdUtc,
-        createdBy,
-        workspaceRoot,
-      });
-
-      // Check if care package already exists on disk (never throw inside fail-closed before_agent_run)
-      const absolutePath = `${workspaceRoot}/${skeleton.carePackageRelativePath}`;
-      try {
-        const alreadyOnDisk = io.existsSync(absolutePath);
-
-        if (!alreadyOnDisk) {
-          // Scaffolding directories: work/topic-<id>-<slug>/{docs,scripts,tests,state}
-          io.mkdirSync(`${skeleton.workspacePath}/docs`, { recursive: true });
-          io.mkdirSync(`${skeleton.workspacePath}/scripts`, { recursive: true });
-          io.mkdirSync(`${skeleton.workspacePath}/tests`, { recursive: true });
-          io.mkdirSync(`${skeleton.workspacePath}/state`, { recursive: true });
-
-          // Ensure archive directory exists and write care package
-          const archiveDir = absolutePath.substring(0, absolutePath.lastIndexOf("/"));
-          io.mkdirSync(archiveDir, { recursive: true });
-          io.writeFileSync(absolutePath, skeleton.markdown, "utf-8");
-
-          api.logger?.info?.(
-            `[oc-lane-supervisor] provisioned topic ${topicId} workspace at ${skeleton.workspacePath}`,
-          );
-        }
-      } catch (err) {
-        api.logger?.warn?.(
-          `[oc-lane-supervisor] topic ${topicId} provisioning I/O failed (fail-open): ${String(err)}`,
-        );
-        return event;
-      }
-
-      state = markTopicProvisioned(state, topicId);
-
-      // Queue Turn 0 orientation brief for before_prompt_build (before_agent_run is gate-only)
-      const injectionKey = String(
-        ctx?.sessionId ?? ctx?.sessionKey ?? event?.sessionId ?? event?.sessionKey ?? `topic:${topicId}`,
-      );
-      pendingInjections.set(injectionKey, skeleton.summaryInjection);
-
-      // Preserve prompt return for direct unit tests on slice.onBeforeAgentRun
+      const summaryInjection = provision(event, ctx);
+      if (!summaryInjection) return event;
       const existingContext = typeof event.prompt === "string" ? event.prompt : "";
-      if (!existingContext.includes("[Topic Orientation]")) {
-        return {
-          ...event,
-          prompt: existingContext
-            ? `${skeleton.summaryInjection}\n\n${existingContext}`
-            : skeleton.summaryInjection,
-        };
-      }
-
-      return event;
+      if (existingContext.includes("[Topic Orientation]")) return event;
+      return {
+        ...event,
+        prompt: existingContext ? `${summaryInjection}\n\n${existingContext}` : summaryInjection,
+      };
     },
     consumeOrientationInjection(sessionKey: string): string | undefined {
-      const brief = pendingInjections.get(sessionKey);
-      if (brief !== undefined) {
-        pendingInjections.delete(sessionKey);
-      }
+      const { nextState, brief } = dequeueOrientationInjection(state, sessionKey);
+      state = nextState;
       return brief;
     },
     isTopicProvisioned: (topicId: number) => state.provisionedTopicIds.has(topicId),
