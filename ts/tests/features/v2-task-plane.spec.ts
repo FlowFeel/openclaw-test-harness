@@ -92,5 +92,46 @@ describe("Feature: Plugins v2 Task Plane — Lock-Free Dispatch, Pipelines, Stag
     const qs = JSON.parse((await api.executeTool("queue_status")).content[0].text);
     expect(qs.total).toBe(3);
   });
+
+  it("Scenario: Open-world payloads survive dispatch, status query, and lock-free wake delivery untouched", async () => {
+    const api = new InMemoryPluginApi();
+    let stored: TaskPlaneRegistry | null = null;
+    let triggerExit: ((code: number | null) => void) | undefined;
+
+    pluginDef.register(api, {
+      registryPath: "/mem/bdd-owa.json",
+      outputDir: "/mem/bdd-out",
+      reader: () => stored,
+      writer: (r: TaskPlaneRegistry) => {
+        stored = r;
+      },
+      spawner: (_cmd: string, opts: { onExit: (code: number | null) => void }) => {
+        triggerExit = opts.onExit;
+        return { pid: 5678, kill: () => {} };
+      },
+    });
+
+    const owner = "agent:main:telegram:group:-1003842172831:topic:83272";
+    const owaPayload = { lineage: { parent: "p-1", step: 4 }, heterogeneous: [1, "x", null, true] };
+    const disp = JSON.parse(
+      (await api.executeTool("task_dispatch", { kind: "exec", command: "echo run", owner, payload: owaPayload }))
+        .content[0].text,
+    );
+    const arrDisp = JSON.parse(
+      (await api.executeTool("task_dispatch", { kind: "durable", owner, payload: ["unstructured", 99] }))
+        .content[0].text,
+    );
+
+    const status = JSON.parse((await api.executeTool("task_status", { taskId: disp.taskId })).content[0].text);
+    expect(status.task.payload).toMatchObject(owaPayload);
+
+    const arrStatus = JSON.parse((await api.executeTool("task_status", { taskId: arrDisp.taskId })).content[0].text);
+    expect(arrStatus.task.payload).toEqual({ raw: ["unstructured", 99] });
+
+    triggerExit!(0);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(api.injections).toHaveLength(1);
+    expect(api.injections[0].sessionKey).toBe(owner);
+  });
 });
 

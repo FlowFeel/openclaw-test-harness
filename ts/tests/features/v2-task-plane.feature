@@ -22,3 +22,9 @@ Feature: Plugins v2 Task Plane — Lock-Free Dispatch, Pipelines, Staging Verify
     Then queue_work dispatches 2 tasks immediately
     And queue_status reports total 3
 
+  Scenario: Open-world payloads survive dispatch, status query, and lock-free wake delivery untouched
+    Given an oc-task-plane engine with in-memory registry, process spawner, and PluginApi workflow wake
+    When task_dispatch is invoked with arbitrary nested and non-object OWA payloads
+    Then task_status preserves all payload keys and raw non-object payloads verbatim
+    And process exit wakes the owning session asynchronously without schema interception
+

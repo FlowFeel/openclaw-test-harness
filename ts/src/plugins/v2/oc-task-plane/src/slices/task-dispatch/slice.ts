@@ -29,7 +29,7 @@ import {
   type ShippedStateReader,
 } from "../../task-plane-io.js";
 import {
-  defaultGatewayWakeSender,
+  createPluginApiWakeSender,
   formatTaskWakeMessage,
   type GatewayWakeSender,
 } from "../../task-plane-wake.js";
@@ -78,7 +78,7 @@ export function bindTaskDispatchSlice(
   const pidChecker = deps.pidChecker ?? isPidAlive;
   const spawner = deps.spawner ?? defaultProcessSpawner;
   const shippedStateReader = deps.shippedStateReader ?? readRepoShippedState;
-  const wakeSender = deps.wakeSender ?? defaultGatewayWakeSender;
+  const wakeSender = deps.wakeSender ?? createPluginApiWakeSender(api);
   const clock = deps.clock ?? (() => Date.now());
 
   let state = createTaskDispatchState(reader(config.registryPath));
@@ -113,17 +113,12 @@ export function bindTaskDispatchSlice(
       const kind = (typeof params.kind === "string" ? params.kind : "durable") as TaskPlaneKind;
       const owner = typeof params.owner === "string" ? params.owner : "session-main";
       const timeoutMs = typeof params.timeoutMs === "number" ? params.timeoutMs : undefined;
-      const rawPayload =
-        params.payload && typeof params.payload === "object"
-          ? (params.payload as Record<string, unknown>)
-          : {};
-
       const { nextState, task, classification } = dispatchNewTask(state, config, {
         command,
         kind,
         owner,
         timeoutMs,
-        payload: rawPayload,
+        payload: params.payload,
         nowMs: clock(),
       });
       state = nextState;
@@ -131,7 +126,7 @@ export function bindTaskDispatchSlice(
 
       if (kind === "exec" && command) {
         const spawned = spawner(command, {
-          cwd: typeof rawPayload.cwd === "string" ? rawPayload.cwd : undefined,
+          cwd: typeof task.payload.cwd === "string" ? task.payload.cwd : undefined,
           onStdoutChunk: (chunk) => appender(task.output_handle, chunk),
           onStderrChunk: (chunk) => appender(task.output_handle, chunk),
           onExit: (exitCode) => {

@@ -7,6 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { createTaskDispatchState } from "../state.js";
 import {
+  normalizeOwaPayload,
   dispatchNewTask,
   transitionTaskComplete,
   transitionTaskCancel,
@@ -62,6 +63,20 @@ describe("oc-task-plane / slices/task-dispatch (Tier 1 Unit)", () => {
     state = d3.nextState;
     const cancelled = transitionTaskCancel(state, d3.task.id, "stop", 11_000);
     expect(cancelled.task?.status).toBe("killed");
+  });
+
+  it("preserves arbitrary open-world payloads (plain objects, arrays, primitives, null) without schema filtering", () => {
+    const nested = {
+      parent_task_id: "root-99",
+      step_index: 3,
+      unnamespaced: { deep: [1, "two", null, { flag: true }] },
+    };
+    expect(normalizeOwaPayload(nested)).toEqual(nested);
+    expect(normalizeOwaPayload(["a", 2, { b: true }])).toEqual({ raw: ["a", 2, { b: true }] });
+    expect(normalizeOwaPayload("raw-string-payload")).toEqual({ raw: "raw-string-payload" });
+    expect(normalizeOwaPayload(42)).toEqual({ raw: 42 });
+    expect(normalizeOwaPayload(null)).toEqual({ raw: null });
+    expect(normalizeOwaPayload(undefined)).toEqual({});
   });
 });
 
