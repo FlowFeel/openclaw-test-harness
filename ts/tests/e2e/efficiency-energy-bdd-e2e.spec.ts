@@ -37,7 +37,7 @@ describe("E2E BDD: Plugins v2 Efficiency & Energy Budgeting in Real Container", 
 
   it("Scenario: Turn energy pool initial allocation and parsimonious execution in container runtime", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "-e",
+      "npx", "tsx", "-e",
       `import { initTurnEnergy, applyEnergyAction, formatEnergyEnvelopeHeader } from '/app/ts/src/plugins/shared/efficiency-energy-logic.ts';
        let state = initTurnEnergy('sovereign');
        if (state.initialEnergy !== 1200 || state.remainingEnergy !== 1200) {
@@ -56,7 +56,7 @@ describe("E2E BDD: Plugins v2 Efficiency & Energy Budgeting in Real Container", 
 
   it("Scenario: Exhausted turn energy budget enforces soft-landing gating in container runtime", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "-e",
+      "npx", "tsx", "-e",
       `import { initTurnEnergy, applyEnergyAction } from '/app/ts/src/plugins/shared/efficiency-energy-logic.ts';
        let state = initTurnEnergy('constrained'); // 600E
        state = applyEnergyAction(state, { toolName: 'exec', durationMs: 300000 }); // burns 600E
@@ -103,7 +103,7 @@ describe("E2E BDD: Plugins v2 Efficiency & Energy Budgeting in Real Container", 
 
   it("Scenario: Hypothetico-axiomatic empirical calibration dynamically adjusts parameters in container runtime", async () => {
     const result = await container.exec([
-      "node", "--experimental-strip-types", "-e",
+      "npx", "tsx", "-e",
       `import { DEFAULT_ENERGY_CONFIG, calibrateEconomicParameters } from '/app/ts/src/plugins/shared/efficiency-energy-logic.ts';
        const baseline = DEFAULT_ENERGY_CONFIG;
        const empirical = {
@@ -123,9 +123,9 @@ describe("E2E BDD: Plugins v2 Efficiency & Energy Budgeting in Real Container", 
 
     expect(result.exitCode).toBe(0);
     const parsed = JSON.parse(result.output.trim().split("\n").pop()!);
-    // Verified dynamic elevation against empirical stress
+    // Verified dynamic elevation against empirical stress (250 + 50 = 300)
     expect(parsed.advisoryThreshold).toBe(250);
-    expect(parsed.delegationRebate).toBe(250);
+    expect(parsed.delegationRebate).toBe(300);
     expect(parsed.zeroDeltaPenaltyDrain).toBe(150);
   });
 });
