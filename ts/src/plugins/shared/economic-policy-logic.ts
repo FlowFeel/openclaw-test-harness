@@ -132,10 +132,17 @@ export function evaluateEconomicAdjustment(
   const idleDrain = durationSec * idleDrainPerSecond;
 
   if (kind === "delegation") {
+    // Scaled delegation rebate: durable_spawn (+350E, +200P), task_dispatch (+300E), sessions_spawn (+250E).
+    // Respects explicit custom overrides when configured differently from default.
+    let baseRebate = rates.delegationRebate;
+    if (rates.delegationRebate === DEFAULT_INCENTIVE_RATES.delegationRebate) {
+      baseRebate = action.toolName === "durable_spawn" ? 350 : action.toolName === "task_dispatch" ? 300 : 250;
+    }
+    const points = action.toolName === "durable_spawn" ? 200 : rates.delegationPoints;
     return {
       kind,
-      energyDelta: Math.max(0, rates.delegationRebate),
-      habitPointsDelta: rates.delegationPoints,
+      energyDelta: Math.max(0, baseRebate),
+      habitPointsDelta: points,
       penaltiesDelta: 0,
       clearsAdvisory: true,
     };

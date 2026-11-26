@@ -92,7 +92,8 @@ export function renderActionableBridge(
   return (
     `\n\n${header}\n` +
     `⚡ Turn density high (${energy.counters.totalActions} actions). ` +
-    `To avoid hitting lane timeout (600s), offload remaining inspection:\n` +
+    `To avoid hitting lane timeout (600s), offload heavy inspection:\n` +
+    `  → durable_spawn(task_name="...", params={...}) for background execution\n` +
     `  → sessions_spawn(task="...", runtime="subagent") followed by sessions_yield()\n` +
     `  → Or batch atomic steps via exec_pipeline(steps=[...])`
   );
