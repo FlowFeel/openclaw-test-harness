@@ -35,3 +35,10 @@ Feature: Incentive-Based Energy Budgeting & OWA Cognitive Economics
     When 17 tool actions are persisted in turn 1 and 12 tool actions in turn 2
     Then turn 1 emits the actionable bridge on actions 12 and 17
     And turn 2 resets the bridge throttle and emits again on action 12
+
+  Scenario: Durable spawn grants maximal energy rebate and points
+    Given a session with remaining energy at 80 units in the advisory zone
+    When the agent delegates work via "durable_spawn"
+    Then remaining energy increases by 350 units to 430 units
+    And the advisory flag is reset
+    And the agent earns 200 delegation habit points

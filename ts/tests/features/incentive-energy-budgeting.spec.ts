@@ -193,4 +193,31 @@ describe("Feature: Incentive-Based Energy Budgeting & OWA Cognitive Economics", 
     }
     expect(turn2Emits).toEqual([12]);
   });
+
+  it("Scenario: Durable spawn grants maximal energy rebate and points", () => {
+    let state = initTurnEnergy("constrained"); // 600E
+    // Burn down into advisory zone (remaining <= 200)
+    state = applyEnergyAction(state, {
+      toolName: "exec",
+      durationMs: 150000,
+    });
+    expect(state.remainingEnergy).toBeLessThanOrEqual(200);
+    expect(state.advisoryEmitted).toBe(true);
+
+    const beforeEnergy = state.remainingEnergy;
+
+    // Delegate via durable_spawn
+    state = applyEnergyAction(state, {
+      toolName: "durable_spawn",
+      durationMs: 500,
+      isDelegation: true,
+    });
+
+    // Assert rebate added +350E
+    expect(state.remainingEnergy).toBe(beforeEnergy + 350);
+    expect(state.advisoryEmitted).toBe(false);
+    expect(state.habitPoints).toBeGreaterThanOrEqual(200);
+    expect(state.delegationCount).toBe(1);
+  });
+
 });
