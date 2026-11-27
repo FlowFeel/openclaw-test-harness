@@ -19,7 +19,7 @@ import {
   sanitizeTranscriptLines,
   type SanitizeReport,
 } from "../../transcript-sanitizer-logic.js";
-import type { CompactionSliceConfig, CompactionSliceState } from "./state.js";
+import type { CompactionSliceConfig, CompactionSliceState, MemoryDistillTaskSpec } from "./state.js";
 
 export function evaluateCompactionCheck(
   state: CompactionSliceState,
@@ -95,5 +95,36 @@ export function runTranscriptSanitization(
       ...state,
       totalSanitizedLinesRemoved: state.totalSanitizedLinesRemoved + addedRemoved,
     },
+  };
+}
+
+
+export function buildMemoryDistillTaskSpec(params: {
+  sessionKey: string;
+  targetDir: string;
+  targetFile?: string;
+  topicId?: number;
+  transcriptTail?: string;
+}): MemoryDistillTaskSpec {
+  return {
+    task_name: "memory_distill",
+    params: {
+      session_key: params.sessionKey,
+      target_dir: params.targetDir,
+      ...(typeof params.topicId === "number" ? { topic_id: params.topicId } : {}),
+      ...(params.targetFile ? { target_file: params.targetFile } : {}),
+      ...(params.transcriptTail ? { transcript_tail: params.transcriptTail } : {}),
+    },
+  };
+}
+
+export function recordDistillationTask(
+  state: CompactionSliceState,
+  taskSpec: MemoryDistillTaskSpec,
+): CompactionSliceState {
+  return {
+    ...state,
+    lastDistillationTask: taskSpec,
+    emittedDistillationCount: state.emittedDistillationCount + 1,
   };
 }

@@ -10,7 +10,12 @@
  * - Tested via oc-memory-nexus integration & manifest specs with InMemory* doubles.
  */
 
-import { Type, type PluginApi } from "../../../../../shared/types.js";
+import {
+  Type,
+  type PluginApi,
+  type HookEvent,
+  type HookContext,
+} from "../../../../../shared/types.js";
 import { readSessions, getSessionFileSize } from "../../sessions-io.js";
 import { readPathMtimes, type PathMtimeReader } from "../../resume-delta-io.js";
 import {
@@ -19,13 +24,20 @@ import {
   resolveSessionTranscriptPath,
 } from "../../transcript-sanitizer-io.js";
 import type { SessionsMap } from "../../../../../shared/session-cleanup.js";
-import { createCompactionSliceState, type CompactionSliceConfig } from "./state.js";
+import {
+  createCompactionSliceState,
+  type CompactionSliceConfig,
+  type MemoryDistillTaskSpec,
+} from "./state.js";
 import {
   evaluateCompactionCheck,
   recordCompactionCheckpoint,
   evaluateResumeDelta,
   runTranscriptSanitization,
+  buildMemoryDistillTaskSpec,
+  recordDistillationTask,
 } from "./logic.js";
+import { resolveMemoryFlushPlan } from "../topic-routing/logic.js";
 
 export interface CompactionIoDeps {
   sessionsPath?: string;
@@ -36,10 +48,12 @@ export interface CompactionIoDeps {
   transcriptReader?: (filePath: string) => string[] | null;
   transcriptWriter?: (filePath: string, lines: string[]) => boolean;
   clock?: () => number;
+  durableSpawner?: (spec: MemoryDistillTaskSpec) => Promise<{ taskId?: string; ok: boolean } | unknown> | unknown;
 }
 
 export interface CompactionSliceHandle {
-  onBeforeCompaction: () => void;
+  onBeforeCompaction: (event?: HookEvent, ctx?: HookContext) => Promise<MemoryDistillTaskSpec | null>;
+  getLastDistillationTask: () => MemoryDistillTaskSpec | null;
 }
 
 export function bindCompactionSlice(
@@ -178,11 +192,58 @@ export function bindCompactionSlice(
   });
 
   return {
-    onBeforeCompaction() {
+    async onBeforeCompaction(event?: HookEvent, ctx?: HookContext) {
       const currentFiles = mtimeReader(config.watchedPaths);
       const res = recordCompactionCheckpoint(state, currentFiles, clock());
       state = res.nextState;
       api.logger?.info?.(`[oc-memory-nexus] pre-compaction checkpoint recorded: ${res.checkpointId}`);
+
+      const record = (ctx ?? event ?? {}) as Record<string, unknown>;
+      const rawSessionKey =
+        record.sessionKey ?? record.sessionId ?? record.conversationId;
+      const sessionKey = typeof rawSessionKey === "string" ? rawSessionKey : "";
+
+      if (!sessionKey) {
+        return null;
+      }
+
+      const plan = resolveMemoryFlushPlan(ctx ?? event, () => new Date(clock()).toISOString().slice(0, 10));
+      const targetDir = plan.targetPath.includes("/")
+        ? plan.targetPath.slice(0, plan.targetPath.lastIndexOf("/"))
+        : plan.targetPath;
+
+      const filePath = resolvePath(sessionKey);
+      const lines = filePath ? readLines(filePath) : null;
+      const transcriptTail =
+        lines && lines.length > 0 ? lines.slice(-20).join("\n") : undefined;
+
+      const taskSpec = buildMemoryDistillTaskSpec({
+        sessionKey,
+        targetDir,
+        targetFile: plan.targetPath,
+        topicId: plan.topicId,
+        transcriptTail,
+      });
+
+      state = recordDistillationTask(state, taskSpec);
+
+      if (typeof deps.durableSpawner === "function") {
+        await deps.durableSpawner(taskSpec);
+      } else if (
+        typeof (api as unknown as Record<string, unknown>).executeTool === "function" &&
+        ((api as unknown as Record<string, unknown>).tools as Map<string, unknown> | undefined)?.has?.("durable_spawn")
+      ) {
+        await ((api as unknown as Record<string, unknown>).executeTool as (name: string, params: unknown) => Promise<unknown>)(
+          "durable_spawn",
+          taskSpec,
+        );
+      }
+
+      api.logger?.info?.(`[oc-memory-nexus] emitted off-loop durable distillation task for ${sessionKey}`);
+      return taskSpec;
+    },
+    getLastDistillationTask() {
+      return state.lastDistillationTask;
     },
   };
 }
