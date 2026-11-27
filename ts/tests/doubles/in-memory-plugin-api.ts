@@ -16,6 +16,7 @@ import type {
   ToolResult,
   HookEvent,
   HookContext,
+  MemoryCapability,
 } from "../../src/plugins/shared/types.js";
 
 export interface CapturedLog {
@@ -39,6 +40,7 @@ export class InMemoryPluginApi implements PluginApi {
   readonly hooks = new Map<string, HookHandler[]>();
   readonly logs: CapturedLog[] = [];
   readonly injections: CapturedInjection[] = [];
+  readonly memoryCapabilities: MemoryCapability[] = [];
   config?: unknown;
   pluginConfig?: unknown;
 
@@ -88,6 +90,10 @@ export class InMemoryPluginApi implements PluginApi {
 
   registerTool(tool: ToolDefinition): void {
     this.tools.set(tool.name, tool);
+  }
+
+  registerMemoryCapability(capability: MemoryCapability): void {
+    this.memoryCapabilities.push(capability);
   }
 
   async dispatchHook(

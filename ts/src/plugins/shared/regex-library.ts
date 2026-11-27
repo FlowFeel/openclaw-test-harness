@@ -333,3 +333,23 @@ export function replaceAll(
 export function splitOn(pattern: Readonly<RegExp>, input: string): string[] {
   return input.split(pattern as RegExp);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// Topic-Aware Memory Routing patterns
+// ═══════════════════════════════════════════════════════════════
+
+export const PLATFORM_LANE_REGEX: Readonly<RegExp> = Object.freeze(
+  /(?:^|:)(?:platform|monorepo)(?::|$)|lane:platform|meta\/team\/SPEC_LOG\.md/i
+);
+
+export const USER_LANE_REGEX: Readonly<RegExp> = Object.freeze(
+  /(?:^|:)(?:user|direct):([a-zA-Z0-9_-]+)/i
+);
+
+export function slugNonAlphanumeric(): RegExp {
+  return /[^a-z0-9]+/g;
+}
+
+export function slugEdgeHyphens(): RegExp {
+  return /^-+|-+$/g;
+}

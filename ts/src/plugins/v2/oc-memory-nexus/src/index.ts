@@ -20,6 +20,7 @@ import {
 import type { MemoryNotesLoader } from "./memory-recall-io.js";
 import type { SidecarClient } from "./sidecar-client.js";
 import { bindRecallRegistrySlice } from "./slices/recall-registry/slice.js";
+import { resolveMemoryFlushPlan } from "./slices/topic-routing/logic.js";
 import { bindEventPushSlice } from "./slices/event-push/slice.js";
 import { bindCompactionSlice, type CompactionIoDeps } from "./slices/compaction/slice.js";
 import { bindCpuSidecarSlice } from "./slices/cpu-sidecar/slice.js";
@@ -90,8 +91,14 @@ export default definePluginEntry({
       return recall.onBeforeAgentReply(event);
     });
 
-    api.on("before_compaction", async () => {
-      compaction.onBeforeCompaction();
+    if (typeof api.registerMemoryCapability === "function") {
+      api.registerMemoryCapability({
+        flushPlanResolver: (context) => resolveMemoryFlushPlan(context, () => new Date(clock()).toISOString().slice(0, 10)),
+      });
+    }
+
+    api.on("before_compaction", async (event: HookEvent, ctx?: HookContext) => {
+      return compaction.onBeforeCompaction(event, ctx);
     });
   },
 });

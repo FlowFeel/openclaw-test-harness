@@ -119,8 +119,13 @@ export interface PluginApi {
   /** Plugin-scoped config (the entry for this plugin id). */
   pluginConfig?: unknown;
   /** Register a custom compaction provider (e.g. literate compaction). */
-    registerCompactionProvider?: (
+  registerCompactionProvider?: (
     provider: CompactionProvider,
+    opts?: { ownerPluginId?: string }
+  ) => void;
+  /** Register a memory host capability (e.g. topic-scoped flush plan resolver). */
+  registerMemoryCapability?: (
+    capability: MemoryCapability,
     opts?: { ownerPluginId?: string }
   ) => void;
   session?: {
@@ -137,6 +142,38 @@ export interface PluginApi {
     text: string;
     idempotencyKey?: string;
   }) => Promise<{ enqueued: boolean; id?: string }>;
+}
+
+// ── Memory Capability Protocol (Pillar 1: Topic-Scoped Memory Routing) ───
+
+export type MemorySessionType = "topic" | "platform" | "user" | "fallback";
+
+export interface MemoryFlushPlan {
+  targetPath: string;
+  promptObjective: string;
+  sessionType: MemorySessionType;
+  topicId?: number;
+  topicSlug?: string;
+  user?: string;
+}
+
+export interface MemoryCapabilityContext {
+  sessionKey?: string;
+  sessionId?: string;
+  topicId?: number;
+  topicName?: string;
+  chatId?: string;
+  user?: string;
+  userName?: string;
+  lane?: string;
+  sessionType?: string;
+  [key: string]: unknown;
+}
+
+export interface MemoryCapability {
+  flushPlanResolver: (
+    ctx?: MemoryCapabilityContext | HookContext
+  ) => MemoryFlushPlan;
 }
 
 export interface CompactionProviderSummarizationInstructions {

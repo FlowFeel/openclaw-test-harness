@@ -11,6 +11,8 @@ import {
   recordCompactionCheckpoint,
   evaluateResumeDelta,
   runTranscriptSanitization,
+  buildMemoryDistillTaskSpec,
+  recordDistillationTask,
 } from "../logic.js";
 
 describe("oc-memory-nexus / slices/compaction (Tier 1 Unit)", () => {
@@ -63,5 +65,27 @@ describe("oc-memory-nexus / slices/compaction (Tier 1 Unit)", () => {
     const live = runTranscriptSanitization(state, lines, false);
     expect(live.report.originalEntries).toBe(3);
     expect(live.nextState.totalSanitizedLinesRemoved).toBe(live.linesRemoved);
+  });
+
+  it("builds and records off-loop durable distillation task specs (Pillar 2)", () => {
+    let state = createCompactionSliceState();
+    const taskSpec = buildMemoryDistillTaskSpec({
+      sessionKey: "agent:main:telegram:group:-1003842172831:topic:102248",
+      targetDir: "meta/memory/topics/102248-cybernetics",
+      targetFile: "meta/memory/topics/102248-cybernetics/MEMORY.md",
+      topicId: 102248,
+      transcriptTail: "line 1\nline 2",
+    });
+
+    expect(taskSpec.task_name).toBe("memory_distill");
+    expect(taskSpec.params.session_key).toBe("agent:main:telegram:group:-1003842172831:topic:102248");
+    expect(taskSpec.params.topic_id).toBe(102248);
+    expect(taskSpec.params.target_dir).toBe("meta/memory/topics/102248-cybernetics");
+    expect(taskSpec.params.target_file).toBe("meta/memory/topics/102248-cybernetics/MEMORY.md");
+    expect(taskSpec.params.transcript_tail).toBe("line 1\nline 2");
+
+    state = recordDistillationTask(state, taskSpec);
+    expect(state.lastDistillationTask).toEqual(taskSpec);
+    expect(state.emittedDistillationCount).toBe(1);
   });
 });
